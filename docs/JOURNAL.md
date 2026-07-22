@@ -42,3 +42,15 @@ Surveyed github.com/8090-inc/mib-doc-challenge issues and PRs. Full writeup in [
 - Organizer rulings extracted into [organizer-guidance.md](organizer-guidance.md) as a standing spec-level reminder (under-determined cases → NEEDS_REVIEW; never guess invisible flags; B-13 document census is the legitimate signal). Competitor material stays in repo-intel.md as secondary reference only.
 - Working plan written: [PLAN.md](PLAN.md). Core of it is the loop — every change runs `eval_local.sh` against the challenge's own scorer and lands one row in `docs/experiments.md` (date, commit, change, scores, CFAs, keep/revert), with CFA=0 as a hard gate and Docker-contract re-verification at milestones. Milestones M0 (harness) → M1 (PDF survey) → M2 (text-layer + rules) → M3 (OCR) → M4 (model + calibration) → M5 (hardening) → M6 (submission).
 - **Next action:** M0 — verify/unzip the data (download was still in progress), write `scripts/eval_local.sh`, commit the stub, record the baseline row.
+
+## 2026-07-21 (later) — Steps 0–2 executed: 91.91 → 112.12, CFA 52 → 0
+
+Full detail in [experiments.md](experiments.md) (rows 1–5). Summary:
+
+- **Harness first:** `scripts/eval_local.sh` (official scorer + per-field report via `scripts/field_report.py`), `scripts/mine_signals.py` (per-case signals joined with truth — every rule validated there *before* shipping), experiments log, baseline committed.
+- **Architecture:** monolith split into `mib/` along trust boundaries — `pdfio` (injection quarantine), `parse`, `packet` (census + precedence merge), `signals` (fraud taxonomy, see [fraud-signals.md](fraud-signals.md)), `policy` (named branches), `confidence`, `emit` (schema safety net). Refactor verified score-identical before any behavior change.
+- **Step 1 rules (validated kills/collateral):** inferred revoked sponsors, DIP-1 carve-out, embargo worlds, staleness, waived-non-DIP tightening, B-13 census. Key finding: the ~25 label-DENIED cases with no readable risk evidence are *EV-positive to approve on train labels* but organizer-ruled NEEDS_REVIEW — we follow the ruling (cost ~2.6 pts, CFA → 0, upside on private labels).
+- **Step 2 OCR:** Tesseract PSM 11 (PSM 4/6 validated useless here), embedded-raster fast path, vocab snapping. One new CFA appeared and was diagnosed to the exact character: OCR reads colons as periods, so `Observed flags. active_warrant` slipped the strict parser — fixed with fuzzy key matching + tolerant separators.
+- **State:** 112.12/150 (class 60.72, extr 37.32, calib 14.08), 0 CFA, 0.15 s/PDF — clears the full interview bar on train.
+
+**Next:** Step 3 calibration (branch-empirical confidences on frozen splits — calib is 14.08/20 with hand-set constants); residual mining (fee_status 55% worst field; risk_flags fuzzy-parse dip 68.3→66.8; 196 APPROVED→NR retreats to shrink); then Docker contract run.
