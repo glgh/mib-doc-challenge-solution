@@ -1,12 +1,39 @@
 """Adjudication rule engine.
 
-Ordered cascade per the MIB field manual (+ train-validated inferences).
-Each branch is named so confidence can be calibrated per-branch and eval
-residuals can be attributed to the exact rule that fired.
+Ordered cascade per the MIB field manual + train-validated inferences (see
+docs/label-mining.md, docs/fraud-signals.md; every rule's hit/collateral was
+measured via scripts/mine_signals.py before inclusion). Branches are named so
+confidence is calibrated per-branch and eval residuals attribute to the rule
+that fired.
 """
+from datetime import date
+
 from .parse import DISQUALIFYING_FLAGS, REVIEW_FLAGS
 
-REVOKED_SPONSORS = {"SPN-0007", "SPN-0139", "SPN-4040"}
+# Manual-published + train-inferred (each 11-14 non-DIP occurrences, zero
+# approvals; independently corroborated). Policy inference, not case memorization.
+REVOKED_SPONSORS = {
+    "SPN-0007", "SPN-0139", "SPN-4040",   # FIELD_MANUAL.md
+    "SPN-2718", "SPN-7331", "SPN-9090",   # inferred from train labels
+}
+
+# TRAPPIST-1e / Eris Relay: 50/50 denied incl. DIP-1 (embargo pierces immunity).
+FULL_EMBARGO_WORLDS = {"TRAPPIST-1e", "Eris Relay"}
+# Wolf-1061c: 51/51 denied non-DIP; DIP-1 cases behave normally.
+PARTIAL_EMBARGO_WORLDS = {"Wolf-1061c"}
+
+# No visible receipt date exists in the corpus; 2026-07-07 (data version date)
+# fits the 180-day staleness rule 36/36 on train.
+RECEIPT_DATE = date(2026, 7, 7)
+STALE_DAYS = 180
+
+
+def _is_stale(arrival):
+    try:
+        y, m, d = map(int, (arrival or "").split("-"))
+        return (RECEIPT_DATE - date(y, m, d)).days > STALE_DAYS
+    except ValueError:
+        return False
 
 
 def adjudicate(values, sig):
@@ -15,28 +42,43 @@ def adjudicate(values, sig):
     fee = (values.get("fee_status") or "unknown").lower()
     visa = values.get("visa_class")
     sponsor = values.get("sponsor_id")
-    has_waiver = bool(sig["waiver_code"])
+    non_dip = visa != "DIP-1"
 
     if sig["finding"]:
         return sig["finding"], "adjudicator_finding"
     if flags & DISQUALIFYING_FLAGS:
         return "DENIED", "disqualifying_flag"
-    if sponsor in REVOKED_SPONSORS:
+    if values.get("home_world") in FULL_EMBARGO_WORLDS:
+        return "DENIED", "embargo_world"
+    if values.get("home_world") in PARTIAL_EMBARGO_WORLDS and non_dip:
+        return "DENIED", "embargo_world_partial"
+    if sponsor in REVOKED_SPONSORS and non_dip:
         return "DENIED", "revoked_sponsor"
     if visa == "TRANSIT-7":
         return "DENIED", "transit_visa"
-    if fee == "unpaid" and not has_waiver:
+    if fee == "unpaid":
         return "DENIED", "fee_unpaid"
     if fee == "unknown":
         return "NEEDS_REVIEW", "fee_unknown"
-    if fee == "waived" and visa != "DIP-1" and not has_waiver:
+    if _is_stale(values.get("arrival_date")) and non_dip:
+        return "DENIED", "stale_arrival"
+    # Waiver-code presence is NOT approval evidence: the only code in the corpus
+    # is DIP-WAIVER, and on non-DIP packets those cases are 46% denied.
+    if fee == "waived" and non_dip:
         return "NEEDS_REVIEW", "waived_non_dip"
     if not values.get("arrival_date"):
         return "NEEDS_REVIEW", "missing_arrival"
     if flags & REVIEW_FLAGS:
         return "NEEDS_REVIEW", "review_flag"
-    if not sponsor and visa != "DIP-1":
+    if not sponsor and non_dip:
         return "NEEDS_REVIEW", "missing_sponsor"
     if not visa:
         return "NEEDS_REVIEW", "missing_visa"
+    # Risk-concealment census (docs/organizer-guidance.md): a would-be approval
+    # with no readable B-13 is the under-determined shape — the incriminating
+    # evidence may simply be absent. Organizer ruling: NEEDS_REVIEW, never
+    # APPROVED. Train-measured cost ~2.6 classification pts for CFA 52→~0;
+    # OCR (plan Step 2) reclaims packets whose B-13 lives in scan pages.
+    if not sig["has_biometric"]:
+        return "NEEDS_REVIEW", "b13_census"
     return "APPROVED", "clean_approve"

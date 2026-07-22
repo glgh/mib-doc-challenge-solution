@@ -72,6 +72,11 @@ def derive(packet, values):
         flags.add("sponsor_mismatch")
     if identity_conflict(packet):
         flags.add("identity_conflict")
+    # Full-embargo origin implies the flag even when no document states it:
+    # train shows 50/50 of these carry planetary_embargo. (Not inferred for
+    # Wolf-1061c — its denials mostly lack the flag.)
+    if values.get("home_world") in ("TRAPPIST-1e", "Eris Relay"):
+        flags.add("planetary_embargo")
     return {
         "flags": flags,
         "finding": adjudicator_finding(packet),
