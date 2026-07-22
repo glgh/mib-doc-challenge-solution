@@ -83,17 +83,22 @@ def assemble(pages, fallback_case_id):
     return packet
 
 
-def merge_fields(packet):
-    """Best value per schema field, walking documents in trust order."""
+def merge_fields(packet, provenance=None):
+    """Best value per schema field, walking documents in trust order.
+
+    If `provenance` is a dict it is filled with fname -> (doc_type, source).
+    """
     values = {}
     for fname in parse.FIELDS:
-        for dtype, _source, kv in packet.docs:
+        for dtype, source, kv in packet.docs:
             candidates = [kv.get(fname)]
             if fname == "applicant_name" and dtype == DOC_REGISTRY:
                 candidates.append(kv.get("registry_name"))
             for cand in candidates:
                 if cand and parse.valid_value(fname, cand):
                     values[fname] = cand.strip()
+                    if provenance is not None:
+                        provenance[fname] = (dtype, source)
                     break
             if fname in values:
                 break

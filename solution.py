@@ -2,8 +2,11 @@
 """MIB doc challenge entrypoint: <input_pdf_dir> <output_predictions_path>.
 
 Thin orchestrator; stages live in mib/ (see mib/__init__.py for the layout).
+Set MIB_DEBUG_JSONL=<path> to also write per-case diagnostics (branch, field
+provenance, census) — predictions themselves stay schema-clean.
 """
 import json
+import os
 import sys
 from multiprocessing import Pool
 from pathlib import Path
@@ -14,11 +17,22 @@ from mib import confidence, emit, packet, pdfio, policy, signals
 def predict(pdf_path):
     pages = pdfio.read_pages(pdf_path)
     pkt = packet.assemble(pages, fallback_case_id=pdf_path.stem)
-    values = packet.merge_fields(pkt)
+    provenance = {}
+    values = packet.merge_fields(pkt, provenance)
     sig = signals.derive(pkt, values)
     decision, branch = policy.adjudicate(values, sig)
     conf = confidence.for_branch(branch)
-    return emit.build_record(pkt.case_id, values, sig["flags"], decision, conf)
+    record = emit.build_record(pkt.case_id, values, sig["flags"], decision, conf)
+    debug = {
+        "case_id": pkt.case_id,
+        "branch": branch,
+        "provenance": {k: list(v) for k, v in provenance.items()},
+        "doc_types": sorted({d for d, _, _ in pkt.docs}),
+        "scan_only_pages": pkt.scan_only_pages,
+        "has_biometric": sig["has_biometric"],
+        "flags": sorted(sig["flags"]),
+    }
+    return record, debug
 
 
 def _safe_predict(pdf):
@@ -26,7 +40,7 @@ def _safe_predict(pdf):
         return predict(pdf)
     except Exception as exc:
         print(f"skipping {pdf.name}: {exc}", file=sys.stderr)
-        return None
+        return None, None
 
 
 def main(input_dir, output_path):
@@ -34,10 +48,17 @@ def main(input_dir, output_path):
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     with Pool(4) as pool:
-        records = pool.map(_safe_predict, pdfs)
+        results = pool.map(_safe_predict, pdfs)
+    records = emit.dedupe([r for r, _ in results])
     with open(output, "w") as f:
-        for record in emit.dedupe(records):
+        for record in records:
             f.write(json.dumps(record, sort_keys=True) + "\n")
+    debug_path = os.environ.get("MIB_DEBUG_JSONL")
+    if debug_path:
+        with open(debug_path, "w") as f:
+            for _, dbg in results:
+                if dbg is not None:
+                    f.write(json.dumps(dbg, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":

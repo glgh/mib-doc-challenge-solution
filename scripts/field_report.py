@@ -6,9 +6,10 @@ from collections import Counter
 from pathlib import Path
 
 
-def main(out_dir):
+def main(out_dir, split=None):
     out = Path(out_dir)
-    cases = [json.loads(line) for line in (out / "case_scores.jsonl").read_text().splitlines()]
+    name = f"case_scores_{split}.jsonl" if split else "case_scores.jsonl"
+    cases = [json.loads(line) for line in (out / name).read_text().splitlines()]
 
     field_hits, field_totals = Counter(), Counter()
     cfas, wrong_by_reason = [], Counter()
@@ -31,4 +32,5 @@ def main(out_dir):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "output/eval")
+    main(sys.argv[1] if len(sys.argv) > 1 else "output/eval",
+         sys.argv[2] if len(sys.argv) > 2 else None)
