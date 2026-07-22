@@ -1,4 +1,5 @@
 """Interpretation: document typing, key/value parsing, and field vocabularies."""
+import difflib
 import re
 
 CASE_ID_RE = re.compile(r"\bMIB-\d{6}\b")
@@ -52,30 +53,68 @@ FIELDS = ["applicant_name", "species_code", "home_world", "visa_class", "sponsor
           "arrival_date", "declared_purpose", "fee_status"]
 
 
+# Distinctive header tokens for OCR-mangled pages, tried after exact markers.
+_FUZZY_HEADERS = [
+    ("adjudicator", DOC_ADJUDICATOR),
+    ("i-8090", DOC_INTAKE),
+    ("b-13", DOC_BIOMETRIC),
+    ("biometric", DOC_BIOMETRIC),
+    ("attestation", DOC_SPONSOR),
+    ("registry extract", DOC_REGISTRY),
+    ("fee receipt", DOC_FEE),
+]
+
+
 def detect_doc_type(lines):
     head = " ".join(lines[:4])
     for marker, dtype in DOC_HEADERS:
         if marker in head:
             return dtype
+    low = head.lower()
+    for token, dtype in _FUZZY_HEADERS:
+        if token in low:
+            return dtype
     return DOC_OTHER
 
 
+def _key_for(text):
+    """Map a candidate label to its canonical field, tolerating OCR debris.
+
+    Exact match first; else fuzzy (handles 'Case 1D', 'Observed fIags'). Fuzzy
+    matching is safe because labels are short and the key set is small/distinct.
+    """
+    t = text.strip().lower()
+    if t in KEY_MAP:
+        return KEY_MAP[t]
+    if len(t) > 30:
+        return None
+    close = difflib.get_close_matches(t, KEY_MAP.keys(), n=1, cutoff=0.8)
+    return KEY_MAP[close[0]] if close else None
+
+
 def parse_kv(lines):
-    """Extract pairs from 'Key: Value' lines and 'Key' / 'Value' line pairs."""
+    """Extract pairs from 'Key: Value' lines and 'Key' / 'Value' line pairs.
+
+    Separator is tolerant ([:.;]) — OCR reads colons as periods ('Observed
+    flags. active_warrant'), which caused a catastrophic false approval
+    (MIB-000161) under the strict-colon parser.
+    """
     kv = {}
     i = 0
     while i < len(lines):
-        line = lines[i]
-        m = re.match(r"^([A-Za-z ][A-Za-z _]+?)\s*:\s*(.+)$", line)
-        if m and m.group(1).strip().lower() in KEY_MAP:
-            kv.setdefault(KEY_MAP[m.group(1).strip().lower()], m.group(2).strip())
-            i += 1
-            continue
-        key = line.strip().lower()
-        if key in KEY_MAP and i + 1 < len(lines):
+        line = lines[i].strip()
+        m = re.match(r"^([A-Za-z][A-Za-z _0-9]{1,28}?)\s*[:.;]\s*(.+)$", line)
+        if m:
+            key = _key_for(m.group(1))
+            if key:
+                kv.setdefault(key, m.group(2).strip())
+                i += 1
+                continue
+        key = _key_for(line)
+        if key and i + 1 < len(lines):
             nxt = lines[i + 1].strip()
-            if nxt.lower() not in KEY_MAP:
-                kv.setdefault(KEY_MAP[key], nxt)
+            if _key_for(nxt) is None:
+                kv.setdefault(key, nxt)
                 i += 2
                 continue
         i += 1

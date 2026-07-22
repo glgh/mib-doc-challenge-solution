@@ -60,7 +60,7 @@ def adjudicator_finding(packet):
 
 def waiver_code(packet):
     """First waiver code present on any document."""
-    code = next((kv.get("waiver_code") for _, kv in packet.docs if kv.get("waiver_code")), "")
+    code = next((kv.get("waiver_code") for _, _, kv in packet.docs if kv.get("waiver_code")), "")
     code = (code or "").strip()
     return "" if code.lower() in ("", "n/a", "none") else code
 

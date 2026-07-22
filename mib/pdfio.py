@@ -14,7 +14,12 @@ import fitz  # PyMuPDF
 class PageText:
     visible_lines: list = field(default_factory=list)
     hidden_lines: list = field(default_factory=list)
+    ocr_lines: list = field(default_factory=list)
     image_count: int = 0
+
+    @property
+    def is_scan_only(self):
+        return self.image_count > 0 and len(self.visible_lines) <= 3
 
 
 def _is_whiteish(color_int):
@@ -49,5 +54,8 @@ def read_pages(pdf_path):
                         pt.visible_lines.append(" ".join(shown).strip())
                     if hidden:
                         pt.hidden_lines.append(" ".join(hidden).strip())
+            if pt.is_scan_only:
+                from . import ocr
+                pt.ocr_lines = ocr.ocr_page(doc, page)
             pages.append(pt)
     return pages
