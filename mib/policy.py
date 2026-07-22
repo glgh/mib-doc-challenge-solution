@@ -22,16 +22,17 @@ FULL_EMBARGO_WORLDS = {"TRAPPIST-1e", "Eris Relay"}
 # Wolf-1061c: 51/51 denied non-DIP; DIP-1 cases behave normally.
 PARTIAL_EMBARGO_WORLDS = {"Wolf-1061c"}
 
-# No visible receipt date exists in the corpus; 2026-07-07 (data version date)
-# fits the 180-day staleness rule 36/36 on train.
-RECEIPT_DATE = date(2026, 7, 7)
-STALE_DAYS = 180
+# No visible receipt date exists in the corpus, so the 180-day staleness rule
+# needs a boundary constant. Train has a 48-day empty band between the latest
+# stale-denied arrival (2025-12-09) and the earliest fresh one (2026-01-26);
+# any cutoff inside fits "perfectly". Max-margin choice: the band midpoint.
+STALE_CUTOFF = date(2026, 1, 2)
 
 
 def _is_stale(arrival):
     try:
         y, m, d = map(int, (arrival or "").split("-"))
-        return (RECEIPT_DATE - date(y, m, d)).days > STALE_DAYS
+        return date(y, m, d) < STALE_CUTOFF
     except ValueError:
         return False
 
@@ -42,7 +43,11 @@ def adjudicate(values, sig):
     fee = (values.get("fee_status") or "unknown").lower()
     visa = values.get("visa_class")
     sponsor = values.get("sponsor_id")
-    non_dip = visa != "DIP-1"
+    # Deny rules require POSITIVE evidence of their preconditions: an unknown
+    # visa must not arm the non-DIP-only denials (it produced 3 over-denials
+    # of true DIP-1 packets whose visa field failed to extract).
+    known_non_dip = visa is not None and visa != "DIP-1"
+    non_dip_or_unknown = visa != "DIP-1"
 
     if sig["finding"]:
         return sig["finding"], "adjudicator_finding"
@@ -50,9 +55,9 @@ def adjudicate(values, sig):
         return "DENIED", "disqualifying_flag"
     if values.get("home_world") in FULL_EMBARGO_WORLDS:
         return "DENIED", "embargo_world"
-    if values.get("home_world") in PARTIAL_EMBARGO_WORLDS and non_dip:
+    if values.get("home_world") in PARTIAL_EMBARGO_WORLDS and known_non_dip:
         return "DENIED", "embargo_world_partial"
-    if sponsor in REVOKED_SPONSORS and non_dip:
+    if sponsor in REVOKED_SPONSORS and known_non_dip:
         return "DENIED", "revoked_sponsor"
     if visa == "TRANSIT-7":
         return "DENIED", "transit_visa"
@@ -60,17 +65,17 @@ def adjudicate(values, sig):
         return "DENIED", "fee_unpaid"
     if fee == "unknown":
         return "NEEDS_REVIEW", "fee_unknown"
-    if _is_stale(values.get("arrival_date")) and non_dip:
+    if _is_stale(values.get("arrival_date")) and known_non_dip:
         return "DENIED", "stale_arrival"
     # Waiver-code presence is NOT approval evidence: the only code in the corpus
     # is DIP-WAIVER, and on non-DIP packets those cases are 46% denied.
-    if fee == "waived" and non_dip:
+    if fee == "waived" and non_dip_or_unknown:
         return "NEEDS_REVIEW", "waived_non_dip"
     if not values.get("arrival_date"):
         return "NEEDS_REVIEW", "missing_arrival"
     if flags & REVIEW_FLAGS:
         return "NEEDS_REVIEW", "review_flag"
-    if not sponsor and non_dip:
+    if not sponsor and non_dip_or_unknown:
         return "NEEDS_REVIEW", "missing_sponsor"
     if not visa:
         return "NEEDS_REVIEW", "missing_visa"

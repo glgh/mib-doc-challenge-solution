@@ -42,7 +42,12 @@ def snap(field, value):
     if field == "visa_class":
         return _closest(v.upper().replace("=", "-"), VISAS, 0.6)
     if field == "fee_status":
-        return _closest(v.lower(), FEES, 0.7)
+        best = _closest(v.lower(), FEES, 0.7)
+        # "unpaid" triggers a hard denial, so it must be read verbatim, never
+        # reconstructed by distance (a garbled "paid" is one edit from "unpaid").
+        if best == "unpaid" and re.sub(r"[^a-z]", "", v.lower()) != "unpaid":
+            return "unknown"
+        return best
     if field == "species_code":
         return _closest(re.sub(r"[^A-Z_]", "", v.upper().replace(" ", "_")), SPECIES, 0.7)
     if field == "home_world":
@@ -51,7 +56,17 @@ def snap(field, value):
         return _closest(v.lower(), PURPOSES, 0.6) or v
     if field == "sponsor_id":
         m = re.search(r"[S5]PN[-–—:\s]*([0-9OolIB]{4})", v)
-        return f"SPN-{m.group(1).translate(_DIGIT_FIXES)}" if m else None
+        if not m:
+            return None
+        raw, fixed = m.group(1), m.group(1).translate(_DIGIT_FIXES)
+        # A revoked sponsor id triggers a hard denial: digit-translation must
+        # never *fabricate* one (it did: SPN-8421 → "revoked" SPN-0139). Exact
+        # digits are required for revoked matches; translated repairs of
+        # non-revoked ids are harmless to policy and keep extraction points.
+        from .policy import REVOKED_SPONSORS
+        if fixed != raw and f"SPN-{fixed}" in REVOKED_SPONSORS:
+            return None
+        return f"SPN-{fixed}"
     if field == "case_id":
         m = re.search(r"M[iI1l]B[-–—:\s]*([0-9OolIB]{6})", v, re.IGNORECASE)
         return f"MIB-{m.group(1).translate(_DIGIT_FIXES)}" if m else None
