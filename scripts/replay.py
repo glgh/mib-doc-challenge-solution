@@ -27,8 +27,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from mib import cache, config, emit  # noqa: E402
-import solution  # noqa: E402
+from mib import cache, config, emit, runner  # noqa: E402
 
 
 def replay(cache_path):
@@ -39,8 +38,8 @@ def replay(cache_path):
         if rec.get("error"):
             failures.append(rec["stem"])
             continue
-        record, debug = solution.predict_from_pages(
-            cache.to_pages(rec["pages"]), rec["stem"])
+        pages, reads = cache.to_case(rec["pages"])
+        record, debug = runner.predict_from_evidence(pages, reads, rec["stem"])
         out.append(record)
         debugs.append(debug)
     return meta, emit.dedupe(out), debugs, failures

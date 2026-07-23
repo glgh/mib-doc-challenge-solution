@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """MIB doc challenge entrypoint: <input_pdf_dir> <output_predictions_path>.
 
-Thin orchestrator; stages live in mib/ (see mib/__init__.py for the layout).
-Set MIB_DEBUG_JSONL=<path> to also write per-case diagnostics (branch, field
+Thin CLI over mib/runner.py, which sequences the stages (see mib/stages/). Set
+MIB_DEBUG_JSONL=<path> to also write per-case diagnostics (branch, field
 provenance, census) — predictions themselves stay schema-clean.
 """
 import json
@@ -11,51 +11,12 @@ import sys
 from multiprocessing import Pool
 from pathlib import Path
 
-from mib import config, confidence, emit, packet, pdfio, policy, signals
-
-
-def predict(pdf_path):
-    return predict_from_pages(pdfio.read_pages(pdf_path), pdf_path.stem)
-
-
-def predict_from_pages(pages, stem):
-    """Everything downstream of page text: pure, cheap, and independently testable.
-
-    Split from `predict` so the characterization tests can drive the real
-    pipeline from frozen page text without re-running OCR — and without
-    re-implementing this sequence, which would let it pass while the pipeline
-    drifted underneath.
-    """
-    pkt = packet.assemble(pages, fallback_case_id=stem)
-    provenance = {}
-    values = packet.merge_fields(pkt, provenance)
-    sig = signals.derive(pkt, values)
-    decision, branch = policy.adjudicate(values, sig)
-    conf = confidence.for_branch(branch)
-    record = emit.build_record(pkt.case_id, values, sig["flags"], decision, conf)
-    debug = {
-        "case_id": pkt.case_id,
-        "branch": branch,
-        "provenance": {k: list(v) for k, v in provenance.items()},
-        "doc_types": sorted({d for d, _, _ in pkt.docs}),
-        "scan_only_pages": pkt.scan_only_pages,
-        "has_biometric": sig["has_biometric"],
-        "flags": sorted(sig["flags"]),
-        "finding": sig["finding"],
-        "waiver_code": sig["waiver_code"],
-        "registry_status": (pkt.registry.get("registry_status") or "").strip().upper(),
-        "n_pages": len(pages),
-        "hidden_lines": sum(len(p.hidden_lines) for p in pages),
-        "n_fields_missing": sum(1 for f in packet.parse.FIELDS if not values.get(f)),
-        "n_corrections": len(packet.manual_corrections(pkt)),
-        "rules_decision": decision,
-    }
-    return record, debug
+from mib import config, emit, runner
 
 
 def _safe_predict(pdf):
     try:
-        return predict(pdf)
+        return runner.predict(pdf)
     except Exception as exc:
         print(f"skipping {pdf.name}: {exc}", file=sys.stderr)
         return None, None

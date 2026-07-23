@@ -9,13 +9,7 @@ that fired.
 from datetime import date
 
 from .parse import DISQUALIFYING_FLAGS, REVIEW_FLAGS
-
-# Manual-published + train-inferred (each 11-14 non-DIP occurrences, zero
-# approvals; independently corroborated). Policy inference, not case memorization.
-REVOKED_SPONSORS = {
-    "SPN-0007", "SPN-0139", "SPN-4040",   # FIELD_MANUAL.md
-    "SPN-2718", "SPN-7331", "SPN-9090",   # inferred from train labels
-}
+from .vocab import REVOKED_SPONSORS  # noqa: F401  (re-exported: policy owns the rule)
 
 # TRAPPIST-1e / Eris Relay: 50/50 denied incl. DIP-1 (embargo pierces immunity).
 FULL_EMBARGO_WORLDS = {"TRAPPIST-1e", "Eris Relay"}

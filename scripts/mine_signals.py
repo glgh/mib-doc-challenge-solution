@@ -11,15 +11,17 @@ from multiprocessing import Pool
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from mib import packet, pdfio, policy, signals  # noqa: E402
+from mib import packet, policy, runner, signals  # noqa: E402
+from mib.stages import render  # noqa: E402
 
 CH = Path(__file__).resolve().parent.parent.parent / "mib-doc-challenge"
 
 
 def row(pdf_path):
     try:
-        pages = pdfio.read_pages(pdf_path)
-        pkt = packet.assemble(pages, fallback_case_id=pdf_path.stem)
+        pages, reads = runner.read_case(pdf_path)
+        ocr_lines = {no: render.best_lines(rs) for no, rs in reads.items()}
+        pkt = packet.assemble(pages, ocr_lines, fallback_case_id=pdf_path.stem)
         values = packet.merge_fields(pkt)
         sig = signals.derive(pkt, values)
         decision, branch = policy.adjudicate(values, sig)

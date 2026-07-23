@@ -77,11 +77,14 @@ def detect_doc_type(lines):
     return DOC_OTHER
 
 
-def _key_for(text):
+def key_for(text):
     """Map a candidate label to its canonical field, tolerating OCR debris.
 
     Exact match first; else fuzzy (handles 'Case 1D', 'Observed fIags'). Fuzzy
     matching is safe because labels are short and the key set is small/distinct.
+
+    Public because S2 scores a page by how many labels it can recognise; it used
+    to reach for the private name.
     """
     t = text.strip().lower()
     if t in KEY_MAP:
@@ -105,15 +108,15 @@ def parse_kv(lines):
         line = lines[i].strip()
         m = re.match(r"^([A-Za-z][A-Za-z _0-9]{1,28}?)\s*[:.;]\s*(.+)$", line)
         if m:
-            key = _key_for(m.group(1))
+            key = key_for(m.group(1))
             if key:
                 kv.setdefault(key, m.group(2).strip())
                 i += 1
                 continue
-        key = _key_for(line)
+        key = key_for(line)
         if key and i + 1 < len(lines):
             nxt = lines[i + 1].strip()
-            if _key_for(nxt) is None:
+            if key_for(nxt) is None:
                 kv.setdefault(key, nxt)
                 i += 2
                 continue

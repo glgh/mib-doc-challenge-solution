@@ -1,4 +1,5 @@
 """Case assembly: active case id, document census, precedence-ordered field merge."""
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -56,12 +57,17 @@ def _repair_ocr_kv(kv):
     return kv
 
 
-def assemble(pages, fallback_case_id):
-    """Build a Packet from PageText objects; pages of other applicants are dropped."""
+def assemble(pages, ocr_lines, fallback_case_id):
+    """Build a Packet from Page records; pages of other applicants are dropped.
+
+    `ocr_lines` maps page_no -> the winning OCR reading for that page. Choosing
+    among readings is S2's job (`stages.render.best`), so this stage never has to
+    know how many variants were tried or how they were scored.
+    """
     id_votes = Counter()
     for pt in pages:
         id_votes.update(parse.page_case_ids(pt.visible_lines))
-        id_votes.update(parse.page_case_ids(pt.ocr_lines))
+        id_votes.update(parse.page_case_ids(ocr_lines.get(pt.page_no, [])))
     case_id = id_votes.most_common(1)[0][0] if id_votes else fallback_case_id
 
     packet = Packet(case_id=case_id)
@@ -69,8 +75,8 @@ def assemble(pages, fallback_case_id):
         lines, source = (pt.visible_lines, SRC_TEXT)
         if pt.is_scan_only:
             packet.scan_only_pages += 1
-            if pt.ocr_lines:
-                lines, source = (pt.ocr_lines, SRC_OCR)
+            if ocr_lines.get(pt.page_no):
+                lines, source = (ocr_lines[pt.page_no], SRC_OCR)
         ids = set(parse.page_case_ids(lines))
         if ids and case_id not in ids:
             continue  # decoy page for a different applicant
@@ -82,8 +88,6 @@ def assemble(pages, fallback_case_id):
     packet.docs.sort(key=lambda t: (t[0], t[1]))
     return packet
 
-
-import re
 
 # "Manual correction: <field> is <value>." — signed-manual-note evidence, the
 # manual's highest precedence tier. Train census: 136 packets carry one, and

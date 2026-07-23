@@ -45,20 +45,45 @@ def read(path):
     return meta, records
 
 
-def to_pages(page_dicts):
-    """Cached page text -> PageText objects, as pdfio would have produced them.
+def to_case(page_dicts):
+    """Cached page text -> (pages, reads), as `runner.read_case` would produce.
 
-    `is_scan_only` is deliberately not restored even though it is written to the
-    cache for readability: it is a derived property, so recomputing it keeps a
-    cache from pinning a stale definition of "this page is a scan".
+    The stored form keeps one OCR reading per page — the one S2 chose — so each
+    replays as a single `Read` tagged `cached`. That is a deliberate limit of the
+    *format*, not of the pipeline: S2 already produces every variant, and this
+    file grows a list when there is an ensemble to store (P3).
+
+    `is_scan_only` is not restored even though it is written for readability: it
+    is derived, so recomputing keeps a cache from pinning a stale definition of
+    "this page is a scan".
     """
-    from .pdfio import PageText
-    return [PageText(
-        visible_lines=list(p["visible_lines"]),
-        hidden_lines=list(p["hidden_lines"]),
-        ocr_lines=list(p["ocr_lines"]),
-        image_count=p["image_count"],
-    ) for p in page_dicts]
+    from .records import Page, Read
+    pages, reads = [], {}
+    for i, p in enumerate(page_dicts):
+        page_no = p.get("page_no", i)
+        pages.append(Page(
+            page_no=page_no,
+            visible_lines=list(p["visible_lines"]),
+            hidden_lines=list(p["hidden_lines"]),
+            image_count=p["image_count"],
+        ))
+        if p.get("ocr_lines"):
+            reads[page_no] = [Read(page_no=page_no, lines=list(p["ocr_lines"]),
+                                   variant="cached")]
+    return pages, reads
+
+
+def from_case(pages, reads):
+    """(pages, reads) -> the serializable page dicts this module reads back."""
+    from .stages import render
+    return [{
+        "page_no": p.page_no,
+        "visible_lines": p.visible_lines,
+        "hidden_lines": p.hidden_lines,
+        "ocr_lines": render.best_lines(reads.get(p.page_no, [])),
+        "image_count": p.image_count,
+        "is_scan_only": p.is_scan_only,
+    } for p in pages]
 
 
 def read_meta(path):

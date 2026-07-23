@@ -27,25 +27,18 @@ CH = ROOT.parent / "mib-doc-challenge"
 
 
 def dump_one(pdf_path):
-    from mib import pdfio
+    from mib import cache, runner
     t0 = time.time()
     try:
-        pages = pdfio.read_pages(pdf_path)
+        pages, reads = runner.read_case(pdf_path)
         err = None
     except Exception as exc:                      # keep going; record the failure
-        pages, err = [], f"{type(exc).__name__}: {exc}"
+        pages, reads, err = [], {}, f"{type(exc).__name__}: {exc}"
     return {
         "stem": pdf_path.stem,
         "cost_ms": round((time.time() - t0) * 1000),
         "error": err,
-        "pages": [{
-            "page_no": i,
-            "visible_lines": p.visible_lines,
-            "hidden_lines": p.hidden_lines,
-            "ocr_lines": p.ocr_lines,
-            "image_count": p.image_count,
-            "is_scan_only": p.is_scan_only,
-        } for i, p in enumerate(pages)],
+        "pages": cache.from_case(pages, reads),
     }
 
 

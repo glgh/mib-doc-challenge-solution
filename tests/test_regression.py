@@ -19,9 +19,9 @@ def test_ocr_period_separator_is_parsed_as_a_key_value_line():
 
 def test_ocr_key_typos_still_resolve():
     """Fuzzy key matching (cutoff 0.8) covers common OCR debris."""
-    assert parse._key_for("Observed fIags") == "observed_flags"
-    assert parse._key_for("Case 1D") == "case_id"
-    assert parse._key_for("a much longer line that is clearly not a field label") is None
+    assert parse.key_for("Observed fIags") == "observed_flags"
+    assert parse.key_for("Case 1D") == "case_id"
+    assert parse.key_for("a much longer line that is clearly not a field label") is None
 
 
 def test_digit_repair_never_fabricates_a_revoked_sponsor():

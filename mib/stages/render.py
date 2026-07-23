@@ -1,5 +1,5 @@
-"""OCR for scan-only pages — mandatory, not a fallback: ~25% of packets carry
-their visible content only as pixels.
+"""S2 — OCR for scan-only pages. Mandatory, not a fallback: ~25% of packets
+carry their visible content only as pixels.
 
 Recipe validated on train scans (docs/experiments.md): Tesseract PSM 11
 (sparse text) recovers structured Key: Value lines where PSM 4/6 fail; embedded
@@ -14,16 +14,26 @@ Restoration level is off | skew | turn | bands (cumulative), owned by
 mib.config.restore_level and set by MIB_RESTORE. `skew` is the shipped default:
 it beats `off` outright, while `turn` and `bands` score higher still at a
 runtime that does not currently fit the budget (docs/damage-geometry.md).
+
+`reads_for` returns **every** reading it produced, not just the winner. Work
+still stops at GOOD_ENOUGH exactly as before, so cost is unchanged; what changes
+is that the discarded readings survive the seam, which is what an ensemble over
+variants would need. Choosing among them is `best()`, deliberately separate.
 """
 import os
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
-from . import imaging, parse
-from .config import at_least as _at_least
-from .vocab import HOME_WORLDS, SPECIES, clean_ocr_line
+import fitz
+
+from .. import imaging
+from ..config import at_least as _at_least
+from ..parse import ALL_FLAGS, CASE_ID_RE, DATE_RE, SPONSOR_RE, VISA_CLASSES, key_for
+from ..records import Read
+from ..vocab import HOME_WORLDS, SPECIES, clean_ocr_line
 
 MIN_EMBEDDED_WIDTH = 1000
 RENDER_ZOOM = 2.8       # ~200 DPI
@@ -46,17 +56,17 @@ def _tesseract(image_path):
 
 
 def recognized_keys(lines):
-    """How many lines carry a recognizable field label (via parse._key_for)."""
+    """How many lines carry a recognizable field label."""
     count = 0
     for line in lines:
         head = line.split(":")[0].split(".")[0].split(";")[0]
-        if parse._key_for(head):
+        if key_for(head):
             count += 1
     return count
 
 
-_VALUE_PATTERNS = (parse.CASE_ID_RE, parse.SPONSOR_RE, parse.DATE_RE)
-_VALUE_WORDS = tuple(parse.VISA_CLASSES | set(SPECIES) | set(HOME_WORLDS) | parse.ALL_FLAGS)
+_VALUE_PATTERNS = (CASE_ID_RE, SPONSOR_RE, DATE_RE)
+_VALUE_WORDS = tuple(VISA_CLASSES | set(SPECIES) | set(HOME_WORLDS) | ALL_FLAGS)
 
 
 def evidence_score(lines):
@@ -79,60 +89,83 @@ def _restorations(gray, best_score):
     angle = imaging.skew_angle(gray)
     upright = imaging.rotate(gray, angle) if abs(angle) >= imaging.MIN_SKEW else None
     if upright is not None and best_score() < GOOD_ENOUGH:
-        yield upright
+        yield "skew", upright
     if _at_least("turn") and best_score() == 0:
         for quarter in (1, 3):                     # 90 and 270 clockwise; 180 never wins
             turned = imaging.turn(gray, quarter)
-            yield imaging.rotate(turned, imaging.skew_angle(turned))
+            yield f"turn{quarter}", imaging.rotate(turned, imaging.skew_angle(turned))
     if _at_least("bands") and best_score() < WEAK:
         bands = imaging.realign_bands(gray)
         if bands is not None:
-            yield imaging.rotate(bands, imaging.skew_angle(bands))
+            yield "bands", imaging.rotate(bands, imaging.skew_angle(bands))
 
 
 def _sources(doc, page, tmp):
-    """Page pixels to read, as (encoded_bytes, grayscale array) pairs: embedded
+    """Page pixels to read, as (name, encoded_bytes, grayscale array): embedded
     raster first, then a 200-DPI render. The encoded bytes are kept so the
     unrestored pass reads exactly the original image, not a re-encode of it."""
     images = page.get_images()
     if images:
         img = doc.extract_image(images[0][0])
         if img["width"] >= MIN_EMBEDDED_WIDTH:
-            yield img["image"], imaging.to_gray(img["image"])
-    import fitz
+            yield "embedded", img["image"], imaging.to_gray(img["image"])
     pix = page.get_pixmap(matrix=fitz.Matrix(RENDER_ZOOM, RENDER_ZOOM))
     path = Path(tmp) / "render.png"
     pix.save(path)
     raw = path.read_bytes()
-    yield raw, imaging.to_gray(raw)
+    yield "render", raw, imaging.to_gray(raw)
 
 
-def ocr_page(doc, page):
-    """OCR one page, retrying weak reads through geometric restoration.
+def reads_for(doc, page, page_no):
+    """Every OCR reading of one page, in generation order (cheapest first).
 
     A 300-DPI grayscale/autocontrast retry was tried here and reverted: +0.21
     dev pts for 43x runtime (experiments.md row 8). The pages it targeted were
     turned or shredded, not low-resolution — hence the geometric path instead.
     """
+    reads = []
     with tempfile.TemporaryDirectory(prefix="mibocr") as tmp:
-        best, best_score, written = [], -1, 0
+        best_score, written = -1, 0
 
-        def read(encoded):
-            nonlocal best, best_score, written
+        def read(encoded, variant):
+            nonlocal best_score, written
             written += 1
             path = Path(tmp) / f"p{written}.png"
             path.write_bytes(encoded)
+            t0 = time.time()
             lines = _tesseract(path)
             score = evidence_score(lines)
+            reads.append(Read(page_no=page_no, lines=lines, variant=variant,
+                              quality=score,
+                              cost_ms=round((time.time() - t0) * 1000)))
             if score > best_score:
-                best, best_score = lines, score
+                best_score = score
 
-        for encoded, gray in _sources(doc, page, tmp):
-            read(encoded)
-            for variant in _restorations(gray, lambda: best_score):
-                read(imaging.to_png_bytes(variant))
+        for name, encoded, gray in _sources(doc, page, tmp):
+            read(encoded, name)
+            for variant, image in _restorations(gray, lambda: best_score):
+                read(imaging.to_png_bytes(image), f"{name}+{variant}")
                 if best_score >= GOOD_ENOUGH:
                     break
             if best_score >= GOOD_ENOUGH:
                 break
-        return best
+    return reads
+
+
+def best(reads):
+    """The reading the pipeline acts on: highest evidence score, earliest wins ties.
+
+    Ties break toward the earlier read because `_sources` yields the embedded
+    raster before the re-render and restorations run cheapest-first, so the
+    earlier read is the one that cost less to obtain.
+    """
+    chosen = None
+    for r in reads:
+        if chosen is None or r.quality > chosen.quality:
+            chosen = r
+    return chosen
+
+
+def best_lines(reads):
+    chosen = best(reads)
+    return chosen.lines if chosen else []

@@ -21,6 +21,16 @@ PURPOSES = [
 ]
 VISAS = ["XW-1", "XW-2", "DIP-1", "MED-3", "TRANSIT-7"]
 FEES = ["paid", "waived", "unpaid", "unknown"]
+
+# Manual-published + train-inferred (each 11-14 non-DIP occurrences, zero
+# approvals; independently corroborated). Policy inference, not case memorization.
+# Lives here rather than in mib/policy.py because repair needs it — snapping must
+# never *fabricate* a revoked id — and a vocabulary reaching forward into the
+# rule engine was a circular import dodged by a function-local import.
+REVOKED_SPONSORS = {
+    "SPN-0007", "SPN-0139", "SPN-4040",   # FIELD_MANUAL.md
+    "SPN-2718", "SPN-7331", "SPN-9090",   # inferred from train labels
+}
 FLAGS = ["memory_tampering", "planetary_embargo", "active_warrant", "biohazard_red",
          "identity_conflict", "sponsor_mismatch", "illegible_biometrics",
          "rescinded_denial", "none"]
@@ -63,7 +73,6 @@ def snap(field, value):
         # never *fabricate* one (it did: SPN-8421 → "revoked" SPN-0139). Exact
         # digits are required for revoked matches; translated repairs of
         # non-revoked ids are harmless to policy and keep extraction points.
-        from .policy import REVOKED_SPONSORS
         if fixed != raw and f"SPN-{fixed}" in REVOKED_SPONSORS:
             return None
         return f"SPN-{fixed}"

@@ -65,3 +65,5 @@ What the instruments bought, all on dev at `skew` and all newly measurable:
 - **`fee_unknown` (7.89 class pts) is not an OCR problem**: its `fee_status` is visible in 0.0% of cases, 3.6% with OCR, and hidden-only in 41 — the fee is not in the document.
 - **`b13_census` (5.00 class pts) is not an evidence problem**: 89 of 95 cases have no B-13 anywhere, only 6 are detection misses, and the other fields read at 98.0%. It needs a split, not better reading.
 - **The ML ceiling over today's partition is +1.56**, against 17.17 behind a finer partition. Decision work stays last.
+
+**Step-0 decision-layer bake-off (2026-07-22, commit adff813, substrate = skew cache replay at 115.20 dev):** 5-fold OOF within dev, identical 66-dim features. Rules 61.27/80eq Brier .1210 CFA 0 → **calibrated logistic + inner-CV correctness confidence 62.43/80eq Brier .1293 CFA 12** (+1.16 class pts, −0.33 calib pts, net ≈ +0.8). MLP(32) overfits (59.44, Brier .21, 31 CFA) — Phase 1 ships logistic. CFA veto sweep: t=0.15 → 61.73/6 CFA; t=0.10 → 60.76/2. Full table in JOURNAL.

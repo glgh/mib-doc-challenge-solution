@@ -8,10 +8,9 @@ import re
 
 import pytest
 
-from conftest import rehydrate
+from conftest import predict
 from mib import emit
 from mib.textmatch import trusted_text, unsourced_flags
-import solution
 
 CASE_ID_RE = re.compile(r"^MIB-\d{6}$")
 SPONSOR_RE = re.compile(r"^SPN-\d{4}$")
@@ -23,16 +22,15 @@ FLAGS = {"memory_tampering", "planetary_embargo", "active_warrant", "biohazard_r
          "rescinded_denial"}
 
 
-def records(cases):
-    for case in cases:
-        record, debug = solution.predict_from_pages(rehydrate(case["pages"]), case["stem"])
+def records(cases, actual):
+    for case, (record, debug) in zip(cases, actual):
         yield case, record, debug
 
 
 # --- schema safety net -------------------------------------------------------
 
-def test_emitted_records_satisfy_the_submission_schema(cases):
-    for _case, r, _debug in records(cases):
+def test_emitted_records_satisfy_the_submission_schema(cases, actual):
+    for _case, r, _debug in records(cases, actual):
         assert r["adjudication"] in ADJUDICATIONS
         assert r["fee_status"] in FEES
         assert SPONSOR_RE.match(r["sponsor_id"]), r["sponsor_id"]
@@ -91,10 +89,9 @@ def test_hidden_text_cannot_change_the_output(cases):
     """
     influenced = []
     for case in cases:
-        with_hidden, _ = solution.predict_from_pages(
-            rehydrate(case["pages"]), case["stem"])
+        with_hidden, _ = predict(case)
         blanked = [{**p, "hidden_lines": []} for p in case["pages"]]
-        without, _ = solution.predict_from_pages(rehydrate(blanked), case["stem"])
+        without, _ = predict(case, pages=blanked)
         if with_hidden != without:
             moved = {k: (without.get(k), with_hidden.get(k))
                      for k in with_hidden if with_hidden.get(k) != without.get(k)}
@@ -114,11 +111,10 @@ def test_an_injected_answer_key_is_ignored(cases):
     """
     influenced = []
     for case in cases[:25]:
-        clean, _ = solution.predict_from_pages(rehydrate(case["pages"]), case["stem"])
+        clean, _ = predict(case)
         poisoned_pages = [{**p, "hidden_lines": list(p["hidden_lines"]) + [HOSTILE_KEY]}
                           for p in case["pages"]]
-        poisoned, _ = solution.predict_from_pages(
-            rehydrate(poisoned_pages), case["stem"])
+        poisoned, _ = predict(case, pages=poisoned_pages)
         if clean != poisoned:
             moved = {k: (clean.get(k), poisoned.get(k))
                      for k in clean if clean.get(k) != poisoned.get(k)}
@@ -133,9 +129,9 @@ def test_an_injected_answer_key_is_ignored(cases):
     "(planetary_embargo from home_world, sponsor_mismatch, identity_conflict) and "
     "emit writes the union to risk_flags. organizer-guidance.md §1 forbids emitting "
     "a flag with no visible-evidence source. Fixed by the observed/derived split."))
-def test_every_emitted_risk_flag_has_an_evidence_source(cases):
+def test_every_emitted_risk_flag_has_an_evidence_source(cases, actual):
     unsourced = []
-    for case, r, _debug in records(cases):
+    for case, r, _debug in records(cases, actual):
         for flag in unsourced_flags(r["risk_flags"], trusted_text(case["pages"])):
             unsourced.append(f"{case['stem']}: {flag}")
     assert not unsourced, "flags emitted with no visible source:\n  " + "\n  ".join(unsourced)

@@ -1,23 +1,16 @@
 """The refactor safety net.
 
-Runs the real downstream pipeline (`solution.predict_from_pages`) against frozen
+Runs the real downstream pipeline (`runner.predict_from_evidence`) against frozen
 page text and asserts the emitted record is unchanged, field by field. Any
 behavior change in parse / merge / signals / policy / confidence / emit shows up
-here in milliseconds instead of in a 15-minute eval.
+here in milliseconds instead of in a 40-minute eval.
 
 When a change is *intended*, regenerate with scripts/make_fixture.py and review
 the diff — the fixture is the record of what the pipeline currently does.
 """
 import pytest
 
-from conftest import rehydrate
-
-import solution
-
-
-def _actual(case):
-    record, debug = solution.predict_from_pages(rehydrate(case["pages"]), case["stem"])
-    return record, debug
+from conftest import predict
 
 
 def test_fixture_covers_the_policy_surface(characterization, cases):
@@ -49,27 +42,29 @@ def test_fixture_covers_the_policy_surface(characterization, cases):
     "sponsor_id", "arrival_date", "declared_purpose", "risk_flags",
     "fee_status", "adjudication", "confidence",
 ])
-def test_records_unchanged(cases, field):
+def test_records_unchanged(cases, actual, field):
     """Per-field so a diff names the field that moved, not just 'a record changed'."""
     diffs = []
-    for case in cases:
-        record, _ = _actual(case)
+    for case, (record, _debug) in zip(cases, actual):
         expected = case["expected_record"][field]
         if record[field] != expected:
             diffs.append(f"{case['stem']}: {expected!r} -> {record[field]!r}")
     assert not diffs, f"{field} changed in {len(diffs)} case(s):\n  " + "\n  ".join(diffs)
 
 
-def test_branches_unchanged(cases):
+def test_branches_unchanged(cases, actual):
     diffs = []
-    for case in cases:
-        _, debug = _actual(case)
+    for case, (_record, debug) in zip(cases, actual):
         if debug["branch"] != case["expected_branch"]:
             diffs.append(f"{case['stem']}: {case['expected_branch']} -> {debug['branch']}")
     assert not diffs, "policy branch changed:\n  " + "\n  ".join(diffs)
 
 
 def test_deterministic(cases):
-    """Same input twice, same output — nothing in the downstream stages may vary."""
+    """Same input twice, same output — nothing in the downstream stages may vary.
+
+    Deliberately does not reuse the session-cached `actual`: this is the one test
+    that must pay for a second real run.
+    """
     for case in cases[:15]:
-        assert _actual(case)[0] == _actual(case)[0], f"{case['stem']} is nondeterministic"
+        assert predict(case)[0] == predict(case)[0], f"{case['stem']} is nondeterministic"

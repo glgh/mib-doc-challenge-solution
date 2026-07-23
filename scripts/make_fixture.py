@@ -36,18 +36,13 @@ from mib.textmatch import trusted_text, unsourced_flags  # noqa: E402
 
 def build_case(rec):
     """One fixture case: frozen page text plus the record it currently produces."""
-    import solution
+    from mib import runner
 
-    pages = cache.to_pages(rec["pages"])
-    record, debug = solution.predict_from_pages(pages, rec["stem"])
-    page_dicts = [{
-        "visible_lines": p.visible_lines, "hidden_lines": p.hidden_lines,
-        "ocr_lines": p.ocr_lines, "image_count": p.image_count,
-        "is_scan_only": p.is_scan_only,
-    } for p in pages]
+    pages, reads = cache.to_case(rec["pages"])
+    record, debug = runner.predict_from_evidence(pages, reads, rec["stem"])
     return {
         "stem": rec["stem"],
-        "pages": page_dicts,
+        "pages": cache.from_case(pages, reads),
         "expected_record": record,
         "expected_branch": debug["branch"],
     }

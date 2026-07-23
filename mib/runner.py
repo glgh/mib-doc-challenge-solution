@@ -1,0 +1,73 @@
+"""Orchestration: sequences the stages and owns the failure envelope.
+
+Stages are independent of each other (see mib/stages/__init__.py); this is where
+they are composed. Two entry points, split at the cache boundary:
+
+  `read_case`              S1 + S2 — the expensive, impure half. Opens the PDF.
+  `predict_from_evidence`  S3..emit — pure, cheap, and replayable from a cache.
+
+That split is the whole point: `scripts/replay.py` re-runs the second half over
+a stored page-text cache in seconds, so a parse or policy change is measurable
+without paying for OCR again.
+"""
+from . import confidence, emit, packet, policy, signals
+from .stages import extract, render
+
+
+def read_case(pdf_path):
+    """S1 + S2 for one PDF -> (pages, reads_by_page).
+
+    The document is opened once and held across both stages: rendering a scanned
+    page needs the same handle S1 read from. Keeping that lifetime here is what
+    lets `extract` avoid reaching forward into `render`, which is the backwards
+    edge the previous `pdfio.read_pages` had.
+    """
+    reads = {}
+    with extract.open_document(pdf_path) as doc:
+        pages = extract.pages(doc)
+        for page in pages:
+            if page.is_scan_only:
+                reads[page.page_no] = render.reads_for(doc, doc[page.page_no],
+                                                       page.page_no)
+    return pages, reads
+
+
+def predict(pdf_path):
+    pages, reads = read_case(pdf_path)
+    return predict_from_evidence(pages, reads, pdf_path.stem)
+
+
+def predict_from_evidence(pages, reads, stem):
+    """Everything downstream of page text: pure, cheap, independently testable.
+
+    Split from `read_case` so the characterization tests and the replay gate can
+    drive the real pipeline from frozen page text without re-running OCR — and
+    without re-implementing this sequence, which would let them pass while the
+    pipeline drifted underneath.
+    """
+    ocr_lines = {no: render.best_lines(rs) for no, rs in reads.items()}
+    pkt = packet.assemble(pages, ocr_lines, fallback_case_id=stem)
+    provenance = {}
+    values = packet.merge_fields(pkt, provenance)
+    sig = signals.derive(pkt, values)
+    decision, branch = policy.adjudicate(values, sig)
+    conf = confidence.for_branch(branch)
+    record = emit.build_record(pkt.case_id, values, sig["flags"], decision, conf)
+    debug = {
+        "case_id": pkt.case_id,
+        "branch": branch,
+        "provenance": {k: list(v) for k, v in provenance.items()},
+        "doc_types": sorted({d for d, _, _ in pkt.docs}),
+        "scan_only_pages": pkt.scan_only_pages,
+        "has_biometric": sig["has_biometric"],
+        "flags": sorted(sig["flags"]),
+        "finding": sig["finding"],
+        "waiver_code": sig["waiver_code"],
+        "registry_status": (pkt.registry.get("registry_status") or "").strip().upper(),
+        "n_pages": len(pages),
+        "hidden_lines": sum(len(p.hidden_lines) for p in pages),
+        "n_fields_missing": sum(1 for f in packet.parse.FIELDS if not values.get(f)),
+        "n_corrections": len(packet.manual_corrections(pkt)),
+        "rules_decision": decision,
+    }
+    return record, debug
