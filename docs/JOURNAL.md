@@ -120,3 +120,42 @@ Full survey in [damage-geometry.md](damage-geometry.md); experiments rows 11–1
   `MIB_RESTORE=bands` eval; the attempt was interrupted (worker-pool BrokenPipeError), so
   `output/eval/` currently holds an `off`-mode run. First action next session:
   `MIB_RESTORE=bands scripts/eval_local.sh dev`, then `scripts/train_decision.py`.
+
+## 2026-07-22 (night) — Step-0 bake-off: decision layer PASSES the gate (calibrated logistic, not the MLP)
+
+Substrate: `output/eval_skew/` — replay of the 1,000-case skew page-text cache
+(`scripts/replay.py output/cache/train_skew.jsonl output/eval_skew`), scored 115.20 dev —
+byte-consistent with experiments row 12, so the cache/replay seam is faithful. The planned
+bands eval was dropped: bands is demoted to experimental-until-P3 and its cost is unmeasured,
+while skew is the shipped default with a full cache on disk.
+
+Bake-off (`scripts/train_decision.py output/eval_skew`, 5-fold OOF within dev, all deciders
+on identical features — 66 dims incl. 16-branch one-hot + rules-decision one-hot):
+
+| Decider | raw | /80eq | acc | Brier | CFA |
+| --- | ---: | ---: | ---: | ---: | --: |
+| Rules baseline (fitted conf) | 4289 | 61.27 | .690 | .1210 | 0 |
+| MLP(32)+branch | 4161 | 59.44 | .730 | .2131 | 31 |
+| MLP(32) no branch | 4106 | 58.66 | .717 | .2027 | 30 |
+| Logistic+branch (raw conf) | 4366 | 62.37 | .756 | .1346 | 21 |
+| Logistic+branch, sigmoid-cal | 4370 | 62.43 | .737 | .1370 | 12 |
+| **Logistic+cal + inner-CV correctness conf** | **4370** | **62.43** | .737 | **.1293** | 12 |
+
+- **Verdict: PASS, with the simpler model.** +1.16 dev pts classification over rules; Brier
+  within 0.008 (≈ −0.33 calib pts), net ≈ +0.8. The MLP overfits 700 cases badly and loses
+  to its own linear ablation — Phase 1 ships a **logistic** forward pass (even easier in
+  numpy), MLP revisited only if Phase-2 features change the picture.
+- Confidence lesson: raw P(chosen) is NOT P(decision correct) under EV-argmax; an inner-CV
+  correctness calibrator (mirroring the rules' fitted per-branch confidence) recovered most
+  of the Brier gap honestly.
+- Divergence profile of the winner vs rules: +0.41 missing_sponsor, +0.33 b13_census,
+  +0.29 missing_arrival, +0.17 missing_visa; fee_unknown neutral (+0.06); only review_flag
+  slightly negative (−0.10). Exactly the "cascade can't price ambiguity" branches.
+- CFA veto sweep (approve blocked when P(D) ≥ t): t=1.0 → 62.43/12 CFA; 0.20 → 62.00/9;
+  0.15 → 61.73/6; 0.10 → 60.76/2; 0.05 → 58.60/0. Smooth insurance knob; decision on the
+  shipped t deferred to Phase 3 with the memo's CFA-pattern argument in view.
+- Provenance: substrate stamped restore=skew rev=d6427f8+dirty; `train_decision.py` now
+  takes an eval-dir argv and runs `config.require_agreement` before joining artifacts.
+
+**Next:** Docker contract parity run (in progress), validation fallback artifact, then
+Phase 1 (`mib/features.py` + `mib/decision.py`, logistic weights in npz, `MIB_DECIDER`).
