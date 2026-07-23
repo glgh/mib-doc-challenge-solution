@@ -8,6 +8,31 @@ import pytest
 from mib import parse, vocab
 
 
+def test_bands_rung_deskews_before_deshredding(monkeypatch):
+    """The `bands` restoration rung must deshred the *deskewed* page, not the raw
+    one: `imaging.realign_bands` keys off the printed border's left edge per row,
+    and a skewed border is a moving reference. Regression guard for the ordering
+    — asserted on call order, so it needs no OCR or real geometry."""
+    from mib import imaging
+    from mib.stages import render
+
+    monkeypatch.setenv("MIB_RESTORE", "bands")
+    deskewed, deshredded = object(), object()
+    seen = {}
+    monkeypatch.setattr(imaging, "skew_angle", lambda g: 3.0)   # past MIN_SKEW
+    monkeypatch.setattr(imaging, "rotate", lambda g, deg: deskewed)
+
+    def fake_realign(base):
+        seen["realign_arg"] = base
+        return deshredded
+    monkeypatch.setattr(imaging, "realign_bands", fake_realign)
+
+    variants = dict(render._restorations(object(), lambda: 1))   # 1 < WEAK, > 0
+    assert variants.get("deshred") is deshredded          # deshred is produced
+    assert "bands" not in variants                        # under the old name
+    assert seen["realign_arg"] is deskewed                # deskew came first
+
+
 def test_unreadable_risk_line_is_not_repaired_into_no_risk():
     """MIB-000672 (experiments row 18): the B-13 scanned as `Observed fans: =-*`
     / `rant` — truly `active_warrant`. snap matched no flag token and fell
