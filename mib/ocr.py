@@ -42,6 +42,7 @@ def _tesseract(image_path):
         result = subprocess.run(
             ["tesseract", str(image_path), "stdout", "--psm", "11"],
             capture_output=True, text=True, timeout=20,
+            env={**os.environ, "OMP_THREAD_LIMIT": "1"},
         )
         return [clean_ocr_line(l) for l in result.stdout.splitlines() if l.strip()]
     except (subprocess.TimeoutExpired, OSError):

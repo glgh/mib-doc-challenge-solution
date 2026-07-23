@@ -31,6 +31,14 @@ def predict(pdf_path):
         "scan_only_pages": pkt.scan_only_pages,
         "has_biometric": sig["has_biometric"],
         "flags": sorted(sig["flags"]),
+        "finding": sig["finding"],
+        "waiver_code": sig["waiver_code"],
+        "registry_status": (pkt.registry.get("registry_status") or "").strip().upper(),
+        "n_pages": len(pages),
+        "hidden_lines": sum(len(p.hidden_lines) for p in pages),
+        "n_fields_missing": sum(1 for f in packet.parse.FIELDS if not values.get(f)),
+        "n_corrections": len(packet.manual_corrections(pkt)),
+        "rules_decision": decision,
     }
     return record, debug
 
