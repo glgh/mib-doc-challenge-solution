@@ -1,0 +1,2 @@
+# Dev-only. NOT installed into the runtime image (see requirements.txt / Dockerfile).
+pytest==9.1.1

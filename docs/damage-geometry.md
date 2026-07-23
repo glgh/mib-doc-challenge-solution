@@ -75,12 +75,12 @@ MIB-000030 p0). That makes it the best-conditioned feature in the corpus:
 
 Dev split (700 cases), cumulative `MIB_RESTORE` levels, CFA 0 at every level:
 
-| Level | Total | Extraction | Classification | Calibration | Wall |
+| Level | Total | Extraction | Classification | Calibration | Wall / 1,000 PDFs |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `off` | 114.50 | 38.53 | 60.94 | 15.03 | 295s |
-| `skew` | 115.20 | 38.76 | 61.27 | 15.16 | 1280s |
-| `turn` | 116.59 | 39.58 | 61.79 | 15.22 | 927s |
-| `bands` | **116.88** | 39.62 | 61.97 | 15.30 | 608s |
+| `off` | 114.50 | 38.53 | 60.94 | 15.03 | not measured |
+| `skew` | 115.20 | 38.76 | 61.27 | 15.16 | **1101s** |
+| `turn` | 116.59 | 39.58 | 61.79 | 15.22 | not measured |
+| `bands` | **116.88** | 39.62 | 61.97 | 15.30 | not measured |
 
 Brier improved 0.1243 → 0.1176 as a side effect: better extraction lands cases
 in better-calibrated branches.
@@ -92,10 +92,25 @@ Per-case, on the two packets that prompted the survey:
 | MIB-000030 | 8/45 | 36/45 |
 | MIB-000131 | 4/45 | 27/45 |
 
-Wall-clock *falls* as restoration deepens (`bands` is the fastest of the three)
-because each level rescues more pages before the expensive 200-DPI re-render,
-and rescued pages trip the `GOOD_ENOUGH` early exit. These are laptop seconds
-with other work running alongside; the Docker-limits run is what counts.
+**Retracted (2026-07-22):** an earlier version of this table carried wall figures
+of 295s / 1280s / 927s / 608s and concluded from them that *wall-clock falls as
+restoration deepens, because rescued pages trip the `GOOD_ENOUGH` early exit*.
+Those were laptop seconds recorded with other jobs running and are not mutually
+comparable, so the conclusion had nothing holding it up.
+
+The `skew` row is now a full-corpus figure — `scripts/dump_text.py` over all
+1,000 train PDFs on 4 workers: 1101s wall, mean 4.40s/case, p50 1.6s, p99 57.5s,
+max 107s, projecting to 1.53h for the 5,000-PDF validation set against an 8.3h
+budget. It is better than what it replaces but it is still not clean: the host
+was running a game at ~47% CPU throughout, and it is a 10-core macOS laptop
+rather than the contract's 4 vCPU Linux container. Treat it as an upper bound
+with the wrong hardware underneath. The other three levels are unmeasured on any
+sample worth quoting.
+
+The early-exit effect is real in the code — a rescued page does skip the 200-DPI
+re-render — but whether it outweighs the added restoration passes is an open
+question, and the prior should be that deeper levels cost *more*. What settles
+it is `scripts/run_docker_submission.py` under the real limits, never yet run.
 
 ## Known inefficiency
 

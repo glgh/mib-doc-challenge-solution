@@ -9,7 +9,11 @@ embedded image is small or yields nothing are re-rendered at ~200 DPI.
 Pages that still read badly are usually damaged *geometrically* rather than
 optically (turned, skewed, or shredded into offset bands), so weak pages are
 retried through mib.imaging restorations rather than at higher resolution.
-Restoration level is set by MIB_RESTORE: off | skew | turn | bands (cumulative).
+
+Restoration level is off | skew | turn | bands (cumulative), owned by
+mib.config.restore_level and set by MIB_RESTORE. `skew` is the shipped default:
+it beats `off` outright, while `turn` and `bands` score higher still at a
+runtime that does not currently fit the budget (docs/damage-geometry.md).
 """
 import os
 import re
@@ -18,6 +22,7 @@ import tempfile
 from pathlib import Path
 
 from . import imaging, parse
+from .config import at_least as _at_least
 from .vocab import HOME_WORLDS, SPECIES, clean_ocr_line
 
 MIN_EMBEDDED_WIDTH = 1000
@@ -26,15 +31,6 @@ RENDER_ZOOM = 2.8       # ~200 DPI
 # Evidence thresholds that decide how hard to work on a page.
 GOOD_ENOUGH = 6         # reads like an intact form; stop spending passes
 WEAK = 4                # worth trying band reassembly
-
-_LEVELS = ("off", "skew", "turn", "bands")
-
-
-def _at_least(level):
-    have = os.environ.get("MIB_RESTORE", "off").lower()
-    if have not in _LEVELS:
-        have = "off"
-    return _LEVELS.index(have) >= _LEVELS.index(level)
 
 
 def _tesseract(image_path):

@@ -8,29 +8,44 @@ to [0.05, 0.95], and writes mib/confidence_table.json for runtime use.
 
 Honesty note: branches that are organizer-sanctioned retreats (b13_census,
 waived_non_dip) *should* score low — the label usually disagrees by design.
+
+The fitted table is a function of the config that produced the eval it was fitted
+on, so the config is recorded beside it in mib/confidence_table.meta.json.
+
+Usage: scripts/fit_confidence.py [eval_dir]
 """
 import csv
 import json
+import sys
 from collections import defaultdict
 from pathlib import Path
 
 SHRINK_K = 10
 CLAMP = (0.05, 0.95)
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 CH = ROOT.parent / "mib-doc-challenge"
 
+from mib import config  # noqa: E402
 
-def main():
+
+def main(eval_dir=None):
+    eval_dir = Path(eval_dir or ROOT / "output/eval")
+    meta_path = eval_dir / "meta.json"
+    eval_meta = json.loads(meta_path.read_text()) if meta_path.exists() else None
+    config.require_agreement([(str(eval_dir), eval_meta)])
+
     dev_ids = set(json.loads((ROOT / "data_splits.json").read_text())["dev"])
     truth = {r["case_id"]: r["adjudication"]
              for r in csv.DictReader(open(CH / "data/train_labels.csv"))}
     preds = {r["case_id"]: r["adjudication"]
-             for r in map(json.loads, open(ROOT / "output/eval/predictions.jsonl"))}
+             for r in map(json.loads, open(eval_dir / "predictions.jsonl"))}
     branches = {r["case_id"]: r["branch"]
-                for r in map(json.loads, open(ROOT / "output/eval/debug.jsonl"))}
+                for r in map(json.loads, open(eval_dir / "debug.jsonl"))}
 
     by_branch = defaultdict(lambda: [0, 0])   # branch -> [hits, n]
     by_decision = defaultdict(lambda: [0, 0])  # predicted class -> [hits, n]
+    branch_calls = defaultdict(list)           # branch -> [predicted class, ...]
     for cid in dev_ids:
         if cid not in preds or cid not in branches:
             continue
@@ -39,26 +54,38 @@ def main():
         by_branch[branches[cid]][1] += 1
         by_decision[preds[cid]][0] += hit
         by_decision[preds[cid]][1] += 1
+        branch_calls[branches[cid]].append(preds[cid])
 
     class_prior = {cls: h / n for cls, (h, n) in by_decision.items()}
-    # branch -> decision mapping comes from observation (branches are pure)
-    branch_decision = {}
-    for cid in dev_ids:
-        if cid in branches and cid in preds:
-            branch_decision.setdefault(branches[cid], preds[cid])
 
+    # Shrink each branch toward the base rate of the class it actually predicts.
+    # Branches are NOT pure: `adjudicator_finding` emits whatever the signed note
+    # says, so on dev it splits 36 APPROVED / 84 DENIED / 52 NEEDS_REVIEW. Taking
+    # the branch's class from whichever case happened to be read first therefore
+    # drew the prior for a class most of that branch's cases were not assigned.
+    # The prior is a per-case property, so mix it per case.
     table = {}
     for branch, (hits, n) in sorted(by_branch.items()):
-        prior = class_prior.get(branch_decision.get(branch), 0.5)
+        calls = branch_calls[branch]
+        prior = (sum(class_prior.get(c, 0.5) for c in calls) / len(calls)
+                 if calls else 0.5)
         shrunk = (hits + SHRINK_K * prior) / (n + SHRINK_K)
         table[branch] = round(min(CLAMP[1], max(CLAMP[0], shrunk)), 3)
+        mixed = "" if len(set(calls)) <= 1 else f" (mixed: {len(set(calls))} classes)"
         print(f"{branch:24s} n={n:3d} raw={hits / n if n else 0:.3f} "
-              f"prior={prior:.3f} -> {table[branch]}")
+              f"prior={prior:.3f} -> {table[branch]}{mixed}")
 
     out = ROOT / "mib/confidence_table.json"
     out.write_text(json.dumps(table, indent=2, sort_keys=True) + "\n")
+    # Sidecar rather than a key inside the table: mib/confidence.py looks the
+    # table up by branch name and must keep seeing branch -> float, nothing else.
+    (ROOT / "mib/confidence_table.meta.json").write_text(json.dumps(
+        config.stamp(artifact="confidence_table", fitted_on=str(eval_dir),
+                     fitted_on_meta=eval_meta, split="dev", shrink_k=SHRINK_K,
+                     clamp=list(CLAMP), n_branches=len(table)),
+        indent=2, sort_keys=True) + "\n")
     print(f"wrote {out}")
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1] if len(sys.argv) > 1 else None)

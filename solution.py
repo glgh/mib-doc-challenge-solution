@@ -11,12 +11,22 @@ import sys
 from multiprocessing import Pool
 from pathlib import Path
 
-from mib import confidence, emit, packet, pdfio, policy, signals
+from mib import config, confidence, emit, packet, pdfio, policy, signals
 
 
 def predict(pdf_path):
-    pages = pdfio.read_pages(pdf_path)
-    pkt = packet.assemble(pages, fallback_case_id=pdf_path.stem)
+    return predict_from_pages(pdfio.read_pages(pdf_path), pdf_path.stem)
+
+
+def predict_from_pages(pages, stem):
+    """Everything downstream of page text: pure, cheap, and independently testable.
+
+    Split from `predict` so the characterization tests can drive the real
+    pipeline from frozen page text without re-running OCR — and without
+    re-implementing this sequence, which would let it pass while the pipeline
+    drifted underneath.
+    """
+    pkt = packet.assemble(pages, fallback_case_id=stem)
     provenance = {}
     values = packet.merge_fields(pkt, provenance)
     sig = signals.derive(pkt, values)
@@ -67,6 +77,14 @@ def main(input_dir, output_path):
             for _, dbg in results:
                 if dbg is not None:
                     f.write(json.dumps(dbg, sort_keys=True) + "\n")
+        # Stamp the eval directory so metric scripts can refuse to join it
+        # against a page-text cache built at a different config. Written beside
+        # the debug sidecar rather than beside the predictions, so the container
+        # writes nothing to /output but the schema-clean submission file.
+        meta = config.stamp(artifact="eval", input_dir=str(input_dir),
+                            n_pdfs=len(pdfs), n_records=len(records))
+        (Path(debug_path).parent / "meta.json").write_text(
+            json.dumps(meta, indent=2, sort_keys=True) + "\n")
 
 
 if __name__ == "__main__":

@@ -26,15 +26,42 @@ Lesson from row 8, for the memo: OCR quality on this corpus is bimodal — pages
 
 Worst fields at baseline: fee_status 44.3%, sponsor_id 49.4%, visa_class 51.4% (scan-only packets dominate misses). Confusion hotspots: 184 DENIED→NR, 142 APPROVED→NR (scan-only punts), 52 DENIED→APPROVED (CFAs).
 
-**Split note:** rows 11–14 are a single cumulative A/B of `MIB_RESTORE` (geometric scan restoration, see [damage-geometry.md](damage-geometry.md)). Row 11 re-baselines: `ocr_page` now selects candidates by `evidence_score` (labels *plus* well-formed values) instead of `recognized_keys`, and stops at `GOOD_ENOUGH` rather than on the first page with any label — worth +0.07 on its own, so rows 12–14 are attributable to geometry. Wall figures are laptop seconds with other work running alongside; Docker-limits parity run still owed.
+**Split note:** rows 11–14 are a single cumulative A/B of `MIB_RESTORE` (geometric scan restoration, see [damage-geometry.md](damage-geometry.md)). Row 11 re-baselines: `ocr_page` now selects candidates by `evidence_score` (labels *plus* well-formed values) instead of `recognized_keys`, and stops at `GOOD_ENOUGH` rather than on the first page with any label — worth +0.07 on its own, so rows 12–14 are attributable to geometry.
 
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
-| 11 | 2026-07-22 | (step6) | `MIB_RESTORE=off` — value-aware candidate selection, no geometry; re-baseline | 114.50 | 60.94 | 38.53 | 15.03 | 0 | 295s | baseline(dev) |
-| 12 | 2026-07-22 | (step6) | `=skew` — projection-profile deskew (±8°, 0.25° steps) on weak pages | 115.20 | 61.27 | 38.76 | 15.16 | 0 | 1280s | keep |
-| 13 | 2026-07-22 | (step6) | `=turn` — + 90°/270° quarter turns on pages reading zero evidence (180° never wins) | 116.59 | 61.79 | 39.58 | 15.22 | 0 | 927s | keep |
-| 14 | 2026-07-22 | (step6) | `=bands` — + shredder band realignment keyed off the constant-width page border | **116.88** | 61.97 | 39.62 | **15.30** | 0 | 608s | keep — **flag-gated, default `off` pending detect-first rework** |
+| 11 | 2026-07-22 | (step6) | `MIB_RESTORE=off` — value-aware candidate selection, no geometry; re-baseline | 114.50 | 60.94 | 38.53 | 15.03 | 0 | ~~295s~~ | baseline(dev) |
+| 12 | 2026-07-22 | (step6) | `=skew` — projection-profile deskew (±8°, 0.25° steps) on weak pages | 115.20 | 61.27 | 38.76 | 15.16 | 0 | 1101s † | keep |
+| 13 | 2026-07-22 | (step6) | `=turn` — + 90°/270° quarter turns on pages reading zero evidence (180° never wins) | 116.59 | 61.79 | 39.58 | 15.22 | 0 | ~~927s~~ | keep |
+| 14 | 2026-07-22 | (step6) | `=bands` — + shredder band realignment keyed off the constant-width page border | **116.88** | 61.97 | 39.62 | **15.30** | 0 | ~~608s~~ | keep — **flag-gated, experimental until P3** |
 
-Row 14 is +2.38 over row 11 (+2.45 over row 10's 114.43) with CFA still 0, and Brier 0.1243 → 0.1176. Wall-clock *falls* as restoration deepens because rescued pages trip the `GOOD_ENOUGH` early exit and skip the 200-DPI re-render.
+Row 14 is +2.38 over row 11 (+2.45 over row 10's 114.43) with CFA still 0, and Brier 0.1243 → 0.1176.
 
 Lesson superseding row 8: the pages that failed OCR were not low-resolution, they were turned, skewed, and shredded. Row 8 spent 43x runtime on the resolution axis and bought +0.21; ~5 ms of numpy on the geometry axis buys +2.38. **Diagnose the transform before scaling the compute.**
+
+**Correction (2026-07-22, row 15 work): the struck-through wall figures above are wrong, and one conclusion drawn from them is withdrawn.** They were laptop seconds recorded with other jobs running, and they are not mutually comparable.
+
+† is the best figure currently available, and it is still not a clean one: `scripts/dump_text.py` at `skew` over all 1,000 train PDFs on 4 workers — 1101s wall, mean 4.40s/case, p50 1.6s / p90 9.8s / p99 57.5s / max 107s, projecting to **1.53 h** for 5,000 PDFs against the 30,000 s (8.3 h) budget. Caveats that must travel with that number:
+
+- **The machine was not idle** (a game was using ~47% of CPU throughout), so it is an upper bound on a quiet host, not a clean measurement.
+- Wall-derived and per-case-derived projections agreeing at 1.53 h is *not* an independent cross-check — `cost_ms` is per-case wall time, so both are the same contended measurement seen two ways.
+- It is a 10-core macOS laptop running 4 workers, not the contract's 4 vCPU Linux container. **The only figure that decides whether a config ships is `scripts/run_docker_submission.py` under the real limits, which has never been run.** That is the gap to close before trusting any of this.
+
+Withdrawn: *"wall-clock falls as restoration deepens."* That read 1280 → 927 → 608 down the struck-through column, and those three numbers do not support it. Per-case cost at `turn` and `bands` is still unmeasured on any sample worth quoting (the `bands` figure quoted elsewhere came from a 12-case dump). Deeper restoration adds OCR passes per page, so the prior should be that cost *rises* with depth until measured otherwise — which is the assumption P3 is planned against.
+
+---
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 15 | 2026-07-22 | (P0.5) | **Ship `skew` as the default** (`mib/config.py`, pinned in `Dockerfile`) + staged-pipeline instruments: provenance stamping, page-text cache, replay gate, characterization suite | **115.20** | 61.27 | 38.76 | 15.16 | 0 | contended | keep |
+
+Row 15 is +0.70 over row 11 and banks a result rows 11–14 had already measured: the shipped artifact was still `off`, so a container built before this row scored 114.50 while the log's headline was 116.88. Only the default moved. Every other change in this row is verified **byte-identical** to row 12: `scripts/replay.py` reproduces all 1,000 cached cases exactly, a full re-run reproduces `output/ab_skew/predictions.jsonl` exactly, and the `mib/config.py` extraction of the `MIB_RESTORE` lookup out of `mib/ocr.py` reproduces page text exactly on the most OCR-heavy scans. `turn`/`bands` remain reachable but unbanked: they cost 8–10× the runtime on an untrustworthy measurement, which is what P3 exists to fix.
+
+Wall is left as "contended" deliberately — the run took ~50 min against the cache build's 18 min for the same OCR work, on a host that was also running a game. Recording that as a number would repeat the mistake corrected above.
+
+What the instruments bought, all on dev at `skew` and all newly measurable:
+
+- **parse, not OCR, is the cheap lever.** 312 field-instances have their truth value in the text and are not emitted (2.21 extraction pts); 273 of those are `parse_miss` (1.90 pts) with three named causes — unparsed prose in the sponsor attestation, a missing `purpose` alias, and left-margin clipping defeating fuzzy key matching. None needs OCR. For comparison the entire `skew`→`bands` restoration ladder is worth +1.68.
+- **`fee_unknown` (7.89 class pts) is not an OCR problem**: its `fee_status` is visible in 0.0% of cases, 3.6% with OCR, and hidden-only in 41 — the fee is not in the document.
+- **`b13_census` (5.00 class pts) is not an evidence problem**: 89 of 95 cases have no B-13 anywhere, only 6 are detection misses, and the other fields read at 98.0%. It needs a split, not better reading.
+- **The ML ceiling over today's partition is +1.56**, against 17.17 behind a finer partition. Decision work stays last.
