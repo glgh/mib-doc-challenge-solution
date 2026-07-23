@@ -4,10 +4,10 @@ _Last updated: 2026-07-23. Rewrite this file in place when the algorithm changes
 
 The reference for **what the system actually does**, stage by stage, with the real
 constants. Sister docs answer the other questions: [STATUS.md](STATUS.md) — where we are and
-what we tried; [experiments.md](experiments.md) — one scored row per change; [scoring.md](scoring.md) — what the
-evaluator rewards; [fraud-signals.md](fraud-signals.md), [label-mining.md](label-mining.md), [damage-geometry.md](damage-geometry.md),
-[organizer-guidance.md](organizer-guidance.md) — the analyses behind specific constants. [CLAUDE.md](../CLAUDE.md) briefs a
-newcomer on the problem.
+what we tried; [experiments.md](experiments.md) — one scored row per change; [BACKGROUND.md](BACKGROUND.md) —
+the evidence behind the constants (organizer rulings, label mining, fraud-signal taxonomy, scan
+geometry, competitor intel); the challenge's own [EVALUATION.md](../../mib-doc-challenge/EVALUATION.md) —
+what the evaluator rewards. [CLAUDE.md](../CLAUDE.md) briefs a newcomer on the problem.
 
 Keep this honest against the code. When a constant or branch here disagrees with `mib/`, the
 code wins and this file is stale — fix it.
@@ -161,7 +161,7 @@ Deny rules require **positive** evidence: an *unknown* visa never arms a non-DIP
 DIP-1 packets whose visa failed to extract. `b13_census` distinguishing "flags: none" from "flags:
 unreadable" is the guard that removed the MIB-000672 false approval.
 
-Key constants (train-validated, see [label-mining.md](label-mining.md) / [fraud-signals.md](fraud-signals.md)):
+Key constants (train-validated, see [BACKGROUND.md](BACKGROUND.md) §2):
 - `STALE_CUTOFF = 2026-01-02` — midpoint of the empty 48-day band between the latest stale-denied
   and earliest fresh arrival (max-margin; no visible receipt date exists in the corpus).
 - Full-embargo `{TRAPPIST-1e, Eris Relay}` (also *implies* the `planetary_embargo` flag);

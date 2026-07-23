@@ -26,7 +26,7 @@ Lesson from row 8, for the memo: OCR quality on this corpus is bimodal — pages
 
 Worst fields at baseline: fee_status 44.3%, sponsor_id 49.4%, visa_class 51.4% (scan-only packets dominate misses). Confusion hotspots: 184 DENIED→NR, 142 APPROVED→NR (scan-only punts), 52 DENIED→APPROVED (CFAs).
 
-**Split note:** rows 11–14 are a single cumulative A/B of `MIB_RESTORE` (geometric scan restoration, see [damage-geometry.md](damage-geometry.md)). Row 11 re-baselines: `ocr_page` now selects candidates by `evidence_score` (labels *plus* well-formed values) instead of `recognized_keys`, and stops at `GOOD_ENOUGH` rather than on the first page with any label — worth +0.07 on its own, so rows 12–14 are attributable to geometry.
+**Split note:** rows 11–14 are a single cumulative A/B of `MIB_RESTORE` (geometric scan restoration, see [BACKGROUND.md](BACKGROUND.md) §4). Row 11 re-baselines: `ocr_page` now selects candidates by `evidence_score` (labels *plus* well-formed values) instead of `recognized_keys`, and stops at `GOOD_ENOUGH` rather than on the first page with any label — worth +0.07 on its own, so rows 12–14 are attributable to geometry.
 
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |

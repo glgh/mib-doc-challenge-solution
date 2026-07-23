@@ -3,9 +3,10 @@
 _Last updated: 2026-07-22 (late). Rewrite this file in place; do not append._
 
 The front page. [experiments.md](experiments.md) has one scored row per change,
-[JOURNAL.md](JOURNAL.md) has the chronological log, [PLAN.md](PLAN.md) has the roadmap, and
-[CLAUDE.md](../CLAUDE.md) briefs a newcomer on the problem. This file answers the two questions
-those don't: **what has been tried**, and **where are we right now**.
+[ALGORITHM.md](ALGORITHM.md) describes how the pipeline works, [BACKGROUND.md](BACKGROUND.md) holds
+the evidence behind the constants, and [CLAUDE.md](../CLAUDE.md) briefs a newcomer on the problem.
+This file answers the two questions those don't: **what has been tried**, and **where are we right
+now**.
 
 ---
 
@@ -212,8 +213,8 @@ places — unreadable flags now return `None`, and the risk-concealment census a
 line was *read*, not whether a slip was *detected*. Generally: **when extraction improves, re-check
 the branches whose job was to catch missing data.**
 
-**The two workstreams disagree about the CFA gate, and it is unreconciled.** `docs/PLAN.md`'s
-amendment says catastrophic false approvals are now *priced, not banned* — expected-points argmax
+**The two workstreams disagree about the CFA gate, and it is unreconciled.** The decision-layer
+position is that catastrophic false approvals are now *priced, not banned* — expected-points argmax
 already charges −4 for one, with `MIB_CFA_VETO` as a tunable demotion threshold. The extraction
 side has been treating CFA 0 as a hard gate and rejected changes on that basis. Both positions are
 defensible; the learned decider currently shows **5 CFAs** on a train-fit dev A/B. This needs a

@@ -46,7 +46,7 @@ from mib.stages import extract, render        # noqa: E402
 EXEMPLARS = [
     ("MIB-000089", 1, "turn3"),
     ("MIB-000037", 0, "turn1"),
-    ("MIB-000237", 1, "skew"),
+    ("MIB-000221", 0, "skew"),   # pure tilt (+4.5°); after reads clean, not shredded
     ("MIB-000045", 2, "bands"),
 ]
 
@@ -159,9 +159,90 @@ def restore(gray, damage):
         turned = imaging.turn(gray, int(damage[-1]))
         return imaging.rotate(turned, imaging.skew_angle(turned))
     if damage == "bands":
-        bands = imaging.realign_bands(gray)
-        return None if bands is None else imaging.rotate(bands, imaging.skew_angle(bands))
+        # Deskew first, then deshred — matches render._restorations.
+        angle = imaging.skew_angle(gray)
+        base = imaging.rotate(gray, angle) if abs(angle) >= imaging.MIN_SKEW else gray
+        return imaging.realign_bands(base)
     raise SystemExit(f"unknown damage class {damage!r}")
+
+
+# --- composition demonstration ---------------------------------------------
+#
+# The ladder applies rungs as *alternatives* — best single variant wins — and
+# its one combined rung (`restore(., "bands")`) deshreds and only then deskews.
+# That order is backwards: `realign_bands` reads the printed border's left edge
+# per row, and a skewed border drifts that signal continuously, so the bands are
+# measured against a moving reference. Deskewing first makes the border vertical,
+# and only then is the per-row left edge a clean read of each band's shift.
+#
+# The case that needs both is a text line the shredder cuts through its own
+# x-height: the glyph tops land in one band and the bottoms in the next, so a
+# rotation cannot rejoin them — only pulling the two bands back together can.
+# Real pages hide the ground truth, so this is shown as a controlled injury: a
+# clean, fully-read page is skewed and shredded with a known recipe, then walked
+# back one transform at a time. The point is the capability and the ordering,
+# not the size of the effect on any one training page.
+
+DEMO_STEM, DEMO_PAGE = "MIB-000189", 2
+DEMO_SKEW = -3.0                       # degrees of synthetic tilt
+DEMO_SEAMS = (111, 140, 177, 203, 236)  # row centers of five field lines
+DEMO_SHIFTS = (0, 55, -48, 52, -46, 50)  # px each band is slid; one per band
+
+
+def _shred(gray, seams, shifts):
+    """Cut into horizontal bands at `seams` and slide each by `shifts` px."""
+    out = gray.copy()
+    bounds = [0] + sorted(seams) + [gray.shape[0]]
+    for i in range(len(bounds) - 1):
+        if shifts[i]:
+            out[bounds[i]:bounds[i + 1]] = np.roll(
+                gray[bounds[i]:bounds[i + 1]], shifts[i], axis=1)
+    return out
+
+
+DEMO_FIELDS = ("species_code", "home_world", "visa_class", "sponsor_id",
+               "arrival_date")
+
+
+def _demo_step(gray, band_rows, label, note):
+    from mib import parse
+    lines, score = ocr(gray)
+    kv = parse.parse_kv(lines)
+    got = {f: kv.get(f, "") for f in DEMO_FIELDS}
+    crop = gray[max(0, band_rows[0]):band_rows[1], :]
+    return {
+        "label": label, "note": note, "score": score,
+        "plate": _uri(gray, PLATE_W),
+        "strip": _uri(crop, DETAIL_W, 74),
+        "fields": got,
+    }
+
+
+def build_demo():
+    _source, clean = source_gray(DEMO_STEM, DEMO_PAGE)
+    band = (80, 270)                          # the field block, for the zoom strip
+    shredded = _shred(clean, DEMO_SEAMS, DEMO_SHIFTS)
+    damaged = imaging.rotate(shredded, DEMO_SKEW)
+    detected = imaging.skew_angle(damaged)
+    deskewed = imaging.rotate(damaged, detected)
+    recovered = imaging.realign_bands(deskewed)
+    steps = [
+        _demo_step(clean, band, "Ground truth",
+                   "A page the pipeline already reads cleanly."),
+        _demo_step(damaged, band, "Skewed &amp; shredded",
+                   f"Tilted {DEMO_SKEW:+g}&deg;, then cut into six bands and slid "
+                   "sideways &mdash; a seam through each field line&rsquo;s "
+                   "x-height."),
+        _demo_step(deskewed, band, "Deskew only",
+                   f"Detected {detected:+.2f}&deg; and rotated flat. The lines are "
+                   "level again, but the bands are still offset &mdash; the sheared "
+                   "values stay broken."),
+        _demo_step(recovered if recovered is not None else deskewed, band,
+                   "Deskew &rarr; deshred",
+                   "With the border now vertical, its left edge per row reads each "
+                   "band&rsquo;s shift exactly, and the values snap back together."),
+    ]
+    return {"detected": detected, "target": DEMO_SKEW, "steps": steps}
 
 
 def build(stem, page_no, damage):
@@ -381,16 +462,82 @@ def census_section(c):
 </section>"""
 
 
-def report(plates, c):
+def _field_cell(field, value, truth):
+    got = value.strip().rstrip("}").strip()
+    ok = got == truth
+    state = "ok" if ok else ("part" if got else "miss")
+    shown = html.escape(got) if got else "&mdash;"
+    return (f'<tr class="{state}"><th>{field.replace("_", " ")}</th>'
+            f'<td>{shown}</td></tr>')
+
+
+DEMO_TRUTH = {
+    "species_code": "ARCTURIAN", "home_world": "Proxima-b", "visa_class": "MED-3",
+    "sponsor_id": "SPN-5145", "arrival_date": "2026-05-15",
+}
+
+
+def _demo_step_html(step, index):
+    rows = "".join(_field_cell(f, step["fields"][f], DEMO_TRUTH[f])
+                   for f in DEMO_FIELDS)
+    recovered = sum(1 for f in DEMO_FIELDS
+                    if step["fields"][f].strip().rstrip("}").strip() == DEMO_TRUTH[f])
+    return f"""
+  <figure class="step step-{index}">
+    <figcaption>
+      <span class="tag">{step['label']}</span>
+      <span class="score">evidence {step['score']}</span>
+    </figcaption>
+    <img class="plate-img" src="{step['plate']}" alt="{step['label']} full plate">
+    <img class="strip" src="{step['strip']}" alt="{step['label']} field block">
+    <p class="note">{step['note']}</p>
+    <table class="fields"><tbody>{rows}</tbody>
+      <tfoot><tr><th>recovered</th><td>{recovered}/{len(DEMO_FIELDS)} fields</td></tr></tfoot>
+    </table>
+  </figure>"""
+
+
+def demo_section(demo):
+    if not demo:
+        return ""
+    steps = "".join(_demo_step_html(s, i) for i, s in enumerate(demo["steps"]))
+    return f"""
+<section class="demo" id="compose">
+  <p class="eyebrow">Composing the ladder</p>
+  <h2>Deskew, then deshred</h2>
+  <p class="blurb prose">The rungs run as alternatives &mdash; the best single
+  variant of a page wins &mdash; so a page that needs <em>two</em> transforms is
+  only half-repaired. The case that needs both is a line the shredder cuts
+  through its own x-height: rotating levels the line but cannot pull its halves
+  back together. Shown as a controlled injury, because a real page hides the
+  ground truth &mdash; a clean page skewed {abs(demo['target']):g}&deg; and cut
+  into six offset bands, walked back one transform at a time. Deskew detected the
+  tilt to {demo['detected']:+.2f}&deg;; only deshred rejoins the values.</p>
+  <div class="steps">{steps}</div>
+  <p class="colophon prose"><b>Why the order.</b> Deshred keys off the printed
+  border&rsquo;s left edge, read per row. A skewed border drifts that reading
+  continuously, so bands measured before deskewing are pulled against a moving
+  reference. The <code>bands</code> rung now deskews first and deshreds second,
+  so the border is vertical and the shift-per-row read exact before any band is
+  moved. The older deshred-first order is dropped: where it happened to read
+  better, the page&rsquo;s plain deskew variant already covers it, and the
+  evidence-max selector keeps that reading.</p>
+</section>"""
+
+
+def report(plates, c, demo=None):
     # Straight substitution rather than str.format: the template carries a
     # stylesheet, and every CSS block would have to be brace-escaped.
     slots = {
         "{{plates}}": "\n".join(plate_section(d, i) for i, d in enumerate(plates)),
         "{{census}}": census_section(c),
+        "{{demo}}": demo_section(demo),
         "{{toc}}": "\n".join(
-            f'<li><a href="#plate-{i}"><span>{CLASS_COPY[d["damage"]][0]}</span>'
-            f'<b>{d["before"]["score"]} &rarr; {d["after"]["score"]}</b></a></li>'
-            for i, d in enumerate(plates)),
+            [f'<li><a href="#plate-{i}"><span>{CLASS_COPY[d["damage"]][0]}</span>'
+             f'<b>{d["before"]["score"]} &rarr; {d["after"]["score"]}</b></a></li>'
+             for i, d in enumerate(plates)]
+            + ([f'<li><a href="#compose"><span>Deskew &rarr; deshred</span>'
+                f'<b>compose</b></a></li>'] if demo else [])),
     }
     text = TEMPLATE
     for slot, value in slots.items():
@@ -544,10 +691,44 @@ b, strong { font-weight: 600; }
   font-size: 0.85rem; color: var(--ink-2); }
 .colophon code { font-family: var(--mono); font-size: 0.8rem; background: var(--sunk);
   padding: 0.1rem 0.3rem; }
+.demo .colophon { margin-top: 2rem; }
 
+/* composition demo: four-step walkback */
+.demo { border-top: 1px solid var(--rule); padding-top: 2.5rem; margin-top: 3.5rem;
+  scroll-margin-top: 1rem; }
+.steps { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule);
+  grid-template-columns: repeat(4, 1fr); margin-top: 1.75rem; }
+.step { background: var(--surface); margin: 0; padding: 0.85rem; display: flex;
+  flex-direction: column; gap: 0.6rem; min-width: 0; }
+.step figcaption { display: flex; flex-direction: column; gap: 0.25rem; }
+.step .plate-img { width: 100%; height: auto; display: block; background: #fff;
+  border: 1px solid var(--rule); }
+.step .strip { width: 100%; height: auto; display: block; background: #fff;
+  border: 1px solid var(--rule); image-rendering: crisp-edges; }
+.step .note { font-size: 0.78rem; color: var(--ink-2); margin: 0; }
+/* the walkback reads left(worst) -> right(best): tint the endpoints */
+.step-1 { box-shadow: inset 3px 0 0 var(--damaged); }
+.step-3 { box-shadow: inset 3px 0 0 var(--restored); }
+.step-1 .score { color: var(--damaged); }
+.step-3 .score { color: var(--restored); }
+
+.fields { width: 100%; border-collapse: collapse; font-family: var(--mono);
+  font-size: 0.68rem; margin-top: auto; }
+.fields th { text-align: left; font-weight: 400; color: var(--ink-3);
+  padding: 0.15rem 0.3rem; white-space: nowrap; }
+.fields td { text-align: right; padding: 0.15rem 0.3rem;
+  font-variant-numeric: tabular-nums; }
+.fields tr.ok td { color: var(--restored); }
+.fields tr.miss td { color: var(--damaged); }
+.fields tr.part td { color: var(--ink-2); }
+.fields tfoot th, .fields tfoot td { border-top: 1px solid var(--rule);
+  color: var(--ink); padding-top: 0.3rem; }
+
+@media (max-width: 60rem) { .steps { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 46rem) {
   .two-up { grid-template-columns: 1fr; }
   .facts { grid-template-columns: repeat(2, minmax(6rem, 1fr)); }
+  .steps { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -582,13 +763,16 @@ TEMPLATE = """<title>Repairing the plate before OCR</title>
     <p>Try 90&deg; and 270&deg;, deskewing each. 180&deg; is never tried &mdash;
     it did not win on a single surveyed page.</p>
     <span class="gate">if evidence = 0</span></div>
-  <div class="rung"><h3>Realign bands</h3>
-    <p>Read the printed border&rsquo;s left edge per row and slide each shredded
-    band back onto the page&rsquo;s common margin.</p>
+  <div class="rung"><h3>Deskew &rarr; deshred</h3>
+    <p>On the deskewed page, read the printed border&rsquo;s left edge per row and
+    slide each shredded band back onto the common margin &mdash; deskew first, so
+    the border is vertical and the per-row shift reads true.</p>
     <span class="gate">if evidence &lt; 4</span></div>
 </div>
 
 <ul class="toc">{{toc}}</ul>
+
+{{demo}}
 
 {{plates}}
 
@@ -614,12 +798,14 @@ TEMPLATE = """<title>Repairing the plate before OCR</title>
 
 
 def main(out_path, specs):
+    print("  composition demo", file=sys.stderr)
+    demo = build_demo()
     plates = []
     for spec in specs:
         stem, page_no, damage = spec.split(":")
         print(f"  {stem} p{page_no} {damage}", file=sys.stderr)
         plates.append(build(stem, int(page_no), damage))
-    text = report(plates, census(CENSUS_PATH))
+    text = report(plates, census(CENSUS_PATH), demo)
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     Path(out_path).write_text(text)
     print(f"{out_path}  {len(text) / 1024:.0f} KB", file=sys.stderr)

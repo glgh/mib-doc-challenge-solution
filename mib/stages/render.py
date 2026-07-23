@@ -8,7 +8,10 @@ embedded image is small or yields nothing are re-rendered at ~200 DPI.
 
 Pages that still read badly are usually damaged *geometrically* rather than
 optically (turned, skewed, or shredded into offset bands), so weak pages are
-retried through mib.imaging restorations rather than at higher resolution.
+retried through mib.imaging restorations rather than at higher resolution. The
+transforms compose in the order they undo real damage: the `bands` rung deskews
+first and then deshreds, because band detection reads the page border and a
+skewed border is a moving reference (see `_restorations`).
 
 Restoration level is off | skew | turn | bands (cumulative), owned by
 mib.config.restore_level and set by MIB_RESTORE. `skew` is the shipped default:
@@ -95,9 +98,18 @@ def _restorations(gray, best_score):
             turned = imaging.turn(gray, quarter)
             yield f"turn{quarter}", imaging.rotate(turned, imaging.skew_angle(turned))
     if _at_least("bands") and best_score() < WEAK:
-        bands = imaging.realign_bands(gray)
-        if bands is not None:
-            yield "bands", imaging.rotate(bands, imaging.skew_angle(bands))
+        # Deskew first, then deshred. `realign_bands` reads the printed border's
+        # left edge per row; on a skewed page that border is diagonal, so the
+        # per-row offset drifts continuously and the bands are measured against a
+        # moving reference. Deskewing first makes the border vertical, so the
+        # per-row left edge is a clean read of each band's true shift — and the
+        # deskewed base needs no further rotation. Reuses `upright` from the skew
+        # rung above; when the page wasn't meaningfully tilted (`upright is
+        # None`), deshredding `gray` directly is correct.
+        base = upright if upright is not None else gray
+        deshredded = imaging.realign_bands(base)
+        if deshredded is not None:
+            yield "deshred", deshredded
 
 
 def _sources(doc, page, tmp):
