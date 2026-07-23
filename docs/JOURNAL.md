@@ -83,3 +83,18 @@ Full analysis in [rethink-2026-07-22.md](rethink-2026-07-22.md). Headlines:
   and a documented cap (competitor at 129.2 carries 5 CFAs).
 - Roadmap v2: R1 OCR ensemble → R2 parse/flag hygiene → R3 policy re-mine → R4 cost-sensitive
   residual adjudicator (trigger now clearly met) → R5 calibration/holdout/Docker/package.
+
+## 2026-07-22 (later still) — Scan damage is geometric: dev 114.43 → 116.88, CFA still 0
+
+Full survey in [damage-geometry.md](damage-geometry.md); experiments rows 11–14. Prompted by reading two packets by hand (MIB-000030, MIB-000131) and noticing pages that were turned sideways or sliced into offset horizontal strips.
+
+- **Root cause found.** Row 8's "synthetically destroyed" and rethink's "PSM-mode problem" were both aiming at the wrong axis. The unreadable pages are *geometrically transformed*: quarter turns (90/270 — **180° never occurs**), several degrees of skew, and horizontal bands slid sideways. Undo the transform and the existing 200-DPI PSM 11 pass reads them fine. Resolution could never have helped; nothing was lost.
+- **Sizing:** 36% of scan pages read zero field labels upright; 10% are rescued by rotation alone; **15.5% of cases carry a turned page contributing nothing**, and those cases extract at 52% vs 75% corpus-wide. Turned pages hurt disproportionately because the intake form — 6 of 9 scored fields — is as likely to be turned as anything else.
+- **Result:** dev 116.88 (+2.38 over the re-baselined 114.50), extraction 38.53 → 39.62, 0 CFA, Brier 0.1243 → 0.1176. MIB-000030 extraction 8/45 → 36/45; MIB-000131 4/45 → 27/45.
+- **Selector flaw fixed en route:** `recognized_keys` underrates restored pages, because the shredder clips the left margin and a rescued line often reads `mnsor ID: SPN-5809` — label gone, scoring value intact. `evidence_score` now counts well-formed values too.
+- **Detection notes:** Tesseract OSD is unusable here (too sparse — "Too few characters" on 2 of 3 test pages). Ink run-length anisotropy gets 86% (91% at margin ≥0.05), but is used only to *order* candidates, never to decide — with 6x budget headroom, a wrong decision discards a page's text while a wrong ordering costs one pass. Best untapped signal is the printed page border: constant width, so its edges give skew precisely and its per-row left edge *is* the band offset.
+- **Build bugs found and fixed** (unrelated, latent): the Dockerfile installed no tesseract **and** never copied `mib/` — the container would have died on import. Added both, plus `TMPDIR=/tmp`, `OMP_THREAD_LIMIT=1` (tesseract's OpenMP threads fight `Pool(4)`), and a `.dockerignore`.
+
+**Shipped flag-gated, default `off`** — the gain is real but the flow is still repair-after-failure (OCR → fail → repair → re-OCR), which is why `skew` costs 4x baseline wall-clock.
+
+**Next:** detect-then-repair rework (measure geometry in ~5 ms, OCR once) and gate the now-redundant 200-DPI re-render; then promote the default and read holdout. After that: cross-page voting for exact-match names, and treating cross-page field disagreement as `identity_conflict` evidence rather than discarding it.

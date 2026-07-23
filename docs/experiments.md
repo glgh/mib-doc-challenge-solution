@@ -25,3 +25,16 @@ Row 5 clears the full interview bar: ≥105 total ✓, ≥55 classification ✓,
 Lesson from row 8, for the memo: OCR quality on this corpus is bimodal — pages either read fine at 200 DPI or are synthetically destroyed; spending compute between those modes buys almost nothing.
 
 Worst fields at baseline: fee_status 44.3%, sponsor_id 49.4%, visa_class 51.4% (scan-only packets dominate misses). Confusion hotspots: 184 DENIED→NR, 142 APPROVED→NR (scan-only punts), 52 DENIED→APPROVED (CFAs).
+
+**Split note:** rows 11–14 are a single cumulative A/B of `MIB_RESTORE` (geometric scan restoration, see [damage-geometry.md](damage-geometry.md)). Row 11 re-baselines: `ocr_page` now selects candidates by `evidence_score` (labels *plus* well-formed values) instead of `recognized_keys`, and stops at `GOOD_ENOUGH` rather than on the first page with any label — worth +0.07 on its own, so rows 12–14 are attributable to geometry. Wall figures are laptop seconds with other work running alongside; Docker-limits parity run still owed.
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 11 | 2026-07-22 | (step6) | `MIB_RESTORE=off` — value-aware candidate selection, no geometry; re-baseline | 114.50 | 60.94 | 38.53 | 15.03 | 0 | 295s | baseline(dev) |
+| 12 | 2026-07-22 | (step6) | `=skew` — projection-profile deskew (±8°, 0.25° steps) on weak pages | 115.20 | 61.27 | 38.76 | 15.16 | 0 | 1280s | keep |
+| 13 | 2026-07-22 | (step6) | `=turn` — + 90°/270° quarter turns on pages reading zero evidence (180° never wins) | 116.59 | 61.79 | 39.58 | 15.22 | 0 | 927s | keep |
+| 14 | 2026-07-22 | (step6) | `=bands` — + shredder band realignment keyed off the constant-width page border | **116.88** | 61.97 | 39.62 | **15.30** | 0 | 608s | keep — **flag-gated, default `off` pending detect-first rework** |
+
+Row 14 is +2.38 over row 11 (+2.45 over row 10's 114.43) with CFA still 0, and Brier 0.1243 → 0.1176. Wall-clock *falls* as restoration deepens because rescued pages trip the `GOOD_ENOUGH` early exit and skip the 200-DPI re-render.
+
+Lesson superseding row 8: the pages that failed OCR were not low-resolution, they were turned, skewed, and shredded. Row 8 spent 43x runtime on the resolution axis and bought +0.21; ~5 ms of numpy on the geometry axis buys +2.38. **Diagnose the transform before scaling the compute.**

@@ -1,0 +1,8 @@
+.venv/
+.git/
+__pycache__/
+*.pyc
+output/
+docs/
+scripts/
+data_splits.json
