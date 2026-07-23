@@ -53,15 +53,32 @@ def test_validate_survives_garbage():
     assert junk["confidence"] == 0.5
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "P2: emit.validate clamps every field except case_id — emit.CASE_ID_RE is "
-    "defined at mib/emit.py:11 and never used, so a bad filename stem reaches "
-    "the evaluator, which hard-fails on it."))
 def test_validate_repairs_case_id():
-    assert CASE_ID_RE.match(emit.validate({
-        "case_id": "not-a-case-id", "adjudication": "DENIED", "fee_status": "paid",
-        "arrival_date": "2026-01-01", "confidence": 0.5,
-    })["case_id"])
+    """A malformed id costs twice — an extra case *and* a missing one — and the
+    evaluator rejects the submission outright, so it is coerced, never passed on."""
+    def repaired(case_id, fallback=None):
+        return emit.validate({
+            "case_id": case_id, "adjudication": "DENIED", "fee_status": "paid",
+            "arrival_date": "2026-01-01", "confidence": 0.5,
+        }, fallback_case_id=fallback)["case_id"]
+
+    # Recovered from debris in the value itself, then from the filename stem.
+    assert repaired("Case MIB-000123 (cont.)") == "MIB-000123"
+    assert repaired("not-a-case-id", "MIB-000456") == "MIB-000456"
+    # Last resort is still schema-valid: an id matching no real case scores
+    # nothing, where a malformed one is a fatal error for the whole run.
+    assert CASE_ID_RE.match(repaired("not-a-case-id"))
+    assert CASE_ID_RE.match(repaired(None))
+
+
+def test_a_failed_case_still_emits_a_scoreable_row():
+    """Dropping a case forfeits its extraction points and takes the missing-case
+    penalty; a NEEDS_REVIEW row cannot score worse than that."""
+    r = emit.fallback_record("MIB-000999")
+    assert r["case_id"] == "MIB-000999"
+    assert r["adjudication"] == "NEEDS_REVIEW"
+    assert len(r) == 12
+    assert 0.0 <= r["confidence"] <= 1.0
 
 
 # --- injection safety --------------------------------------------------------

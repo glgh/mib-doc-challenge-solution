@@ -11,12 +11,29 @@ a stored page-text cache in seconds, so a parse or policy change is measurable
 without paying for OCR again.
 """
 import os
+import sys
+import time
 
 from . import confidence, emit, packet, policy, signals
 from .stages import extract, render
 
+# Per-case OCR budget: a bound on the pathological case, not a tuning knob.
+# Exceeding it drops to the text layer for the remaining pages rather than
+# abandoning the case, because a partial read still scores.
+#
+# Deliberately set above the worst case ever measured (p50 1.6s / p90 9.8s /
+# p99 57.5s / max 107s over 1,000 train packets) so that in normal operation it
+# never fires and output stays reproducible. It is a wall-clock guard, so a
+# value low enough to bite would make results depend on machine load — a 45s
+# trial truncated a real case (MIB-000008) purely because the host was busy.
+# What it actually bounds is the unbounded shape underneath: tesseract is capped
+# at 20s per call, but a many-page scan tried at several variants each has no
+# ceiling, and the contract stops the container at a fixed wall time and scores
+# whatever was written. Retune only against the Docker parity run.
+CASE_OCR_BUDGET_S = float(os.environ.get("MIB_CASE_BUDGET_S", "120"))
 
-def read_case(pdf_path):
+
+def read_case(pdf_path, budget_s=None):
     """S1 + S2 for one PDF -> (pages, reads_by_page).
 
     The document is opened once and held across both stages: rendering a scanned
@@ -24,13 +41,20 @@ def read_case(pdf_path):
     lets `extract` avoid reaching forward into `render`, which is the backwards
     edge the previous `pdfio.read_pages` had.
     """
+    budget = CASE_OCR_BUDGET_S if budget_s is None else budget_s
     reads = {}
+    deadline = time.monotonic() + budget if budget else None
     with extract.open_document(pdf_path) as doc:
         pages = extract.pages(doc)
         for page in pages:
-            if page.is_scan_only:
-                reads[page.page_no] = render.reads_for(doc, doc[page.page_no],
-                                                       page.page_no)
+            if not page.is_scan_only:
+                continue
+            if deadline and time.monotonic() > deadline:
+                print(f"{pdf_path.name}: OCR budget spent, text layer only for "
+                      f"page {page.page_no}+", file=sys.stderr)
+                break
+            reads[page.page_no] = render.reads_for(doc, doc[page.page_no],
+                                                   page.page_no)
     return pages, reads
 
 
