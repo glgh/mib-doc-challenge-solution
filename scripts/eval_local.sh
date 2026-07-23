@@ -11,7 +11,8 @@ OUT="$ROOT/output/eval"
 mkdir -p "$OUT"
 
 START=$(date +%s)
-"$ROOT/.venv/bin/python" "$ROOT/solution.py" "$CH/data/train" "$OUT/predictions.jsonl"
+MIB_DEBUG_JSONL="$OUT/debug.jsonl" \
+  "$ROOT/.venv/bin/python" "$ROOT/solution.py" "$CH/data/train" "$OUT/predictions.jsonl"
 END=$(date +%s)
 echo "pipeline wall-clock: $((END - START))s for $(wc -l < "$OUT/predictions.jsonl" | tr -d ' ') predictions"
 echo

@@ -1,9 +1,13 @@
-"""Branch → confidence. Hand-set placeholders pending Step 3 (empirical
-per-branch accuracy on frozen train splits). Low values on branches whose
-train accuracy is known-poor (census/waived retreats are usually 2-point
-outcomes, not correct labels)."""
+"""Branch → confidence.
 
-BRANCH_CONFIDENCE = {
+Primary source: mib/confidence_table.json, fitted by scripts/fit_confidence.py
+from dev-split empirical accuracy (Laplace-shrunk, clamped — see that script).
+The hand-set table below is the fallback when no fitted table exists.
+"""
+import json
+from pathlib import Path
+
+FALLBACK = {
     "adjudicator_finding": 0.9,
     "disqualifying_flag": 0.85,
     "embargo_world": 0.9,
@@ -22,6 +26,11 @@ BRANCH_CONFIDENCE = {
     "clean_approve": 0.8,
 }
 
+_table_path = Path(__file__).parent / "confidence_table.json"
+_FITTED = json.loads(_table_path.read_text()) if _table_path.exists() else {}
+
 
 def for_branch(branch):
-    return BRANCH_CONFIDENCE.get(branch, 0.5)
+    if branch in _FITTED:
+        return _FITTED[branch]
+    return FALLBACK.get(branch, 0.5)

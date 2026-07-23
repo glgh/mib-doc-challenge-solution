@@ -10,10 +10,11 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from . import parse
 from .vocab import clean_ocr_line
 
 MIN_EMBEDDED_WIDTH = 1000
-RENDER_ZOOM = 2.8  # ~200 DPI
+RENDER_ZOOM = 2.8       # ~200 DPI
 
 
 def _tesseract(image_path):
@@ -27,20 +28,43 @@ def _tesseract(image_path):
         return []
 
 
+def recognized_keys(lines):
+    """How many lines carry a recognizable field label (via parse._key_for)."""
+    count = 0
+    for line in lines:
+        head = line.split(":")[0].split(".")[0].split(";")[0]
+        if parse._key_for(head):
+            count += 1
+    return count
+
+
 def ocr_page(doc, page):
-    """OCR one page: embedded raster fast path, render fallback."""
+    """OCR one page: embedded raster fast path, render fallback, and an
+    enhanced retry (300 DPI + grayscale/autocontrast) when the first pass
+    yields no recognizable field labels — stamp overlays (COPY/ARCHIVE) and
+    degraded scans defeat the plain pass on exactly the pages that matter
+    (fee receipts, B-13 flag lines, adjudicator notes)."""
     with tempfile.TemporaryDirectory(prefix="mibocr") as tmp:
+        candidates = []
         images = page.get_images()
         if images:
             img = doc.extract_image(images[0][0])
             if img["width"] >= MIN_EMBEDDED_WIDTH:
                 path = Path(tmp) / f"emb.{img['ext']}"
                 path.write_bytes(img["image"])
-                lines = _tesseract(path)
-                if len(lines) >= 4:
-                    return lines
+                embedded = _tesseract(path)
+                if recognized_keys(embedded) > 0:
+                    return embedded
+                candidates.append(embedded)
         import fitz
         pix = page.get_pixmap(matrix=fitz.Matrix(RENDER_ZOOM, RENDER_ZOOM))
         path = Path(tmp) / "render.png"
         pix.save(path)
-        return _tesseract(path)
+        rendered = _tesseract(path)
+        candidates.append(rendered)
+        # A 300-DPI grayscale/autocontrast retry pass was tried here and
+        # reverted: +0.21 dev pts for 43x runtime (experiments.md row 8) —
+        # destroyed scans stay destroyed.
+        return max(candidates, key=recognized_keys)
+
+
