@@ -159,3 +159,24 @@ on identical features — 66 dims incl. 16-branch one-hot + rules-decision one-h
 
 **Next:** Docker contract parity run (in progress), validation fallback artifact, then
 Phase 1 (`mib/features.py` + `mib/decision.py`, logistic weights in npz, `MIB_DECIDER`).
+
+## 2026-07-22 (night, cont.) — Phase 1 landed: learned decider wired behind MIB_DECIDER
+
+- `mib/features.py`: featurize moved out of the bake-off script — single source of truth
+  consuming the exact (record, debug) pair the pipeline emits, so trainer and runtime cannot
+  drift. `mib/decision.py`: numpy-only forward pass replicating
+  CalibratedClassifierCV(scaler+logistic, cv=3, sigmoid) + EV-argmax + correctness-calibrated
+  confidence + `MIB_CFA_VETO` knob (default 1.0 = pure EV). `scripts/export_decision.py`
+  trains on dev(700) and refuses to export unless the numpy pass matches sklearn
+  (achieved 3e-16); model is 22 KiB, feature-order check refuses stale models at load.
+- Wiring at the S5 seam in `mib/runner.py` (the refactor's intended swap point): the learned
+  decider always runs into the sidecar (mlp_decision/confidence/probs on every eval — permanent
+  A/B); `MIB_DECIDER=mlp` promotes it into the record; any failure falls back to rules.
+- Same-code A/B on the skew cache replay, dev: rules 61.27 class / .1210 Brier / 0 CFA vs
+  mlp 65.16 / .1066 / 5 CFA, extraction byte-identical (0 non-decision field diffs).
+  **The mlp figures are train-fit biased** (model trained on these 700); the honest OOF
+  estimate stays 62.43 class (+1.16). Holdout untouched.
+- Debugging note: a phantom "extraction changed under mlp" turned out to be the parallel
+  session's in-flight packet.py edit landing between my two replays — caught by diffing
+  non-decision fields, currently −0.08 extraction on their WIP (junk values no longer
+  normalized to 'unknown': 'unknown' → '[REGISTRY LOST]' etc. on 39 fields).

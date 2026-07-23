@@ -13,8 +13,8 @@ Ablations: MLP with/without rules-branch features; multinomial logistic sanity.
 """
 import csv
 import json
+import sys
 from collections import Counter, defaultdict
-from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -25,21 +25,12 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 CH = ROOT.parent / "mib-doc-challenge"
 
+from mib.features import featurize  # noqa: E402  (single source of truth)
+
 CLASSES = ["APPROVED", "DENIED", "NEEDS_REVIEW"]
-VISAS = ["XW-1", "XW-2", "DIP-1", "MED-3", "TRANSIT-7"]
-FEES = ["paid", "waived", "unpaid", "unknown"]
-FLAGS = ["memory_tampering", "planetary_embargo", "active_warrant", "biohazard_red",
-         "identity_conflict", "sponsor_mismatch", "illegible_biometrics", "rescinded_denial"]
-BRANCHES = ["adjudicator_finding", "disqualifying_flag", "embargo_world",
-            "embargo_world_partial", "revoked_sponsor", "transit_visa", "fee_unpaid",
-            "fee_unknown", "stale_arrival", "waived_non_dip", "missing_arrival",
-            "review_flag", "missing_sponsor", "missing_visa", "b13_census", "clean_approve"]
-REVOKED = {"SPN-0007", "SPN-0139", "SPN-4040", "SPN-2718", "SPN-7331", "SPN-9090"}
-FULL_EMBARGO = {"TRAPPIST-1e", "Eris Relay"}
-PARTIAL_EMBARGO = {"Wolf-1061c"}
-STALE_CUTOFF = date(2026, 1, 2)
 
 PAYOFF = {}  # (truth, pred) -> raw points
 for t in CLASSES:
@@ -65,67 +56,6 @@ def expected_points_decision(probs):
         "NEEDS_REVIEW": 8 * pn + 2 * pa + 2 * pd,
     }
     return max(ev, key=ev.get), ev
-
-
-def staleness_days(arrival):
-    try:
-        y, m, d = map(int, arrival.split("-"))
-        return max(-365, min(365, (STALE_CUTOFF - date(y, m, d)).days)) / 365.0
-    except (ValueError, AttributeError):
-        return 0.0
-
-
-def featurize(pred, dbg, with_branch=True):
-    f = {}
-    visa = pred["visa_class"]
-    for v in VISAS:
-        f[f"visa={v}"] = visa == v
-    f["visa=unknown"] = visa not in VISAS
-    fee = pred["fee_status"]
-    for v in FEES:
-        f[f"fee={v}"] = fee == v
-    sponsor = pred["sponsor_id"]
-    f["sponsor_present"] = sponsor != "SPN-0000"
-    f["sponsor_revoked"] = sponsor in REVOKED
-    f["dip_no_sponsor"] = (visa == "DIP-1") and sponsor == "SPN-0000"
-    arrival = pred["arrival_date"]
-    f["arrival_present"] = arrival != "1900-01-01"
-    f["staleness"] = staleness_days(arrival) if f["arrival_present"] else 0.0
-    flags = set(dbg["flags"])
-    for fl in FLAGS:
-        f[f"flag={fl}"] = fl in flags
-    f["n_flags"] = len(flags)
-    reg = dbg.get("registry_status", "")
-    f["registry=CLEAR"] = reg == "CLEAR"
-    f["registry=FLAGGED"] = bool(reg) and reg != "CLEAR"
-    f["registry=absent"] = not reg
-    finding = dbg.get("finding")
-    for c in CLASSES:
-        f[f"finding={c}"] = finding == c
-    f["finding=none"] = finding is None
-    docs = set(dbg["doc_types"])
-    for dt, name in [(1, "adjudicator"), (2, "intake"), (3, "biometric"),
-                     (4, "sponsor"), (5, "registry"), (6, "fee")]:
-        f[f"has_{name}"] = dt in docs
-    f["n_pages"] = dbg.get("n_pages", 0)
-    f["n_scan_pages"] = dbg.get("scan_only_pages", 0)
-    f["hidden_present"] = dbg.get("hidden_lines", 0) > 0
-    f["n_fields_missing"] = dbg.get("n_fields_missing", 0)
-    f["n_corrections"] = dbg.get("n_corrections", 0)
-    f["waiver_present"] = bool(dbg.get("waiver_code"))
-    world = pred["home_world"]
-    f["embargo_world"] = world in FULL_EMBARGO
-    f["partial_embargo_world"] = world in PARTIAL_EMBARGO
-    prov = dbg.get("provenance", {})
-    srcs = [v[1] for v in prov.values()]
-    f["n_ocr_fields"] = sum(srcs)
-    f["worst_doc_rank"] = max((v[0] for v in prov.values()), default=9)
-    if with_branch:
-        for b in BRANCHES:
-            f[f"branch={b}"] = dbg["branch"] == b
-        for c in CLASSES:
-            f[f"rules={c}"] = dbg.get("rules_decision", pred["adjudication"]) == c
-    return f
 
 
 def score_decisions(decisions, confs, truths):
@@ -272,6 +202,4 @@ def main(eval_dir=ROOT / "output/eval"):
 
 
 if __name__ == "__main__":
-    import sys
-    sys.path.insert(0, str(ROOT))
     main(*sys.argv[1:2])

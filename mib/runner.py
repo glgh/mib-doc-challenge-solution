@@ -10,6 +10,8 @@ That split is the whole point: `scripts/replay.py` re-runs the second half over
 a stored page-text cache in seconds, so a parse or policy change is measurable
 without paying for OCR again.
 """
+import os
+
 from . import confidence, emit, packet, policy, signals
 from .stages import extract, render
 
@@ -70,4 +72,20 @@ def predict_from_evidence(pages, reads, stem):
         "n_corrections": len(packet.manual_corrections(pkt)),
         "rules_decision": decision,
     }
+    # S5 decider swap: the learned decider always runs for the sidecar (permanent
+    # A/B on every eval); MIB_DECIDER=mlp promotes its outputs into the record.
+    # Failure falls back to the rules record — a missing/stale model file must
+    # degrade the score, never crash a case.
+    decider = os.environ.get("MIB_DECIDER", "rules").lower()
+    debug["decider"] = decider
+    try:
+        from . import decision as learned
+        mlp_dec, mlp_conf, mlp_probs = learned.decide(record, debug)
+        debug["mlp_decision"], debug["mlp_confidence"], debug["mlp_probs"] = \
+            mlp_dec, mlp_conf, mlp_probs
+        if decider == "mlp":
+            record = emit.build_record(pkt.case_id, values, sig["flags"],
+                                       mlp_dec, mlp_conf)
+    except Exception as exc:  # noqa: BLE001
+        debug["mlp_error"] = str(exc)
     return record, debug
