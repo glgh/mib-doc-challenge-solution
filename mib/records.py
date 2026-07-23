@@ -76,8 +76,14 @@ class Read:
 class Candidate:
     """One value for one field, with everything needed to prefer another.
 
-    `raw_value` is what the document actually said before vocabulary repair;
-    keeping both is what lets a later stage tell a clean read from a rescued one.
+    `raw_value` is what the document actually said before whitespace and
+    vocabulary repair; keeping both is what lets a later stage tell a clean read
+    from a rescued one.
+
+    `valid` is schema conformance (does this look like a sponsor id at all),
+    which is a different question from `quality` (how well did we read the page
+    it came from). Today only `valid` is consulted; separating them is what makes
+    "prefer the clean text-layer copy over the OCR'd one" expressible later.
     """
     field_name: str = ""
     value: str = ""
@@ -85,4 +91,5 @@ class Candidate:
     doc_type: int = 0
     source: int = 0
     page_no: int = 0
+    valid: bool = False
     quality: float = 0.0

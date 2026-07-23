@@ -2088,14 +2088,14 @@
    "expected_branch": "transit_visa",
    "expected_record": {
     "adjudication": "DENIED",
-    "applicant_name": "Tekzam Mirarix",
+    "applicant_name": "Tekzarn Mirarix",
     "arrival_date": "2026-04-11",
     "case_id": "MIB-000241",
     "confidence": 0.95,
     "declared_purpose": "reactor maintenance",
     "fee_status": "unknown",
     "home_world": "Proxima-b",
-    "risk_flags": "identity_conflict|sponsor_mismatch",
+    "risk_flags": "identity_conflict",
     "species_code": "SIRIUS_AVIAN",
     "sponsor_id": "SPN-3165",
     "visa_class": "TRANSIT-7"
@@ -2647,7 +2647,7 @@
    "expected_branch": "review_flag",
    "expected_record": {
     "adjudication": "NEEDS_REVIEW",
-    "applicant_name": "Qorvoss Sollesh",
+    "applicant_name": "Qorul Arikesh",
     "arrival_date": "2026-03-06",
     "case_id": "MIB-000303",
     "confidence": 0.645,

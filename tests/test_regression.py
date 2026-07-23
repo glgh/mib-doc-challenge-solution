@@ -57,13 +57,21 @@ def test_snapping_does_not_corrupt_in_vocabulary_values():
     assert vocab.snap("declared_purpose", "an unseen purpose") == "an unseen purpose"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "mib/vocab.py's docstring promises 'values far from any known term pass "
-    "through unchanged, so unseen private-set values survive' — true only for "
-    "declared_purpose, which has an `or v` fallback. home_world and species_code "
-    "return None, and mib/packet.py:53-55 then DELETES the field. Invisible on "
-    "train (every value is in-vocabulary by construction) but drops weight-5 and "
-    "weight-6 fields on any private case with an unseen value on an OCR'd page."))
-def test_unseen_vocabulary_values_survive_on_scanned_pages():
-    assert vocab.snap("home_world", "Antares Reach IV") == "Antares Reach IV"
-    assert vocab.snap("species_code", "ZZ_UNSEEN_SPECIES") == "ZZ_UNSEEN_SPECIES"
+def test_unrepairable_values_are_dropped_not_passed_through():
+    """Deleting a value snapping cannot vouch for is deliberate, not an oversight.
+
+    It reads like a bug: the module docstring promises unseen values pass through,
+    and only declared_purpose actually does. It was measured as a fix and was not
+    one — passthrough cost 0.08 dev points, because deletion was acting as a
+    quality filter that let a cleaner copy on another document supply the value
+    (0.04 even after per-field source preference landed).
+
+    The intended upside was unseen private-set values surviving, and that upside
+    does not exist: 1,000 train cases yield exactly 13 home worlds and 12 species,
+    and mib/vocab.py's lists are those enumerations. A fourteenth world would be
+    expected ~77 times in a sample that size, so the universe is closed.
+    """
+    assert vocab.snap("home_world", "Antares Reach IV") is None
+    assert vocab.snap("species_code", "ZZ_UNSEEN_SPECIES") is None
+    # declared_purpose keeps its passthrough: it is free text, not an enumeration.
+    assert vocab.snap("declared_purpose", "an unseen purpose") == "an unseen purpose"

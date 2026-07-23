@@ -66,4 +66,22 @@ What the instruments bought, all on dev at `skew` and all newly measurable:
 - **`b13_census` (5.00 class pts) is not an evidence problem**: 89 of 95 cases have no B-13 anywhere, only 6 are detection misses, and the other fields read at 98.0%. It needs a split, not better reading.
 - **The ML ceiling over today's partition is +1.56**, against 17.17 behind a finer partition. Decision work stays last.
 
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 16 | 2026-07-22 | (P1b) | Per-field candidate preference: prefer the clean text-layer read, settle ties by field-manual trust order | **115.43** | 61.27 | **39.00** | 15.16 | 0 | — | keep |
+| — | 2026-07-22 | (P1b) | *Also tried:* vocab passthrough for unseen `home_world` / `species_code` | 115.39 | 61.27 | 38.95 | 15.16 | 0 | — | **reject** |
+
+Row 16 is the first change measured entirely through `scripts/replay.py` — seconds per variant against a cached page-text dump, rather than a 40-minute pipeline run. The full 2×2 matrix was scored in about a minute:
+
+| passthrough | preference | total | extr |
+| --- | --- | ---: | ---: |
+| off | trust-then-source (old) | 115.20 | 38.76 |
+| off | **source-then-trust** | **115.43** | **39.00** |
+| on | trust-then-source | 115.12 | 38.68 |
+| on | source-then-trust | 115.39 | 38.95 |
+
+`packet.docs` sorts by `(doc_type, source)`, which ranks whole *documents*, so an OCR'd high-trust document wins every field at once over a clean text-layer copy elsewhere. Both cases the characterization suite flagged were corrections: MIB-000241 `Tekzam Mirarix` → `Tekzarn Mirarix` and MIB-000303 `Qorvoss Sollesh` → `Qorul Arikesh`, both matching truth, and the first also stopped emitting a spurious `sponsor_mismatch` — better names mean fewer false name-mismatch flags on an exact-set-match field worth 8.
+
+**The rejected row is the more useful one.** Passing unseen values through instead of deleting them looks like an obvious bug fix — `mib/vocab.py`'s docstring promises it, and only `declared_purpose` delivers it — and a strict-xfail test was standing by to confirm it. It measured as a *loss* twice, because deleting a value snapping could not vouch for was quietly acting as a quality filter that let a cleaner copy supply the field. Its intended upside also does not exist: all 1,000 train cases yield exactly 13 home worlds, 12 species and 10 purposes, and the vocabulary lists are those enumerations. In a sample that size a fourteenth world would be expected ~77 times, so the value universe is closed and there are no unseen private-set values to rescue. U7 is closed as a non-issue and the xfail became an ordinary test asserting the deletion is deliberate.
+
 **Step-0 decision-layer bake-off (2026-07-22, commit adff813, substrate = skew cache replay at 115.20 dev):** 5-fold OOF within dev, identical 66-dim features. Rules 61.27/80eq Brier .1210 CFA 0 → **calibrated logistic + inner-CV correctness confidence 62.43/80eq Brier .1293 CFA 12** (+1.16 class pts, −0.33 calib pts, net ≈ +0.8). MLP(32) overfits (59.44, Brier .21, 31 CFA) — Phase 1 ships logistic. CFA veto sweep: t=0.15 → 61.73/6 CFA; t=0.10 → 60.76/2. Full table in JOURNAL.

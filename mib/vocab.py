@@ -58,6 +58,19 @@ def snap(field, value):
         if best == "unpaid" and re.sub(r"[^a-z]", "", v.lower()) != "unpaid":
             return "unknown"
         return best
+    # home_world and species_code return None when nothing is close, and
+    # packet._repair_ocr_kv then deletes the field. That looks like a bug against
+    # this module's own docstring, and it was measured as one: passing the value
+    # through instead cost 0.08 dev points, because deleting an unrepairable OCR
+    # read was quietly acting as a quality filter and letting a cleaner copy on
+    # another document supply the value. With per-field source preference in
+    # packet._preference the cost falls to 0.04, but it does not become a gain.
+    #
+    # The gain was supposed to come from unseen private-set values surviving. All
+    # 1,000 train cases yield exactly 13 home worlds, 12 species and 10 purposes,
+    # and these lists are those enumerations — a saturated sample, since a
+    # fourteenth world would be expected ~77 times. The value universe is closed,
+    # so there are no unseen values for passthrough to rescue. Deletion stays.
     if field == "species_code":
         return _closest(re.sub(r"[^A-Z_]", "", v.upper().replace(" ", "_")), SPECIES, 0.7)
     if field == "home_world":

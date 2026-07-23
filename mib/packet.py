@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from . import parse, vocab
 from .parse import DOC_ADJUDICATOR, DOC_BIOMETRIC, DOC_INTAKE, DOC_REGISTRY, DOC_SPONSOR
+from .records import Candidate
 
 SRC_TEXT = 0  # clean digital text layer
 SRC_OCR = 1   # OCR of scan pixels — same doc type ranks below its text-layer peer
@@ -84,6 +85,7 @@ def assemble(pages, ocr_lines, fallback_case_id):
         if source == SRC_OCR:
             kv = _repair_ocr_kv(kv)
         kv["_raw"] = lines
+        kv["_page_no"] = pt.page_no
         packet.docs.append((parse.detect_doc_type(lines), source, kv))
     packet.docs.sort(key=lambda t: (t[0], t[1]))
     return packet
@@ -124,6 +126,54 @@ def manual_corrections(packet):
     return corrections
 
 
+def candidates(packet):
+    """Every value seen for every schema field, in trust order.
+
+    `packet.docs` is already sorted by (doc_type, source), so generation order is
+    trust order and the winner is simply the first valid entry per field. The
+    point of materializing the losers is that today they are unrecoverable: the
+    sort ranks whole *documents*, so an OCR'd high-trust document outranks a
+    clean text-layer lower-trust one for every field at once, and 37 dev
+    field-instances are lost that way — a correct `Miravoss` on one page losing
+    to a garbled `Mirayoss` on another. Preferring per field needs the
+    alternatives to still exist at this seam.
+    """
+    out = []
+    for dtype, source, kv in packet.docs:
+        page_no = kv.get("_page_no", 0)
+        for fname in parse.FIELDS:
+            raws = [kv.get(fname)]
+            # The registry extract names the applicant under its own key.
+            if fname == "applicant_name" and dtype == DOC_REGISTRY:
+                raws.append(kv.get("registry_name"))
+            for raw in raws:
+                if not raw:
+                    continue
+                out.append(Candidate(
+                    field_name=fname, value=raw.strip(), raw_value=raw,
+                    doc_type=dtype, source=source, page_no=page_no,
+                    valid=parse.valid_value(fname, raw),
+                    quality=1.0 if source == SRC_TEXT else 0.5))
+    return out
+
+
+def _preference(cand):
+    """Sort key deciding which candidate for a field wins: read quality, then trust.
+
+    `packet.docs` is ordered (doc_type, source), which ranks whole *documents* and
+    therefore lets an OCR'd high-trust document win every field at once over a
+    clean text-layer copy elsewhere — a correct `Miravoss` losing to a garbled
+    `Mirayoss`. Preferring the clean read first and settling ties by field-manual
+    trust order is worth +0.23 dev (38.76 -> 39.00 extraction, CFA unchanged).
+
+    This does not contradict the manual's evidence precedence. That order ranks
+    *kinds of evidence*, and both copies here are the same kind — one is simply a
+    better reading of it. Trust order still decides between different documents,
+    which is what the tie-break does.
+    """
+    return (cand.source, cand.doc_type)
+
+
 def merge_fields(packet, provenance=None):
     """Best value per schema field: manual corrections override, then documents
     in trust order.
@@ -131,19 +181,12 @@ def merge_fields(packet, provenance=None):
     If `provenance` is a dict it is filled with fname -> (doc_type, source).
     """
     values = {}
-    for fname in parse.FIELDS:
-        for dtype, source, kv in packet.docs:
-            candidates = [kv.get(fname)]
-            if fname == "applicant_name" and dtype == DOC_REGISTRY:
-                candidates.append(kv.get("registry_name"))
-            for cand in candidates:
-                if cand and parse.valid_value(fname, cand):
-                    values[fname] = cand.strip()
-                    if provenance is not None:
-                        provenance[fname] = (dtype, source)
-                    break
-            if fname in values:
-                break
+    for cand in sorted(candidates(packet), key=_preference):
+        if not cand.valid or cand.field_name in values:
+            continue
+        values[cand.field_name] = cand.value
+        if provenance is not None:
+            provenance[cand.field_name] = (cand.doc_type, cand.source)
     for fname, value in manual_corrections(packet).items():
         values[fname] = value
         if provenance is not None:
