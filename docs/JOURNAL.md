@@ -66,3 +66,20 @@ Experiments rows 6–10. Highlights:
 
 **State vs interview bar (holdout, unbiased): 113.46 total, 60.63 classification, 0 CFA — all cleared.**
 **Next segment:** stop-or-model decision (per-branch entropy check for the conditional GBM), Docker contract parity run (tesseract + pillow in image), then packaging (validation predictions, MEMO.md, SUBMISSION.md, PR + form).
+
+## 2026-07-22 (later) — Rethink at 113.46: reports of ~135 prompted a zoom-out
+
+Full analysis in [rethink-2026-07-22.md](rethink-2026-07-22.md). Headlines:
+- Competitor PRs now self-report 120.6 / 126.7 / 129.2 / **132.4** on train — the gap is real.
+- **"Destroyed scans" was wrong**: the pages are human-legible; our single-pass PSM 11 OCR is
+  the failure. PSM 6/11 (+binarization) are complementary on real pages. Multi-pass ensemble
+  with KV-level voting is roadmap item R1; PP-OCR (ONNX) to be benchmarked as an alternative.
+- ~17/19 lost classification points are our own NR retreats; `b13_census` is 58% truly-approved
+  (benign packets legitimately lack a B-13; registry-CLEAR discriminates); `fee_unknown` is
+  mostly an unread-flags problem, and many packets have no receipt at all.
+- Hidden injected answer keys on train contain the TRUE field values (fake APPROVED tail) —
+  confirmed trap, still quarantined.
+- Recommendation pending user sign-off: relax hard CFA=0 to expected-points argmax with vetoes
+  and a documented cap (competitor at 129.2 carries 5 CFAs).
+- Roadmap v2: R1 OCR ensemble → R2 parse/flag hygiene → R3 policy re-mine → R4 cost-sensitive
+  residual adjudicator (trigger now clearly met) → R5 calibration/holdout/Docker/package.
