@@ -81,7 +81,7 @@ PDFs deliberately contain prompt injection: white-on-white text, text outside th
 
 ## Data & local evaluation
 
-- Public data zip: `../mib-doc-challenge/mib-doc-challenge-public-data-v2026-07-07.zip` (SHA-256 in `data/DATASET_CARD.md`). As of 2026-07-21 it is **still downloading and not yet unzipped** — once complete, verify the checksum and unzip at the challenge repo root so `data/train/` and `data/validation/` exist.
+- Public data is downloaded, checksum-verified, and unzipped at the challenge repo root: `data/train/` and `data/validation/` exist (SHA-256 in `data/DATASET_CARD.md`).
 - **Train**: 1,000 labeled PDFs + `data/train_labels.csv` (distribution: 431 DENIED / 289 APPROVED / 280 NEEDS_REVIEW; `risk_flags` is `none` in 535 cases, pipe-delimited combos occur).
 - **Validation**: 5,000 unlabeled PDFs + `data/validation_manifest.csv` (case_id, pdf_path, pages). Scored privately for the leaderboard.
 - **Test**: fully private, used for final ranking and anti-gaming audits after close.
@@ -114,4 +114,12 @@ python3 scripts/validate_submission.py \
 
 ## Current state of this repo
 
-Format-valid stub, not a real solution yet: `solution.py` extracts text with PyMuPDF, greps the first `MIB-\d{6}` as case_id, and emits constant placeholder fields with `NEEDS_REVIEW` / confidence 0.2. `run.sh` is the container entrypoint; `Dockerfile` is `python:3.12-slim` + `requirements.txt` (pymupdf only). Skeleton derived from the challenge repo's MIT-licensed templates.
+Working solution, not a stub. `solution.py` is a thin CLI over the `mib/` package: a staged pipeline (S1 extract text/layout → S2 render+OCR scanned pages → S3 parse documents → S4 assemble packet + merge fields → S5 adjudicate), orchestrated by `mib/runner.py`. `run.sh` is the container entrypoint; `Dockerfile` is `python:3.12-slim` + tesseract; runtime deps are pymupdf + numpy only (sklearn is train-time only).
+
+**Two deciders at the S5 seam** (`mib/runner.py`): the rules cascade (`mib/policy.py`, 16 branches, per-branch fitted confidence in `mib/confidence.py`) and a learned decider (`mib/decision.py`: calibrated logistic over 66 features from `mib/features.py`, expected-points argmax, numpy-only forward pass from `mib/decision_model.npz`). The debug sidecar always logs both deciders' outputs — every eval is an A/B. Train/export via `scripts/train_decision.py` / `scripts/export_decision.py` (refit `--split all` only at packaging time).
+
+**Env knobs**: `MIB_DECIDER=rules|mlp` (which decider's output ships; default rules), `MIB_RESTORE` (scan-restore variant; default skew), `MIB_CFA_VETO` (P(DENIED) threshold that demotes a learned APPROVED to NEEDS_REVIEW; default 1.0 = pure EV), `MIB_DEBUG_JSONL` (sidecar path), `MIB_CASE_BUDGET_S` (per-case OCR wall-clock bound; default 120).
+
+**Dev workflow**: use `.venv/bin/python`. Full eval: `scripts/eval_local.sh`. Fast loop: `scripts/dump_text.py` writes a page-text cache once, then `scripts/replay.py <cache> <out_dir>` re-runs everything downstream of OCR in seconds. Artifacts carry provenance stamps (`mib/config.py`); `config.require_agreement` before joining artifacts from different runs. Frozen splits in `data_splits.json` (dev 700 / holdout 300, seed 8090): select on dev 5-fold OOF only, read holdout only at major milestones.
+
+**Scores** (train, local evaluate.py): dev 115.43 with rules decider, CFA 0; learned decider +1.16 class pts honest OOF (dev 5-fold); holdout 113.46 at tag v1 (one read). Log every change as a row in `docs/experiments.md` and a note in `docs/JOURNAL.md`; `docs/PLAN.md` holds the roadmap, `docs/scoring.md`/`docs/label-mining.md`/`docs/repo-intel.md` the background analyses.

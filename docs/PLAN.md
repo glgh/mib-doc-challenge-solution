@@ -1,5 +1,26 @@
 # Working plan
 
+> **Amendment (2026-07-22).** Two guardrails below are superseded by the
+> decision-layer rework (see JOURNAL entries for commits adff813 / a21fc36 and
+> `docs/rethink-2026-07-22.md`):
+>
+> - **"CFA = 0 is a hard gate" no longer holds as an absolute.** Catastrophic
+>   false approvals are now *priced, not banned*: the learned decider chooses by
+>   expected-points argmax (a CFA costs −4 raw vs +8 for a correct approve, so
+>   EV already charges for it), `MIB_CFA_VETO` provides a tunable
+>   P(DENIED) threshold that demotes marginal approvals to NEEDS_REVIEW, and
+>   every eval reports its CFA count. The rules cascade still runs at CFA 0;
+>   the shipped operating point (decider + veto) is chosen on dev OOF at
+>   packaging time.
+> - **Architecture is now one signal layer, two deciders** — the rules cascade
+>   (`mib/policy.py`) and a calibrated-logistic learned decider
+>   (`mib/decision.py`), selected via `MIB_DECIDER` at the S5 seam, replacing
+>   the M4 "GBM residual model with rules short-circuit" sketch. The debug
+>   sidecar logs both on every run, so each eval is a standing A/B.
+>
+> The milestone list below is otherwise historical context; current sequencing
+> lives in JOURNAL's latest entry.
+
 Goal: a real solution clearing the interview bar (105+ total, 55+ classification, 0 catastrophic false approvals, 90%+ valid rows) with headroom, built as an evaluation-driven loop rather than a big-bang pipeline. Deadline: Aug 3, 2026.
 
 Background docs: [scoring.md](scoring.md) (what the metric rewards), [label-mining.md](label-mining.md) (rule ceiling ~85% on perfect fields), [organizer-guidance.md](organizer-guidance.md) (authoritative rulings — part of the spec), [repo-intel.md](repo-intel.md) (secondary reference), [JOURNAL.md](JOURNAL.md) (running log).

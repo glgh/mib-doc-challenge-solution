@@ -180,3 +180,31 @@ Phase 1 (`mib/features.py` + `mib/decision.py`, logistic weights in npz, `MIB_DE
   session's in-flight packet.py edit landing between my two replays — caught by diffing
   non-decision fields, currently −0.08 extraction on their WIP (junk values no longer
   normalized to 'unknown': 'unknown' → '[REGISTRY LOST]' etc. on 39 fields).
+
+## 2026-07-23 — Session close: Docker parity post-mortem, docs synced
+
+- **Docker parity is still unresolved, and both attempts this session are invalid.**
+  Post-mortem: the first contract run "failed" with exit 125 ("unexpected EOF") because the
+  Docker daemon crashed — but its container survived the daemon restart and kept running.
+  The retry then started a *second* contract container, and two concurrent `--memory 8g`
+  containers (plus 2g tmpfs each) on the 8.2 GB Docker Desktop VM starved the daemon into
+  the same EOF crash. Neither run's timing or output is usable. Both zombies killed, stale
+  image removed. **Lesson: `docker ps` before starting or timing any contract run**, and
+  treat the VM's memory as barely sufficient for exactly one contract container.
+- Docs synced to reality: CLAUDE.md "Current state" rewritten (staged pipeline, two
+  deciders, env knobs, dev workflow, scores); PLAN.md got a dated amendment retiring the
+  CFA=0 hard gate in favor of EV-priced decisions + `MIB_CFA_VETO` + per-run CFA reporting.
+- State at close: dev 115.43 (rules, CFA 0, parallel session at P2 runner robustness);
+  learned decider honest OOF +1.16 class pts; holdout 113.46 (v1, one read).
+
+**Next-session queue, in order:**
+1. Clean Docker parity from current HEAD (verify `docker ps` empty first): byte-match vs a
+   same-code local run at skew + s/PDF timing vs the 6 s budget.
+2. Validation fallback artifact: best pipeline over `data/validation/` (5,000 PDFs) →
+   `output/validation_predictions_v1.jsonl` + `validate_submission.py`. Insurance from day one.
+3. Phase 2 signal extraction: OCR multi-pass ensemble at the Read seam; adjudicator
+   `Reason:` → risk_flags; guarded loose flag snap; evidence-gated mismatch flags;
+   coordinate with the parallel session's geometry rework.
+4. Phase 3 integrate & ship: retrain/export on Phase-2 signals (`--split all` only at
+   packaging), pick decider + `MIB_CFA_VETO` on dev OOF, holdout read #2 (gap < 2 pts
+   gate), Docker parity re-run, package MEMO/SUBMISSION/PR + form before 2026-08-03.
