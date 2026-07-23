@@ -1,5 +1,9 @@
 # Working plan
 
+> **Current state lives in [STATUS.md](STATUS.md)** — where things are, what has been tried and
+> rejected, and the open questions. This file is the roadmap and the historical reasoning; where
+> the two disagree, STATUS.md is newer.
+
 > **Amendment (2026-07-22).** Two guardrails below are superseded by the
 > decision-layer rework (see JOURNAL entries for commits adff813 / a21fc36 and
 > `docs/rethink-2026-07-22.md`):
