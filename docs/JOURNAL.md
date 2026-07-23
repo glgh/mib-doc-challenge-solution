@@ -54,3 +54,15 @@ Full detail in [experiments.md](experiments.md) (rows 1–5). Summary:
 - **State:** 112.12/150 (class 60.72, extr 37.32, calib 14.08), 0 CFA, 0.15 s/PDF — clears the full interview bar on train.
 
 **Next:** Step 3 calibration (branch-empirical confidences on frozen splits — calib is 14.08/20 with hand-set constants); residual mining (fee_status 55% worst field; risk_flags fuzzy-parse dip 68.3→66.8; 196 APPROVED→NR retreats to shrink); then Docker contract run.
+
+## 2026-07-22 — Lean round executed: dev 112.56 → 114.43, holdout 113.46, still 0 CFA
+
+Experiments rows 6–10. Highlights:
+- **Frozen 700/300 split** now governs iteration (holdout read only at milestones; read #1 passed: dev-holdout gap < 1 pt).
+- **Manual corrections discovered**: `Manual correction: <field> is <value>.` lines on 136 packets, 100% truth-consistent where checked — parsed as rank-0 evidence (the manual's "signed manual note" tier). Found while diagnosing an over-denial whose intake carried "Manual correction: fee status is waived." above an `unpaid` receipt.
+- **Safe-deny evidence standards**: deny rules now require positive preconditions (unknown visa no longer arms non-DIP denials; digit repair can't fabricate revoked sponsor ids; `unpaid` must be verbatim). Also replaced the fitted receipt-date constant with the max-margin staleness cutoff (2026-01-02, middle of train's 48-day empty band).
+- **Negative result worth keeping**: 300-DPI preprocessing retry for destroyed scans = +0.21 pts at 43x runtime → reverted. OCR quality here is bimodal; pages read at 200 DPI or are synthetically destroyed.
+- **Fitted per-branch confidence** (Laplace-shrunk dev accuracy): calibration 14.22 → 15.13 dev / 15.05 holdout; census retreat honestly sits at 0.283.
+
+**State vs interview bar (holdout, unbiased): 113.46 total, 60.63 classification, 0 CFA — all cleared.**
+**Next segment:** stop-or-model decision (per-branch entropy check for the conditional GBM), Docker contract parity run (tesseract + pillow in image), then packaging (validation predictions, MEMO.md, SUBMISSION.md, PR + form).
