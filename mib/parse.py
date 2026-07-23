@@ -33,6 +33,7 @@ DOC_HEADERS = [
 KEY_MAP = {
     "case id": "case_id",
     "applicant": "applicant_name",
+    "purpose": "declared_purpose",      # sponsor attestation labels it plainly
     "registry name": "registry_name",
     "species code": "species_code",
     "species match": "species_code",
@@ -95,6 +96,25 @@ def key_for(text):
     return KEY_MAP[close[0]] if close else None
 
 
+# The shredder clips the left margin, so a rescued line often reads
+# `insor ID: SPN-5809` — the label is destroyed but the value that carries the
+# points is intact and exact. A looser key match alone would be reckless (an
+# adjudicator note reading `Revoked sponser: SPN-2718` must never become the
+# applicant's sponsor), so the value has to corroborate it: the loose match is
+# accepted only when the value is well-formed for the field it claims. In
+# practice `Revoked sponser` fails the key test at this cutoff anyway, and the
+# corroboration is what makes that not merely lucky.
+LOOSE_KEY_CUTOFF = 0.55
+
+
+def _loose_key_for(text):
+    t = text.strip().lower()
+    if len(t) > 30:
+        return None
+    close = difflib.get_close_matches(t, KEY_MAP.keys(), n=1, cutoff=LOOSE_KEY_CUTOFF)
+    return KEY_MAP[close[0]] if close else None
+
+
 def parse_kv(lines):
     """Extract pairs from 'Key: Value' lines and 'Key' / 'Value' line pairs.
 
@@ -106,11 +126,16 @@ def parse_kv(lines):
     i = 0
     while i < len(lines):
         line = lines[i].strip()
-        m = re.match(r"^([A-Za-z][A-Za-z _0-9]{1,28}?)\s*[:.;]\s*(.+)$", line)
+        m = re.match(r"^([A-Za-z0-9][A-Za-z _0-9]{1,28}?)\s*[:.;]\s*(.+)$", line)
         if m:
             key = key_for(m.group(1))
             if key:
                 kv.setdefault(key, m.group(2).strip())
+                i += 1
+                continue
+            loose, value = _loose_key_for(m.group(1)), m.group(2).strip()
+            if loose and valid_value(loose, value):
+                kv.setdefault(loose, value)
                 i += 1
                 continue
         key = key_for(line)
@@ -124,6 +149,41 @@ def parse_kv(lines):
     return kv
 
 
+# The sponsor attestation states its facts in sentences, not Key: Value lines,
+# so parse_kv sees nothing on it at all — 273 of the 312 dev field-instances that
+# are present in the text but never extracted come from unparsed lines like this.
+# Matching happens against the *joined* text because the sentence wraps: the
+# purpose in "expected on Earth for reactor / maintenance." straddles a newline,
+# and half of it is not a purpose.
+_PROSE_PATTERNS = [
+    ("sponsor_id", re.compile(r"\bSponsor\s+(SPN-\d{4})\s+attests\b", re.IGNORECASE)),
+    ("applicant_name",
+     re.compile(r"\battests\s+that\s+(.+?)\s+is\s+expected\s+on\s+Earth\b", re.IGNORECASE)),
+    ("declared_purpose",
+     re.compile(r"\bis\s+expected\s+on\s+Earth\s+for\s+(.+?)\s*[.;]", re.IGNORECASE)),
+    ("visa_class",
+     re.compile(r"\bresponsibility\s+for\s+class\s+([A-Za-z]+-\d)\s+compliance",
+                re.IGNORECASE)),
+]
+
+
+def parse_prose(lines):
+    """Fields stated in sentences rather than Key: Value lines.
+
+    Deliberately narrow: each pattern is anchored on wording specific to the
+    attestation letter, so it cannot fire on an intake form or a decoy. Values
+    are returned raw — snapping and validation happen downstream exactly as they
+    do for parsed keys.
+    """
+    text = " ".join(l.strip() for l in lines if l.strip())
+    out = {}
+    for field, pattern in _PROSE_PATTERNS:
+        m = pattern.search(text)
+        if m and m.group(1).strip():
+            out[field] = m.group(1).strip()
+    return out
+
+
 def page_case_ids(lines):
     ids = []
     for line in lines:
@@ -131,8 +191,17 @@ def page_case_ids(lines):
     return ids
 
 
+# The corpus marks damaged fields in place: [NAME CUT OUT], [REGISTRY LOST],
+# [PURPOSE ILLEGIBLE], and OCR-mangled variants like [MAME CUT OUT]. These are
+# the document saying the value is unrecoverable, which is exactly `unknown` —
+# not a value. 51 of them were being emitted verbatim as answers.
+_DAMAGE_MARKER_RE = re.compile(r"^\[[^\]]{3,40}\]$")
+
+
 def valid_value(field, value):
     if not value or value.lower() in ("n/a", "unknown", ""):
+        return False
+    if _DAMAGE_MARKER_RE.match(value.strip()):
         return False
     if field == "visa_class":
         return value in VISA_CLASSES

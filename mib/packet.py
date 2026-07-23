@@ -53,8 +53,13 @@ def _repair_ocr_kv(kv):
         if snapped:
             kv[fname] = snapped
         elif fname in ("sponsor_id", "case_id", "arrival_date", "visa_class",
-                       "fee_status", "species_code", "home_world"):
-            del kv[fname]  # garbage id/enum: absent beats wrong for policy safety
+                       "fee_status", "species_code", "home_world",
+                       "observed_flags"):
+            # Garbage id/enum: absent beats wrong for policy safety. observed_flags
+            # belongs here for a sharper reason — left in place, an unreadable risk
+            # line still counts as flag evidence, so a packet whose B-13 OCR'd to
+            # debris looks like a slip that reported nothing.
+            del kv[fname]
     return kv
 
 
@@ -82,6 +87,10 @@ def assemble(pages, ocr_lines, fallback_case_id):
         if ids and case_id not in ids:
             continue  # decoy page for a different applicant
         kv = parse.parse_kv(lines)
+        # Prose fills only what the labelled lines did not: an explicit
+        # `Purpose: research` on the same document outranks a sentence.
+        for fname, value in parse.parse_prose(lines).items():
+            kv.setdefault(fname, value)
         if source == SRC_OCR:
             kv = _repair_ocr_kv(kv)
         kv["_raw"] = lines

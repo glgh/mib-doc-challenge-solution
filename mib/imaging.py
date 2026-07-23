@@ -22,26 +22,39 @@ def to_gray(image_bytes):
     return np.asarray(Image.open(io.BytesIO(image_bytes)).convert("L"))
 
 
-def skew_angle(gray):
-    """Angle (degrees) that lays text lines flat, by projection-profile sharpness.
+def skew_sweep(gray):
+    """(angles, sharpness) over the candidate skew range — the curve `skew_angle`
+    takes the argmax of.
 
     Shearing rather than rotating the ink mask keeps this to one bincount per
     candidate angle, so the whole sweep costs a few milliseconds.
+
+    Exposed separately so `scripts/visualize_restore.py` can plot the same
+    numbers the pipeline decides on, instead of a re-implementation that could
+    drift from it. Returns `(angles, None)` when there is too little ink to
+    measure, which is the flat-zero case the caller reports as 0 degrees.
     """
+    angles = np.arange(-MAX_SKEW, MAX_SKEW + 1e-9, SKEW_STEP)
     ink = np.asarray(Image.fromarray((gray < INK).astype(np.uint8) * 255).resize(
         (max(1, gray.shape[1] // 3), max(1, gray.shape[0] // 3)), Image.BILINEAR)) > 40
     ys, xs = np.nonzero(ink)
     if len(ys) < 50:
-        return 0.0
+        return angles, None
     height = ink.shape[0]
-    best, best_score = 0.0, -1.0
-    for angle in np.arange(-MAX_SKEW, MAX_SKEW + 1e-9, SKEW_STEP):
+    scores = np.empty(len(angles))
+    for i, angle in enumerate(angles):
         rows = np.round(ys - xs * np.tan(np.deg2rad(angle))).astype(int) + height
         profile = np.bincount(np.clip(rows, 0, 3 * height), minlength=3 * height + 1)
-        score = float((profile.astype(np.float64) ** 2).sum())
-        if score > best_score:
-            best_score, best = score, float(angle)
-    return best
+        scores[i] = float((profile.astype(np.float64) ** 2).sum())
+    return angles, scores
+
+
+def skew_angle(gray):
+    """Angle (degrees) that lays text lines flat, by projection-profile sharpness."""
+    angles, scores = skew_sweep(gray)
+    if scores is None:
+        return 0.0
+    return float(angles[int(np.argmax(scores))])
 
 
 def rotate(gray, degrees):

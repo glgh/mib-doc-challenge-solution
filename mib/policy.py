@@ -78,6 +78,12 @@ def adjudicate(values, sig):
     # evidence may simply be absent. Organizer ruling: NEEDS_REVIEW, never
     # APPROVED. Train-measured cost ~2.6 classification pts for CFA 52→~0;
     # OCR (plan Step 2) reclaims packets whose B-13 lives in scan pages.
-    if not sig["has_biometric"]:
+    #
+    # "Readable" means the risk line was read, not merely that a slip was
+    # detected. MIB-000672 carried a B-13 whose flag line OCR'd to debris; with
+    # only a presence check the packet looked complete and was approved against a
+    # truth of DENIED. A detected slip we cannot read the flags from is exactly
+    # the concealment shape this rule exists for.
+    if not sig["has_biometric"] or not sig["has_flag_evidence"]:
         return "NEEDS_REVIEW", "b13_census"
     return "APPROVED", "clean_approve"

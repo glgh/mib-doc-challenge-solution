@@ -82,5 +82,10 @@ def derive(packet, values):
         "finding": adjudicator_finding(packet),
         "waiver_code": waiver_code(packet),
         "has_biometric": packet.has_doc(parse.DOC_BIOMETRIC),
+        # A B-13 we could not read the flag line from is evidence of nothing.
+        # `has_biometric` only says a slip was detected; the risk-concealment
+        # census is about whether its risk line was actually read, so policy
+        # needs to tell "flags: none" from "flags: <unreadable>".
+        "has_flag_evidence": bool(packet.biometric.get("observed_flags")),
         "scan_only_pages": packet.scan_only_pages,
     }

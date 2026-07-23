@@ -1058,8 +1058,8 @@
     "home_world": "Europa Station",
     "risk_flags": "none",
     "species_code": "JOVIAN_GASFORM",
-    "sponsor_id": "SPN-0000",
-    "visa_class": "unknown"
+    "sponsor_id": "SPN-4322",
+    "visa_class": "DIP-1"
    },
    "pages": [
     {
@@ -1366,7 +1366,7 @@
     "arrival_date": "2026-05-27",
     "case_id": "MIB-000178",
     "confidence": 0.95,
-    "declared_purpose": "unknown",
+    "declared_purpose": "diplomatic",
     "fee_status": "unknown",
     "home_world": "Wolf-1061c",
     "risk_flags": "none",
@@ -3570,14 +3570,14 @@
    "expected_branch": "revoked_sponsor",
    "expected_record": {
     "adjudication": "DENIED",
-    "applicant_name": "Solzam Orivoss",
+    "applicant_name": "Solzarn Orivoss",
     "arrival_date": "2026-04-14",
     "case_id": "MIB-000398",
     "confidence": 0.95,
     "declared_purpose": "archive audit",
     "fee_status": "unknown",
     "home_world": "Europa Station",
-    "risk_flags": "sponsor_mismatch",
+    "risk_flags": "none",
     "species_code": "VENUSIAN_MYCELIAL",
     "sponsor_id": "SPN-9090",
     "visa_class": "XW-1"
@@ -3683,7 +3683,7 @@
     "confidence": 0.645,
     "declared_purpose": "xenobotany",
     "fee_status": "paid",
-    "home_world": "[REGISTRY LOST]",
+    "home_world": "unknown",
     "risk_flags": "rescinded_denial",
     "species_code": "ANDROMEDAN",
     "sponsor_id": "SPN-2677",
@@ -3849,7 +3849,7 @@
    "expected_branch": "fee_unknown",
    "expected_record": {
     "adjudication": "NEEDS_REVIEW",
-    "applicant_name": "[NAME CUT OUT]",
+    "applicant_name": "unknown",
     "arrival_date": "2026-04-12",
     "case_id": "MIB-000405",
     "confidence": 0.443,
@@ -5584,13 +5584,13 @@
     "arrival_date": "1900-01-01",
     "case_id": "MIB-000622",
     "confidence": 0.373,
-    "declared_purpose": "unknown",
+    "declared_purpose": "archive audit",
     "fee_status": "paid",
     "home_world": "unknown",
     "risk_flags": "illegible_biometrics",
     "species_code": "ALPHA_DRACONIAN",
-    "sponsor_id": "SPN-0000",
-    "visa_class": "unknown"
+    "sponsor_id": "SPN-5236",
+    "visa_class": "XW-2"
    },
    "pages": [
     {
@@ -5950,7 +5950,7 @@
     "arrival_date": "1900-01-01",
     "case_id": "MIB-000693",
     "confidence": 0.443,
-    "declared_purpose": "unknown",
+    "declared_purpose": "archive audit",
     "fee_status": "unknown",
     "home_world": "Mars Dome-7",
     "risk_flags": "none",
@@ -6165,19 +6165,19 @@
    "stem": "MIB-000696"
   },
   {
-   "expected_branch": "missing_sponsor",
+   "expected_branch": "b13_census",
    "expected_record": {
     "adjudication": "NEEDS_REVIEW",
-    "applicant_name": "unknown",
+    "applicant_name": "Ixoix Solix",
     "arrival_date": "2026-05-29",
     "case_id": "MIB-000705",
-    "confidence": 0.3,
+    "confidence": 0.283,
     "declared_purpose": "unknown",
     "fee_status": "paid",
     "home_world": "unknown",
     "risk_flags": "none",
     "species_code": "ARCTURIAN",
-    "sponsor_id": "SPN-0000",
+    "sponsor_id": "SPN-4853",
     "visa_class": "XW-2"
    },
    "pages": [
@@ -6456,7 +6456,7 @@
     "arrival_date": "2026-07-04",
     "case_id": "MIB-000742",
     "confidence": 0.95,
-    "declared_purpose": "unknown",
+    "declared_purpose": "medical consult",
     "fee_status": "unpaid",
     "home_world": "Wolf-1061c",
     "risk_flags": "none",
@@ -6843,20 +6843,20 @@
    "stem": "MIB-000770"
   },
   {
-   "expected_branch": "missing_visa",
+   "expected_branch": "clean_approve",
    "expected_record": {
-    "adjudication": "NEEDS_REVIEW",
+    "adjudication": "APPROVED",
     "applicant_name": "Tekix Ixorix",
     "arrival_date": "2026-02-04",
     "case_id": "MIB-000772",
-    "confidence": 0.392,
-    "declared_purpose": "unknown",
+    "confidence": 0.871,
+    "declared_purpose": "research",
     "fee_status": "paid",
     "home_world": "Proxima-b",
     "risk_flags": "none",
     "species_code": "ARCTURIAN",
     "sponsor_id": "SPN-1781",
-    "visa_class": "unknown"
+    "visa_class": "DIP-1"
    },
    "pages": [
     {

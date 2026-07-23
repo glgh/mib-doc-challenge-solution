@@ -96,8 +96,16 @@ def snap(field, value):
         m = re.search(r"(\d{4})[-–—/.](\d{2})[-–—/.](\d{2})", v)
         return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else None
     if field == "observed_flags":
-        tokens = re.split(r"[|,;\s]+", v.lower())
-        fixed = [f for t in tokens if t for f in [_closest(t, FLAGS, 0.8)] if f]
+        tokens = [t for t in re.split(r"[|,;\s]+", v.lower()) if t]
+        fixed = [f for t in tokens for f in [_closest(t, FLAGS, 0.8)] if f]
+        # Unreadable is not the same as clear. This used to fall through to
+        # "none", turning scan debris into a positive assertion that no risk flag
+        # was observed — MIB-000672's B-13 read `Observed fans: =-*` / `rant`
+        # (truly `active_warrant`), was repaired to "none", and the case was
+        # approved despite a truth of DENIED. Returning None deletes the field so
+        # the missing-flag-evidence guard in policy can see there is nothing here.
+        if not fixed:
+            return None
         return "|".join(f for f in fixed if f != "none") or "none"
     return v
 

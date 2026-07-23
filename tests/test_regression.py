@@ -8,6 +8,79 @@ import pytest
 from mib import parse, vocab
 
 
+def test_unreadable_risk_line_is_not_repaired_into_no_risk():
+    """MIB-000672 (experiments row 18): the B-13 scanned as `Observed fans: =-*`
+    / `rant` — truly `active_warrant`. snap matched no flag token and fell
+    through to "none", turning scan debris into a positive assertion that no risk
+    flag was observed. The case was approved against a truth of DENIED: a
+    catastrophic false approval manufactured entirely by a repair step.
+
+    Unreadable and clear must not be the same value. A genuine "none" still reads
+    as "none"; debris now reads as nothing at all, and the packet loses its claim
+    to flag evidence."""
+    assert vocab.snap("observed_flags", "=-*") is None
+    assert vocab.snap("observed_flags", "rant") is None
+    assert vocab.snap("observed_flags", "none") == "none"
+    assert vocab.snap("observed_flags", "active_warrant") == "active_warrant"
+
+
+def test_an_unreadable_b13_does_not_count_as_flag_evidence():
+    """The risk-concealment census asks whether the risk line was *read*, not
+    whether a slip was detected. A detected B-13 with an unreadable flag line is
+    the concealment shape, so the field must be dropped rather than left as
+    debris that still looks like evidence."""
+    kv = parse.parse_kv(["FORM B-13", "Case ID: MIB-000672", "Observed fans: =-*"])
+    assert kv.get("observed_flags") == "=-*"        # parsed, but meaningless
+    from mib.packet import _repair_ocr_kv
+    assert "observed_flags" not in _repair_ocr_kv(dict(kv))
+
+
+def test_sponsor_attestation_prose_is_extracted():
+    """The attestation states its facts in sentences, so parse_kv saw nothing on
+    it — 273 of 312 dev parse failures came from unparsed lines like these.
+    The sentence wraps mid-phrase, so matching must join lines first: 'reactor'
+    and 'maintenance.' are on separate lines and 'reactor' is not a purpose."""
+    fields = parse.parse_prose([
+        "Sponsor Attestation Letter",
+        "Sponsor SPN-4560 attests that Aridane Zavoss is expected on Earth for reactor",
+        "maintenance.",
+        "The sponsor acknowledges responsibility for class XW-2 compliance and immediate",
+        "reporting duties.",
+    ])
+    assert fields == {
+        "sponsor_id": "SPN-4560",
+        "applicant_name": "Aridane Zavoss",
+        "declared_purpose": "reactor maintenance",
+        "visa_class": "XW-2",
+    }
+
+
+def test_prose_patterns_do_not_fire_on_unrelated_documents():
+    """Each pattern is anchored on attestation wording; a decoy must not match."""
+    assert parse.parse_prose([
+        "FORM I-8090", "Applicant: Someone Else",
+        "The sponsor is expected to comply with SPN-1234 reporting duties.",
+    ]) == {}
+
+
+def test_purpose_is_a_recognized_label():
+    """The attestation labels it `Purpose:`; KEY_MAP only had `declared purpose`."""
+    assert parse.key_for("Purpose") == "declared_purpose"
+    assert parse.parse_kv(["Purpose: research"]).get("declared_purpose") == "research"
+
+
+def test_damage_markers_are_not_values():
+    """The corpus marks destroyed fields in place. These are the document saying
+    the value is unrecoverable — which is `unknown`, not an answer. 51 were being
+    emitted verbatim, including `[NAME CUT OUT]` as an applicant name."""
+    for marker in ("[NAME CUT OUT]", "[REGISTRY LOST]", "[PURPOSE ILLEGIBLE]",
+                   "[MAME CUT OUT]", "[PURPOSE NLEGIBLE]"):
+        assert not parse.valid_value("applicant_name", marker), marker
+        assert not parse.valid_value("declared_purpose", marker), marker
+    # A real value that merely contains a bracket is untouched.
+    assert parse.valid_value("applicant_name", "Zorx [the Elder]")
+
+
 def test_ocr_period_separator_is_parsed_as_a_key_value_line():
     """MIB-000161 (experiments row 5): Tesseract read the colon in 'Observed
     flags:' as a period. The strict-colon parser dropped the line, the
