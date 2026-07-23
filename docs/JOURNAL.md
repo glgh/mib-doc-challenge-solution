@@ -98,3 +98,25 @@ Full survey in [damage-geometry.md](damage-geometry.md); experiments rows 11–1
 **Shipped flag-gated, default `off`** — the gain is real but the flow is still repair-after-failure (OCR → fail → repair → re-OCR), which is why `skew` costs 4x baseline wall-clock.
 
 **Next:** detect-then-repair rework (measure geometry in ~5 ms, OCR once) and gate the now-redundant 200-DPI re-render; then promote the default and read holdout. After that: cross-page voting for exact-match names, and treating cross-page field disagreement as `identity_conflict` evidence rather than discarding it.
+
+## 2026-07-22 (later still) — Plan v2 approved (rules ∥ MLP deciders); prep landed
+
+- **Approved plan** (plan file, summarized): one signal-extraction layer feeding two
+  interchangeable deciders — the existing rules cascade (kept as baseline/fallback/feature
+  source) and a simple MLP → expected-points argmax, with the cascade's branch one-hot as
+  stacked features; `MIB_DECIDER=rules|mlp` selector. CFA=0 hard gate replaced by the −4
+  term inside expected points + per-case CFA reporting.
+- **Prep commit 72364b4**: enriched debug sidecar (finding, registry_status, waiver_code,
+  n_pages, hidden_lines, n_fields_missing, n_corrections, rules_decision — additive only),
+  tesseract subprocess pinned to `OMP_THREAD_LIMIT=1` locally (parity with the Docker ENV),
+  `scripts/ocr_bench.py` (offline per-variant OCR recovery table), `scripts/train_decision.py`
+  (Step-0 bake-off: 5-fold CV within dev, rules vs MLP vs logistic, branch-feature ablation,
+  divergence-by-branch table, CFA listing). Baseline tag `v1-rules-holdout-113.46` at f0e7f62;
+  sklearn in the dev venv only (never the image).
+- **Second competitor wave** documented in repo-intel.md: 120.6 / 126.7 / 129.2 / **132.4**
+  train. Common tier traits: multi-pass OCR on weak pages, vocab repair, selective retries
+  gated on "no flags yet", cost-sensitive decision layers tolerating a few CFAs.
+- **Step-0 bake-off not yet run**: it needs `output/eval/{debug,predictions}.jsonl` from a
+  `MIB_RESTORE=bands` eval; the attempt was interrupted (worker-pool BrokenPipeError), so
+  `output/eval/` currently holds an `off`-mode run. First action next session:
+  `MIB_RESTORE=bands scripts/eval_local.sh dev`, then `scripts/train_decision.py`.

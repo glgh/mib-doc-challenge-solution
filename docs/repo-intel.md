@@ -44,6 +44,17 @@ From **Abhishek21g** (PR #3, local 113.7/150 = ext 37.1 + class 63.6 + calib 13.
 
 Reading: 113.7 clears the 105 interview bar with extraction at only 74% and calibration at 65% — both leave headroom. Beating ~115 needs: near-max deterministic classification + the under-determined cases correctly routed to NR + isotonic-grade calibration + stronger extraction (fuzzy enum repair).
 
+## Second wave (surveyed 2026-07-22 — five new PRs #7–#12)
+
+| Who | Total | Extraction | Classification | Calibration | Notes |
+| --- | ---: | ---: | ---: | ---: | --- |
+| thegoleffect (#9) | **132.44** | 45.80/50 | 69.79/80 | 16.84/20 | Tesseract dual-pass PSM 3+11 at 150 DPI; vocab repair for species/worlds/visas/names + constrained char fixes for dates/IDs; 300-DPI grayscale retry *only* for low-confidence packets with no recovered risk flag |
+| dw820 (#10) | 129.21 | 43.42/50 | 68.42/80 | 17.37/20 | RapidOCR (PP-OCR via ONNX) + pypdfium2; treats the embedded text layer as `hidden_text`, trusts only rendered pixels; gated orientation testing (~3x OCR cost saved); flag rules 0.825 precision / 0.638 recall; **HistGradientBoosting+ExtraTrees cost-sensitive adjudicator; ships 5 CFAs** |
+| mikeg-cerebras (#12) | 126.7 | 43.6/50 | 66.9/80 | 16.2/20 | Pure rules, no ML in decision path; "escalation ladder" of OCR enhancement/segmentation passes + CNN secondary validation; text counts as evidence only if it demonstrably paints visible pixels inside the crop; 1.4 s/doc |
+| arvindcr4 (#8) | 120.6 | 40.5/50 | 64.5/80 | 15.7/20 | OCR variant ensemble (dark-ink threshold, projection-profile deskew, Otsu, 4-orientation fallback, keep best-parsing); provenance-tracked extraction, hidden text quarantined as fraud signal; EV-matrix decision layer pricing packet hygiene; honest 5-fold CV numbers (63.1/15.5) |
+
+Reading: the 126–132 tier shares (a) multi-pass OCR on every weak page — PSM/orientation/threshold variants or a better engine, (b) aggressive vocab repair, (c) selective expensive retries gated on "no flags recovered yet", (d) a cost-sensitive decision layer that tolerates a few CFAs instead of retreating. Independent corroboration of our geometry finding (orientation fallbacks everywhere; nobody needed higher resolution). dw820's render-only trust model (never read the text layer as visible evidence) is the cleanest injection defense seen so far.
+
 ## Design updates adopted
 
 1. Add **document census** signal (which doc types present; B-13 missing ⇒ review-leaning) — new, from issue #5.
