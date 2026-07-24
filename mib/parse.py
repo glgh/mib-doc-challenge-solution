@@ -1,6 +1,7 @@
 """Interpretation: document typing, key/value parsing, and field vocabularies."""
 import difflib
 import re
+from datetime import date
 
 CASE_ID_RE = re.compile(r"\bMIB-\d{6}\b")
 SPONSOR_RE = re.compile(r"\bSPN-\d{4}\b")
@@ -208,7 +209,13 @@ def valid_value(field, value):
     if field == "sponsor_id":
         return bool(SPONSOR_RE.fullmatch(value))
     if field == "arrival_date":
-        return bool(DATE_RE.fullmatch(value))
+        if not DATE_RE.fullmatch(value):
+            return False
+        try:                        # reject well-shaped but impossible dates (2026-03-41)
+            date.fromisoformat(value)
+        except ValueError:
+            return False
+        return True
     if field == "fee_status":
         return value.lower() in FEE_STATUSES
     if field == "species_code":

@@ -10,6 +10,8 @@ carries its own copy and `mib.decision` refuses to run on a mismatch.
 """
 from datetime import date
 
+from . import policy, vocab
+
 CLASSES = ["APPROVED", "DENIED", "NEEDS_REVIEW"]
 VISAS = ["XW-1", "XW-2", "DIP-1", "MED-3", "TRANSIT-7"]
 FEES = ["paid", "waived", "unpaid", "unknown"]
@@ -19,10 +21,14 @@ BRANCHES = ["adjudicator_finding", "disqualifying_flag", "embargo_world",
             "embargo_world_partial", "revoked_sponsor", "transit_visa", "fee_unpaid",
             "fee_unknown", "stale_arrival", "waived_non_dip", "missing_arrival",
             "review_flag", "missing_sponsor", "missing_visa", "b13_census", "clean_approve"]
-REVOKED = {"SPN-0007", "SPN-0139", "SPN-4040", "SPN-2718", "SPN-7331", "SPN-9090"}
-FULL_EMBARGO = {"TRAPPIST-1e", "Eris Relay"}
-PARTIAL_EMBARGO = {"Wolf-1061c"}
-STALE_CUTOFF = date(2026, 1, 2)
+# Policy facts imported from their owners (the rules engine and the closed
+# vocab) so the ML features, the rules branch, and the derived signals share one
+# definition and cannot silently drift — editing one now propagates to all three
+# deciders at once. Guarded by test_policy_constants_have_a_single_source.
+REVOKED = vocab.REVOKED_SPONSORS
+FULL_EMBARGO = policy.FULL_EMBARGO_WORLDS
+PARTIAL_EMBARGO = policy.PARTIAL_EMBARGO_WORLDS
+STALE_CUTOFF = policy.STALE_CUTOFF
 
 # Doc-type ranks as used in packet provenance (rank, is_ocr) pairs.
 DOC_NAMES = [(1, "adjudicator"), (2, "intake"), (3, "biometric"),

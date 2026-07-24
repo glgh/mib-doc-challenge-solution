@@ -9,6 +9,7 @@ import json
 import multiprocessing
 import os
 import sys
+import time
 from pathlib import Path
 
 from mib import config, emit, runner
@@ -20,15 +21,24 @@ def _safe_predict(pdf):
     """Never return nothing. A dropped case forfeits its extraction points and
     takes the missing-case penalty, where an unjustified NEEDS_REVIEW row still
     scores 2 raw points against a true APPROVED or DENIED and 8 against a true
-    NEEDS_REVIEW."""
+    NEEDS_REVIEW.
+
+    Stamps `cost_ms` (true per-case wall time inside this worker, OCR included)
+    onto the debug dict — the only per-case timing on the container path, needed
+    to measure the heavy tail (p99/max) under the Docker runtime contract. It is
+    sidecar-only, so predictions stay schema-clean and replay debug is unchanged.
+    """
+    t0 = time.perf_counter()
     try:
-        return runner.predict(pdf)
+        record, dbg = runner.predict(pdf)
     except Exception as exc:
         print(f"{pdf.name}: {type(exc).__name__}: {exc} — emitting fallback row",
               file=sys.stderr)
-        return emit.fallback_record(pdf.stem), {"case_id": pdf.stem,
-                                                "branch": "error",
-                                                "error": f"{type(exc).__name__}: {exc}"}
+        record = emit.fallback_record(pdf.stem)
+        dbg = {"case_id": pdf.stem, "branch": "error",
+               "error": f"{type(exc).__name__}: {exc}"}
+    dbg["cost_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+    return record, dbg
 
 
 def main(input_dir, output_path):

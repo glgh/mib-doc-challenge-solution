@@ -43,9 +43,9 @@ def main(cache_path, n_scans=4, n_random=2):
 
     bad = 0
     for rec in sample:
-        pages, reads = runner.read_case(CH / f"data/train/{rec['stem']}.pdf")
+        pages, ocr_lines = runner.read_case(CH / f"data/train/{rec['stem']}.pdf")
         got = [(p["visible_lines"], p["hidden_lines"], p["ocr_lines"], p["image_count"])
-               for p in cache.from_case(pages, reads)]
+               for p in cache.from_case(pages, ocr_lines)]
         want = [(p["visible_lines"], p["hidden_lines"], p["ocr_lines"], p["image_count"])
                 for p in rec["pages"]]
         ok = got == want

@@ -33,7 +33,7 @@ from pathlib import Path
 import fitz
 
 from .. import imaging
-from ..config import at_least as _at_least
+from ..config import at_least as _at_least, early_stop as _early_stop
 from ..parse import ALL_FLAGS, CASE_ID_RE, DATE_RE, SPONSOR_RE, VISA_CLASSES, key_for
 from ..records import Read
 from ..vocab import HOME_WORLDS, SPECIES, clean_ocr_line
@@ -85,19 +85,25 @@ def evidence_score(lines):
     return recognized_keys(lines) + values
 
 
-def _restorations(gray, best_score):
-    """Geometric variants worth OCR'ing, cheapest and most likely first."""
+def _restorations(gray, best_score, early_stop=True):
+    """Geometric variants worth OCR'ing, cheapest and most likely first.
+
+    The `best_score()` gates are the early-stop: skip a restoration once an
+    earlier reading is already good enough. Off by default (`config.early_stop`),
+    so every variant is produced and `best()` keeps the strongest — measured
+    +0.21 dev over stopping early (docs/experiments.md). `MIB_EARLY_STOP=1`
+    restores the gates."""
     if not _at_least("skew"):
         return
     angle = imaging.skew_angle(gray)
     upright = imaging.rotate(gray, angle) if abs(angle) >= imaging.MIN_SKEW else None
-    if upright is not None and best_score() < GOOD_ENOUGH:
+    if upright is not None and (not early_stop or best_score() < GOOD_ENOUGH):
         yield "skew", upright
-    if _at_least("turn") and best_score() == 0:
+    if _at_least("turn") and (not early_stop or best_score() == 0):
         for quarter in (1, 3):                     # 90 and 270 clockwise; 180 never wins
             turned = imaging.turn(gray, quarter)
             yield f"turn{quarter}", imaging.rotate(turned, imaging.skew_angle(turned))
-    if _at_least("bands") and best_score() < WEAK:
+    if _at_least("bands") and (not early_stop or best_score() < WEAK):
         # Deskew first, then deshred. `realign_bands` reads the printed border's
         # left edge per row; on a skewed page that border is diagonal, so the
         # per-row offset drifts continuously and the bands are measured against a
@@ -135,6 +141,7 @@ def reads_for(doc, page, page_no):
     dev pts for 43x runtime (experiments.md row 8). The pages it targeted were
     turned or shredded, not low-resolution — hence the geometric path instead.
     """
+    early_stop = _early_stop()
     reads = []
     with tempfile.TemporaryDirectory(prefix="mibocr") as tmp:
         best_score, written = -1, 0
@@ -155,11 +162,11 @@ def reads_for(doc, page, page_no):
 
         for name, encoded, gray in _sources(doc, page, tmp):
             read(encoded, name)
-            for variant, image in _restorations(gray, lambda: best_score):
+            for variant, image in _restorations(gray, lambda: best_score, early_stop):
                 read(imaging.to_png_bytes(image), f"{name}+{variant}")
-                if best_score >= GOOD_ENOUGH:
+                if early_stop and best_score >= GOOD_ENOUGH:
                     break
-            if best_score >= GOOD_ENOUGH:
+            if early_stop and best_score >= GOOD_ENOUGH:
                 break
     return reads
 

@@ -6,6 +6,7 @@ clamped/normalized here so a pipeline bug can never produce an invalid row.
 """
 import re
 import sys
+from datetime import date
 
 ADJUDICATIONS = {"APPROVED", "DENIED", "NEEDS_REVIEW"}
 FEE_VALUES = {"paid", "waived", "unpaid", "unknown"}
@@ -69,8 +70,14 @@ def validate(record, fallback_case_id=None):
         record["adjudication"] = "NEEDS_REVIEW"
     if record["fee_status"] not in FEE_VALUES:
         record["fee_status"] = "unknown"
-    if not DATE_RE.match(record["arrival_date"] or ""):
+    ad = record["arrival_date"] or ""
+    if not DATE_RE.match(ad):
         record["arrival_date"] = "1900-01-01"
+    else:
+        try:                       # well-shaped but impossible -> coerce to the sentinel
+            date.fromisoformat(ad)
+        except ValueError:
+            record["arrival_date"] = "1900-01-01"
     try:
         record["confidence"] = min(1.0, max(0.0, float(record["confidence"])))
     except (TypeError, ValueError):

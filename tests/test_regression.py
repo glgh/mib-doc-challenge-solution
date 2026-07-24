@@ -8,6 +8,27 @@ import pytest
 from mib import parse, vocab
 
 
+def test_policy_constants_have_a_single_source():
+    """Embargo sets, the revoked-sponsor set, and the stale cutoff were copied
+    across the rules engine, the derived signals, and the ML features. They were
+    identical, so an edit to one policy fact silently changed the rules branch
+    but not the ML feature or the emitted flag — a live hazard since both deciders
+    run every case. They now share one definition; this pins that so the drift
+    cannot return (identity, not equality: a re-copied literal would fail here)."""
+    from mib import features, policy, signals
+    from mib.packet import Packet
+
+    assert features.REVOKED is vocab.REVOKED_SPONSORS
+    assert features.FULL_EMBARGO is policy.FULL_EMBARGO_WORLDS
+    assert features.PARTIAL_EMBARGO is policy.PARTIAL_EMBARGO_WORLDS
+    assert features.STALE_CUTOFF is policy.STALE_CUTOFF
+    # signals infers planetary_embargo off the same set (drawn from policy here,
+    # so a re-inlined divergent copy in signals would drop this world and fail).
+    world = next(iter(policy.FULL_EMBARGO_WORLDS))
+    sig = signals.derive(Packet(case_id="MIB-000000"), {"home_world": world})
+    assert "planetary_embargo" in sig["flags"]
+
+
 def test_bands_rung_deskews_before_deshredding(monkeypatch):
     """The `bands` restoration rung must deshred the *deskewed* page, not the raw
     one: `imaging.realign_bands` keys off the printed border's left edge per row,
@@ -173,3 +194,63 @@ def test_unrepairable_values_are_dropped_not_passed_through():
     assert vocab.snap("species_code", "ZZ_UNSEEN_SPECIES") is None
     # declared_purpose keeps its passthrough: it is free text, not an enumeration.
     assert vocab.snap("declared_purpose", "an unseen purpose") == "an unseen purpose"
+
+
+def test_confusion_weighted_matcher_recovers_ocr_corruption():
+    """A flag word survives OCR damage that exact matching drops.
+
+    MIB-000078's B-13 read `Observed flags: bichaxarc_yed` for biohazard_red;
+    exact `token in ALL_FLAGS` missed it and the disqualifying flag was lost. The
+    confusion-weighted matcher resolves the look-alike substitutions (o->c, z->x,
+    r->y) that a plain edit distance would not credit."""
+    assert vocab.match_flag_token("bichaxarc_yed") == "biohazard_red"
+    assert vocab.match_flag_token("bicharerd_yed") == "biohazard_red"
+    assert vocab.match_flag_token("actwe_warant") == "active_warrant"
+    assert vocab.match_flag_token("planetary_embargo") == "planetary_embargo"
+
+
+def test_matcher_rejects_benign_flag_substring_words():
+    """A word that is a substring of a flag name is not the flag. The margin guard
+    plus length-normalized distance keep 'biometrics'/'sponsor' from posing as
+    illegible_biometrics/sponsor_mismatch — the false-positive that would deny a
+    clean case."""
+    for benign in ("biometrics", "sponsor", "biometric", "status", "reason",
+                   "finding", "approved", "denied", "registry", "none"):
+        assert vocab.match_flag_token(benign) is None, benign
+
+
+def test_flag_extraction_survives_label_damage_and_trailing_punctuation():
+    """observed_flags reads the flag value, not a specific parsed key, so a
+    mangled label ('Chserved flags') or trailing punctuation ('planetary_embargo.'
+    from adjudicator prose) no longer drops the flag."""
+    from mib import signals
+    from mib.packet import SRC_OCR, Packet
+
+    pkt = Packet(case_id="MIB-000078")
+    pkt.docs = [(parse.DOC_BIOMETRIC, SRC_OCR,
+                 {"_raw": ["Chserved flags: bichaxarc_yed, illegible_biometrics"]})]
+    assert signals.observed_flags(pkt) == {"biohazard_red", "illegible_biometrics"}
+
+    note = Packet(case_id="MIB-000121")
+    note.docs = [(parse.DOC_ADJUDICATOR, SRC_OCR,
+                  {"_raw": ["Finding: DENIED. Reason: Disqualifying risk flag: planetary_embargo."]})]
+    assert signals.observed_flags(note) == {"planetary_embargo"}
+
+
+def test_flag_extraction_does_not_fabricate_from_legend_or_negation():
+    """The guards that keep the fuzzy scan from manufacturing a flag: an explicit
+    none/clear, a legend that lists the options, and a sentence that negates the
+    flag must all yield nothing."""
+    from mib import signals
+    from mib.packet import SRC_OCR, Packet
+
+    def flags(*lines):
+        p = Packet()
+        p.docs = [(parse.DOC_BIOMETRIC, SRC_OCR, {"_raw": list(lines)})]
+        return signals.observed_flags(p)
+
+    assert flags("Observed flags: none") == set()
+    assert flags("Registry Status: clear") == set()
+    assert flags("Finding: APPROVED. Reason: cleared of biohazard_red") == set()
+    assert flags("Possible flags: biohazard_red | active_warrant | "
+                 "memory_tampering | planetary_embargo") == set()

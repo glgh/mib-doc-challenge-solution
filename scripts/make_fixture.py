@@ -38,11 +38,11 @@ def build_case(rec):
     """One fixture case: frozen page text plus the record it currently produces."""
     from mib import runner
 
-    pages, reads = cache.to_case(rec["pages"])
-    record, debug = runner.predict_from_evidence(pages, reads, rec["stem"])
+    pages, ocr_lines = cache.to_case(rec["pages"])
+    record, debug = runner.predict_from_evidence(pages, ocr_lines, rec["stem"])
     return {
         "stem": rec["stem"],
-        "pages": cache.from_case(pages, reads),
+        "pages": cache.from_case(pages, ocr_lines),
         "expected_record": record,
         "expected_branch": debug["branch"],
     }

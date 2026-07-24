@@ -117,3 +117,71 @@ def clean_ocr_line(line):
     line = re.sub(r"\bM[iI1l][bB]-", "MIB-", line)
     line = re.sub(r"\b[S5]PN[-–—]", "SPN-", line)
     return line.strip()
+
+
+# OCR shape confusions: swapping one glyph for a look-alike is cheaper than a
+# full edit, because that is the mistake the scanner actually makes. This is the
+# letter-shape counterpart of _DIGIT_FIXES above, expressed as edit costs so a
+# corrupted flag word still resolves. Pairs are symmetric; cost < 1 (a real edit).
+_CONFUSION_COST = 0.3
+_OCR_SUB_COST = {}
+for _x, _y in [
+    ("o", "c"), ("o", "e"), ("o", "0"), ("o", "a"), ("c", "e"), ("a", "e"),
+    ("z", "x"), ("z", "2"), ("r", "n"), ("r", "y"), ("n", "m"), ("u", "v"),
+    ("h", "b"), ("h", "n"), ("b", "8"), ("b", "6"), ("g", "9"), ("g", "q"),
+    ("l", "1"), ("l", "i"), ("i", "1"), ("i", "j"), ("s", "5"), ("s", "z"),
+    ("t", "f"), ("t", "l"), ("d", "a"), ("d", "o"), ("e", "c"), ("v", "y"),
+]:
+    _OCR_SUB_COST[(_x, _y)] = _CONFUSION_COST
+    _OCR_SUB_COST[(_y, _x)] = _CONFUSION_COST
+
+
+def _sub_cost(x, y):
+    if x == y:
+        return 0.0
+    return _OCR_SUB_COST.get((x, y), 1.0)
+
+
+def _weighted_levenshtein(a, b):
+    """Edit distance with substitution priced by OCR look-alike cost; ins/del = 1."""
+    n = len(b)
+    prev = [float(j) for j in range(n + 1)]
+    for i in range(1, len(a) + 1):
+        cur = [float(i)] + [0.0] * n
+        ai = a[i - 1]
+        for j in range(1, n + 1):
+            cur[j] = min(prev[j] + 1.0,                       # delete a[i-1]
+                         cur[j - 1] + 1.0,                    # insert b[j-1]
+                         prev[j - 1] + _sub_cost(ai, b[j - 1]))  # substitute
+        prev = cur
+    return prev[n]
+
+
+def _weighted_sim(a, b):
+    if not a and not b:
+        return 1.0
+    return 1.0 - _weighted_levenshtein(a, b) / max(len(a), len(b))
+
+
+# Only the risk flags — never "none", which is the absence of one.
+_REAL_FLAGS = [f for f in FLAGS if f != "none"]
+
+
+def match_flag_token(token, cutoff=0.7, margin=0.15):
+    """Resolve one OCR-mangled token to a risk flag, or None.
+
+    Confusion-weighted so `bichaxarc_yed` reaches `biohazard_red`, and
+    margin-guarded so a benign flag-substring word cannot pose as a flag: an
+    edit-distance metric normalized by the longer string already scores
+    `biometrics` vs `illegible_biometrics` at ~0.5 (a whole inserted prefix is
+    not an OCR confusion), and requiring the winner to beat the runner-up by
+    `margin` closes the rest of the gap.
+    """
+    t = (token or "").strip().lower()
+    if len(t) < 4:
+        return None
+    scored = sorted(((_weighted_sim(t, f), f) for f in _REAL_FLAGS), reverse=True)
+    (best_s, best_f), (second_s, _) = scored[0], scored[1]
+    if best_s >= cutoff and best_s - second_s >= margin:
+        return best_f
+    return None

@@ -35,7 +35,7 @@ def actual(cases):
 
 
 def rehydrate(page_dicts):
-    """Frozen page text -> (pages, reads), ready for runner.predict_from_evidence.
+    """Frozen page text -> (pages, ocr_lines), ready for predict_from_evidence.
 
     Shared with the replay path rather than reimplemented here: a test helper
     that rehydrates differently from the tool under test can pass while the real
@@ -48,5 +48,5 @@ def rehydrate(page_dicts):
 def predict(case, pages=None):
     """Run the real pipeline over a fixture case's frozen page text."""
     from mib import runner
-    pages, reads = rehydrate(case["pages"] if pages is None else pages)
-    return runner.predict_from_evidence(pages, reads, case["stem"])
+    pages, ocr_lines = rehydrate(case["pages"] if pages is None else pages)
+    return runner.predict_from_evidence(pages, ocr_lines, case["stem"])

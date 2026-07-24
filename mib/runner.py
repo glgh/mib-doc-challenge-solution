@@ -34,12 +34,18 @@ CASE_OCR_BUDGET_S = float(os.environ.get("MIB_CASE_BUDGET_S", "120"))
 
 
 def read_case(pdf_path, budget_s=None):
-    """S1 + S2 for one PDF -> (pages, reads_by_page).
+    """S1 + S2 for one PDF -> (pages, ocr_lines_by_page).
 
     The document is opened once and held across both stages: rendering a scanned
     page needs the same handle S1 read from. Keeping that lifetime here is what
     lets `extract` avoid reaching forward into `render`, which is the backwards
     edge the previous `pdfio.read_pages` had.
+
+    Variant selection (`render.best`) is S2's job and runs here, so the value
+    that crosses into the pure downstream half — and into the cache — is the
+    chosen line list per page, not the ensemble of readings. `best` is impure
+    w.r.t. the parser's readability vocab, so keeping it above the cache boundary
+    is what lets the replay path consume the decision instead of re-deriving it.
     """
     budget = CASE_OCR_BUDGET_S if budget_s is None else budget_s
     reads = {}
@@ -55,30 +61,31 @@ def read_case(pdf_path, budget_s=None):
                 break
             reads[page.page_no] = render.reads_for(doc, doc[page.page_no],
                                                    page.page_no)
-    return pages, reads
+    ocr_lines = {no: render.best_lines(rs) for no, rs in reads.items()}
+    return pages, ocr_lines
 
 
 def predict(pdf_path):
-    pages, reads = read_case(pdf_path)
-    return predict_from_evidence(pages, reads, pdf_path.stem)
+    pages, ocr_lines = read_case(pdf_path)
+    return predict_from_evidence(pages, ocr_lines, pdf_path.stem)
 
 
-def predict_from_evidence(pages, reads, stem):
+def predict_from_evidence(pages, ocr_lines, stem):
     """Everything downstream of page text: pure, cheap, independently testable.
 
     Split from `read_case` so the characterization tests and the replay gate can
     drive the real pipeline from frozen page text without re-running OCR — and
     without re-implementing this sequence, which would let them pass while the
-    pipeline drifted underneath.
+    pipeline drifted underneath. `ocr_lines` is the already-chosen line list per
+    page; selection happened in `read_case`, so nothing here re-derives it.
     """
-    ocr_lines = {no: render.best_lines(rs) for no, rs in reads.items()}
     pkt = packet.assemble(pages, ocr_lines, fallback_case_id=stem)
     provenance = {}
     values = packet.merge_fields(pkt, provenance)
     sig = signals.derive(pkt, values)
     decision, branch = policy.adjudicate(values, sig)
     conf = confidence.for_branch(branch)
-    record = emit.build_record(pkt.case_id, values, sig["flags"], decision, conf)
+    record = emit.build_record(pkt.case_id, values, sig["emit_flags"], decision, conf)
     debug = {
         "case_id": pkt.case_id,
         "branch": branch,
@@ -87,6 +94,7 @@ def predict_from_evidence(pages, reads, stem):
         "scan_only_pages": pkt.scan_only_pages,
         "has_biometric": sig["has_biometric"],
         "flags": sorted(sig["flags"]),
+        "emit_flags": sorted(sig["emit_flags"]),
         "finding": sig["finding"],
         "waiver_code": sig["waiver_code"],
         "registry_status": (pkt.registry.get("registry_status") or "").strip().upper(),
@@ -108,7 +116,7 @@ def predict_from_evidence(pages, reads, stem):
         debug["mlp_decision"], debug["mlp_confidence"], debug["mlp_probs"] = \
             mlp_dec, mlp_conf, mlp_probs
         if decider == "mlp":
-            record = emit.build_record(pkt.case_id, values, sig["flags"],
+            record = emit.build_record(pkt.case_id, values, sig["emit_flags"],
                                        mlp_dec, mlp_conf)
     except Exception as exc:  # noqa: BLE001
         debug["mlp_error"] = str(exc)

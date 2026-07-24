@@ -10,17 +10,16 @@ import sys
 from multiprocessing import Pool
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 from mib import packet, policy, runner, signals  # noqa: E402
-from mib.stages import render  # noqa: E402
 
-CH = Path(__file__).resolve().parent.parent.parent / "mib-doc-challenge"
+CH = ROOT.parent / "mib-doc-challenge"
 
 
 def row(pdf_path):
     try:
-        pages, reads = runner.read_case(pdf_path)
-        ocr_lines = {no: render.best_lines(rs) for no, rs in reads.items()}
+        pages, ocr_lines = runner.read_case(pdf_path)
         pkt = packet.assemble(pages, ocr_lines, fallback_case_id=pdf_path.stem)
         values = packet.merge_fields(pkt)
         sig = signals.derive(pkt, values)
@@ -44,7 +43,11 @@ def row(pdf_path):
 
 def main():
     truth = {r["case_id"]: r for r in csv.DictReader(open(CH / "data/train_labels.csv"))}
-    pdfs = sorted((CH / "data/train").glob("*.pdf"))
+    # Dev only: mining rules/censuses over all train would leak the holdout into
+    # every threshold this feeds (embargo sets, STALE_CUTOFF, revoked lists).
+    dev = set(json.loads((ROOT / "data_splits.json").read_text())["dev"])
+    pdfs = [p for p in sorted((CH / "data/train").glob("*.pdf")) if p.stem in dev]
+    print(f"mining {len(pdfs)} dev cases (holdout excluded)", flush=True)
     with Pool(4) as pool:
         rows = pool.map(row, pdfs)
     out = Path(__file__).resolve().parent.parent / "output/signals.jsonl"

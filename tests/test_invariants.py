@@ -10,7 +10,6 @@ import pytest
 
 from conftest import predict
 from mib import emit
-from mib.textmatch import trusted_text, unsourced_flags
 
 CASE_ID_RE = re.compile(r"^MIB-\d{6}$")
 SPONSOR_RE = re.compile(r"^SPN-\d{4}$")
@@ -141,14 +140,44 @@ def test_an_injected_answer_key_is_ignored(cases):
         + "\n  ".join(influenced))
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "P1: signals.derive unions evidence-sourced flags with policy-inferred ones "
-    "(planetary_embargo from home_world, sponsor_mismatch, identity_conflict) and "
-    "emit writes the union to risk_flags. organizer-guidance.md §1 forbids emitting "
-    "a flag with no visible-evidence source. Fixed by the observed/derived split."))
-def test_every_emitted_risk_flag_has_an_evidence_source(cases, actual):
-    unsourced = []
-    for case, r, _debug in records(cases, actual):
-        for flag in unsourced_flags(r["risk_flags"], trusted_text(case["pages"])):
-            unsourced.append(f"{case['stem']}: {flag}")
-    assert not unsourced, "flags emitted with no visible source:\n  " + "\n  ".join(unsourced)
+def test_emitted_flags_exclude_policy_only_inferences(cases, actual):
+    """Every emitted risk flag has a visible-evidence source: it was read off a
+    slip (observed), never merely inferred by policy.
+
+    The naive form of this — "each emitted flag's token appears in the trusted
+    text" — is the same literal-presence trap that test_hidden_text_cannot_change
+    _the_output was rewritten to avoid: an OCR-repaired `illegible_biometrics` is
+    the pipeline reading a mangled slip, not an injection, and 13 dev truth flags
+    are exactly that (dropping them costs extraction, measured). So the real
+    property is checked instead: a flag policy only *inferred* (planetary_embargo
+    from an embargo world, or a cross-document sponsor/identity mismatch) may
+    drive the decision but must never reach risk_flags. This regresses loudly if
+    emission goes back to the full policy set (`sig["flags"]`)."""
+    leaked = []
+    for case, r, dbg in records(cases, actual):
+        emitted = set(r["risk_flags"].split("|")) - {"none"}
+        inferred_only = set(dbg["flags"]) - set(dbg["emit_flags"])
+        for flag in sorted(emitted & inferred_only):
+            leaked.append(f"{case['stem']}: {flag}")
+    assert not leaked, ("policy-only inference emitted as a risk flag:\n  "
+                        + "\n  ".join(leaked))
+
+
+def test_inferred_flag_drives_policy_but_is_not_emitted():
+    """The observed/derived split, pinned independently of the fixture: an embargo
+    home world infers planetary_embargo, which must DENY the case yet stay out of
+    the emitted risk_flags because no slip stated it."""
+    from mib import policy, signals
+    from mib.packet import Packet
+
+    world = next(iter(policy.FULL_EMBARGO_WORLDS))
+    values = {"home_world": world, "visa_class": "XW-1",
+              "arrival_date": "2026-06-01", "sponsor_id": "SPN-1234",
+              "fee_status": "paid"}
+    sig = signals.derive(Packet(case_id="MIB-000000"), values)
+    assert "planetary_embargo" in sig["flags"]           # available to policy
+    assert "planetary_embargo" not in sig["emit_flags"]  # but not visible evidence
+    decision, _branch = policy.adjudicate(values, sig)
+    assert decision == "DENIED"
+    record = emit.build_record("MIB-000000", values, sig["emit_flags"], decision, 0.5)
+    assert "planetary_embargo" not in record["risk_flags"]

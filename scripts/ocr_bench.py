@@ -20,7 +20,6 @@ import io
 import json
 import os
 import random
-import re
 import subprocess
 import sys
 import tempfile
@@ -28,12 +27,14 @@ import time
 from multiprocessing import Pool
 from pathlib import Path
 
-import fitz
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
 CH = ROOT.parent / "mib-doc-challenge"
 sys.path.insert(0, str(ROOT))
+
+from mib.stages import extract  # noqa: E402
+from mib.textmatch import normalize as _tnorm, present as _present  # noqa: E402
 
 CHECK_FIELDS = ["species_code", "home_world", "visa_class", "sponsor_id",
                 "arrival_date", "declared_purpose", "fee_status", "applicant_name"]
@@ -85,40 +86,33 @@ VARIANTS = {
 }
 
 
-def _norm(s):
-    return re.sub(r"[^a-z0-9]", "", s.lower())
-
-
 def recovered(field, truth_value, texts):
-    """Loose containment: normalized truth value appears in any normalized text."""
-    tv = _norm(truth_value)
-    if not tv:
-        return False
-    return any(tv in _norm(t) for t in texts)
+    """Token-boundary match on the scorer's own normalization, so a short value no
+    longer matches spuriously inside a longer one (`paid` ⊄ `unpaid`)."""
+    return bool(_present(truth_value, _tnorm(" ".join(texts))))
 
 
 def bench_case(args):
     cid, variants = args
-    doc = fitz.open(str(CH / f"data/train/{cid}.pdf"))
     truth = TRUTH[cid]
     out = {}
-    for vname in variants:
-        fn = VARIANTS[vname]
-        texts = []
-        t0 = time.time()
-        for page in doc:
-            if len(page.get_text()) > 400:   # text-layer page; not OCR territory
-                continue
-            if not page.get_images():
-                continue
-            emb, ren = page_images(doc, page)
-            texts.extend(fn(emb, ren))
-        hits = {f: recovered(f, truth[f], texts) for f in CHECK_FIELDS}
-        # flags: count truth components found
-        tflags = [] if truth["risk_flags"] == "none" else truth["risk_flags"].split("|")
-        hits["risk_flag_components"] = sum(recovered("rf", fl, texts) for fl in tflags)
-        hits["_n_truth_flags"] = len(tflags)
-        out[vname] = (hits, time.time() - t0)
+    with extract.open_document(CH / f"data/train/{cid}.pdf") as doc:
+        # Bench the exact pages production OCRs — `Page.is_scan_only`, not a
+        # separate 400-char heuristic that scores a different page set.
+        scan_nos = [p.page_no for p in extract.pages(doc) if p.is_scan_only]
+        for vname in variants:
+            fn = VARIANTS[vname]
+            texts = []
+            t0 = time.time()
+            for no in scan_nos:
+                emb, ren = page_images(doc, doc[no])
+                texts.extend(fn(emb, ren))
+            hits = {f: recovered(f, truth[f], texts) for f in CHECK_FIELDS}
+            # flags: count truth components found
+            tflags = [] if truth["risk_flags"] == "none" else truth["risk_flags"].split("|")
+            hits["risk_flag_components"] = sum(recovered("rf", fl, texts) for fl in tflags)
+            hits["_n_truth_flags"] = len(tflags)
+            out[vname] = (hits, time.time() - t0)
     return cid, out
 
 

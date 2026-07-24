@@ -28,7 +28,7 @@ SCHEMA = 1
 
 # A mismatch here means the two artifacts describe different pipelines and any
 # join across them is meaningless.
-CRITICAL_KEYS = ("restore",)
+CRITICAL_KEYS = ("restore", "early_stop")
 # A mismatch here is usually just as invalidating, but the working tree is
 # routinely dirty mid-phase and rebuilding every artifact per commit is not
 # affordable, so it warns instead of failing.
@@ -42,6 +42,32 @@ def restore_level():
 
 def at_least(level):
     return RESTORE_LEVELS.index(restore_level()) >= RESTORE_LEVELS.index(level)
+
+
+def early_stop():
+    """Whether S2 stops OCRing a page once a reading looks 'good enough'.
+
+    Off by default: an exhaustive read (every geometric variant, keep the best)
+    scored +0.21 dev over stopping early — the early stop was settling for a worse
+    variant — for ~0.5s/case of a 6s budget (see docs/experiments.md). Opt back in
+    with MIB_EARLY_STOP=1. Critical + stamped: a cache built one way must never be
+    joined with predictions built the other, exactly like `restore`.
+    """
+    return os.environ.get("MIB_EARLY_STOP", "0") == "1"
+
+
+# Decider config is stamped for visibility (shown by `describe`) but deliberately
+# NOT in CRITICAL_KEYS yet: a page-text cache is decider-independent, so enforcing
+# it would false-positive cache<->eval joins until `require_agreement` learns to
+# skip keys absent from some inputs. Promoting to critical is a follow-up.
+def decider():
+    """Which S5 decider produced an eval artifact (`rules` | `mlp`)."""
+    return os.environ.get("MIB_DECIDER", "rules").lower()
+
+
+def cfa_veto():
+    """The learned decider's P(DENIED) demotion threshold (`MIB_CFA_VETO`)."""
+    return os.environ.get("MIB_CFA_VETO", "1.0")
 
 
 def _git_state():
@@ -63,6 +89,9 @@ def stamp(**extra):
     return {
         "schema": SCHEMA,
         "restore": restore_level(),
+        "early_stop": early_stop(),
+        "decider": decider(),
+        "cfa_veto": cfa_veto(),
         "git_rev": rev,
         "git_dirty": dirty,
         "created": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -75,7 +104,9 @@ def describe(meta):
         return "UNSTAMPED"
     dirty = "+dirty" if meta.get("git_dirty") else ""
     back = " (backfilled)" if meta.get("backfilled") else ""
-    return f"restore={meta.get('restore', '?')} rev={meta.get('git_rev') or '?'}{dirty}{back}"
+    es = " early_stop" if meta.get("early_stop") else ""
+    dec = f" decider={meta['decider']}" if meta.get("decider") else ""
+    return f"restore={meta.get('restore', '?')}{es}{dec} rev={meta.get('git_rev') or '?'}{dirty}{back}"
 
 
 def require_agreement(labelled):

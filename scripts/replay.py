@@ -8,11 +8,13 @@ Two jobs, and the second is why this exists:
      without paying for OCR again. `scripts/dump_text.py` pays that cost once.
 
   2. The refactor gate. Replaying a cache and diffing against predictions from a
-     real run tests three claims at once: that `solution.predict_from_pages` is a
-     faithful seam (same records as the fused path), that the cache is a faithful
-     recording of page text (nothing lost in serialization), and that OCR was
-     deterministic when the cache was built. Any pure refactor in the staged
-     pipeline must keep this diff empty.
+     real run tests that everything downstream of page text is behaviour-
+     preserving: that `predict_from_evidence` is a faithful seam (same records as
+     the fused path) and that the cache is a faithful recording of the chosen page
+     text (nothing lost in serialization). It does NOT exercise OCR or variant
+     selection — those ran once at dump time and only their output is stored, so
+     an S1/S2 change needs scripts/verify_render.py, not this. Any pure refactor
+     downstream of the cache boundary must keep this diff empty.
 
 Provenance is checked, not assumed: replaying a cache built at one restoration
 level against predictions from another compares two different pipelines and the
@@ -38,8 +40,8 @@ def replay(cache_path):
         if rec.get("error"):
             failures.append(rec["stem"])
             continue
-        pages, reads = cache.to_case(rec["pages"])
-        record, debug = runner.predict_from_evidence(pages, reads, rec["stem"])
+        pages, ocr_lines = cache.to_case(rec["pages"])
+        record, debug = runner.predict_from_evidence(pages, ocr_lines, rec["stem"])
         out.append(record)
         debugs.append(debug)
     return meta, emit.dedupe(out), debugs, failures
@@ -99,8 +101,8 @@ def main(cache_path, out_dir=None, reference=None):
         if len(diffs) > 40:
             print(f"    ... and {len(diffs) - 40} more")
     if not (diffs or only_ref or only_got):
-        print("  IDENTICAL — seam is behavior-preserving, cache is faithful, "
-              "OCR was deterministic")
+        print("  IDENTICAL — downstream seam is behavior-preserving and the "
+              "cached page text is faithful (OCR/selection not exercised)")
         return 0
     return 1
 

@@ -5,24 +5,73 @@ policy. Signals must be validated on train before policy may act on them.
 """
 import re
 
-from . import parse
-from .parse import ALL_FLAGS, SPONSOR_RE, norm_name
+from . import parse, policy, vocab
+from .parse import SPONSOR_RE, norm_name
+
+# Flags are asserted on these documents; scanning others invites false positives
+# from decoys and form legends. (B-13 slip, registry extract, adjudicator note.)
+FLAG_DOC_TYPES = (parse.DOC_ADJUDICATOR, parse.DOC_BIOMETRIC, parse.DOC_REGISTRY)
+_TOKEN_SPLIT = re.compile(r"[\s|,;:/()\[\]]+")
+_LEGEND_RE = re.compile(
+    r"\b(option|one of|any of|possible|valid value|choose|list of|e\.g\.)\b", re.I)
+_NEGATION = {"no", "not", "without", "none", "negative", "clear", "cleared", "absent"}
+_STRIP = " .,;:|/()[]'\"-"
+
+
+def _flags_in_line(line):
+    """Risk flags asserted on one line, matched fuzzily, or empty.
+
+    The guards keep an OCR-mangled flag *value* from being manufactured out of a
+    legend that merely lists the options, or a sentence that negates the flag
+    ('cleared of biohazard_red'). Fuzzy matching itself is in mib.vocab.
+    """
+    low = line.strip().lower()
+    if _LEGEND_RE.search(low):
+        return set()
+    tokens = [t.strip(_STRIP) for t in _TOKEN_SPLIT.split(low)]
+    found = set()
+    for i, tok in enumerate(tokens):
+        if not tok or any(w in _NEGATION for w in tokens[max(0, i - 2):i]):
+            continue
+        flag = vocab.match_flag_token(tok)
+        if flag:
+            found.add(flag)
+    return found if len(found) <= 3 else set()   # >3 on one line reads as a legend
 
 
 def observed_flags(packet):
-    """Risk flags stated on the B-13 slip and registry status line. (§5, validated)"""
-    flags = set()
-    observed = (packet.biometric.get("observed_flags") or "").strip().lower()
-    for token in re.split(r"[|,;\s]+", observed):
-        if token in ALL_FLAGS:
-            flags.add(token)
+    """Risk flags stated on the flag-bearing documents, read value-first. (§5)
 
-    reg_status = (packet.registry.get("registry_status") or "").strip().lower()
-    if reg_status and reg_status != "clear":
-        for token in re.split(r"[|,;\s]+", reg_status):
-            if token in ALL_FLAGS:
-                flags.add(token)
+    Matched fuzzily and confusion-weighted (mib.vocab.match_flag_token) so the
+    flag survives OCR damage to either the label ('Observed flags'->'Chserved
+    flags') or the value ('biohazard_red'->'bichaxarc_yed') — the same
+    'values outlast labels' property S2's evidence_score relies on. `_raw` holds
+    only visible + OCR text (assemble never stores hidden_lines there), so this
+    reads trusted evidence by construction; the injection differential tests hold.
+    """
+    flags = set()
+    for dtype, _src, kv in packet.docs:
+        if dtype in FLAG_DOC_TYPES:
+            for line in kv.get("_raw", []):
+                flags |= _flags_in_line(line)
     return flags
+
+
+def has_flag_evidence(packet):
+    """Whether the B-13 slip's risk line was actually read — a flag or an explicit
+    'none'/'clear' — versus unreadable debris. Lets the risk-concealment census in
+    policy tell 'flags: none' from 'flags: <unreadable>'; unreadable is not clear.
+    """
+    bio = packet.biometric
+    if bio.get("observed_flags") is not None:   # parsed key present (incl. 'none')
+        return True
+    for line in bio.get("_raw", []):
+        if _flags_in_line(line):
+            return True
+        low = line.lower()
+        if "flag" in low and re.search(r"\b(none|clear)\b", low):
+            return True
+    return False
 
 
 def sponsor_mismatch(packet, values):
@@ -41,11 +90,17 @@ def sponsor_mismatch(packet, values):
     return False
 
 
-def identity_conflict(packet):
-    """Registry name disagrees with intake name. (§2, partial)"""
+def identity_conflict(packet, values):
+    """Registry name disagrees with the applicant name we actually emit. (§2, partial)
+
+    Compares against the merged value, not the raw intake kv, so a manual
+    correction or a precedence choice that already fixed applicant_name also
+    clears the conflict — otherwise this flag can fire against, and contradict,
+    the very name the record reports.
+    """
     reg_name = packet.registry.get("registry_name")
-    intake_name = packet.intake.get("applicant_name")
-    return bool(reg_name and intake_name and norm_name(reg_name) != norm_name(intake_name))
+    name = values.get("applicant_name")
+    return bool(reg_name and name and norm_name(reg_name) != norm_name(name))
 
 
 def adjudicator_finding(packet):
@@ -66,19 +121,30 @@ def waiver_code(packet):
 
 
 def derive(packet, values):
-    """All signals as a dict; single entry point for policy and diagnostics."""
-    flags = set(observed_flags(packet))
+    """All signals as a dict; single entry point for policy and diagnostics.
+
+    Two flag sets, deliberately distinct. `flags` is what policy acts on:
+    observed evidence plus policy-level inferences. `emit_flags` is only the
+    observed subset — the flags with a visible-evidence source. organizer
+    guidance §1 forbids emitting an inferred flag, so the inference
+    (planetary_embargo from an embargo world, sponsor_mismatch, identity_conflict)
+    still drives the decision but is never written to risk_flags.
+    """
+    observed = set(observed_flags(packet))
+    flags = set(observed)
     if sponsor_mismatch(packet, values):
         flags.add("sponsor_mismatch")
-    if identity_conflict(packet):
+    if identity_conflict(packet, values):
         flags.add("identity_conflict")
     # Full-embargo origin implies the flag even when no document states it:
     # train shows 50/50 of these carry planetary_embargo. (Not inferred for
-    # Wolf-1061c — its denials mostly lack the flag.)
-    if values.get("home_world") in ("TRAPPIST-1e", "Eris Relay"):
+    # Wolf-1061c — its denials mostly lack the flag.) Inference drives policy
+    # only; it is not evidence, so it does not enter emit_flags.
+    if values.get("home_world") in policy.FULL_EMBARGO_WORLDS:
         flags.add("planetary_embargo")
     return {
         "flags": flags,
+        "emit_flags": observed,
         "finding": adjudicator_finding(packet),
         "waiver_code": waiver_code(packet),
         "has_biometric": packet.has_doc(parse.DOC_BIOMETRIC),
@@ -86,6 +152,6 @@ def derive(packet, values):
         # `has_biometric` only says a slip was detected; the risk-concealment
         # census is about whether its risk line was actually read, so policy
         # needs to tell "flags: none" from "flags: <unreadable>".
-        "has_flag_evidence": bool(packet.biometric.get("observed_flags")),
+        "has_flag_evidence": has_flag_evidence(packet),
         "scan_only_pages": packet.scan_only_pages,
     }
