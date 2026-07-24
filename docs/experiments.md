@@ -242,7 +242,8 @@ one-line instrument and is the prerequisite for any gated retry.
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
 | 21 | 2026-07-24 | (dirty) | **Overfitting audit** (`scripts/audit_constants.py`): 5-fold within dev, every label-fitted constant refit from in-fold cases only, scored out-of-fold | **118.86** | 62.41 | 41.36 | 15.09 | 0 | — | measurement |
-| 22 | 2026-07-24 | (dirty) | **B2** — delete the `planetary_embargo` inference in `signals.derive`; the `embargo_world` branch it shadowed now fires (8 dev cases) and gets a fitted confidence entry | **119.13** | 62.41 | 41.36 | 15.35 | 0 | — | keep |
+| 22a | 2026-07-24 | 068e99e | **B2** — delete the `planetary_embargo` inference in `signals.derive`; the `embargo_world` branch it shadowed now fires (8 dev cases) | 119.10 | 62.41 | 41.36 | 15.32 | 0 | — | keep |
+| 22b | 2026-07-24 | 068e99e | **Refit the stale confidence table.** It dated to `f0e7f62`, fitted when dev was **114.43**, and had never been refit through P1b/P2/P3/rows 16 & 18 | **119.13** | 62.41 | 41.36 | 15.35 | 0 | — | keep |
 | 23 | 2026-07-24 | (dirty) | **C** — `mib/corpus.py`: label-free recurring-sponsor detection + post-stream revision in `solution.py`. No-op on the shipped config; measured by ablation | 119.13 | 62.41 | 41.36 | 15.35 | 0 | — | keep |
 
 **Row 21 — the fitted constants are not the overfit (2026-07-24, `output/audit_oof`, replay on
@@ -297,7 +298,32 @@ no observed flag at all** — those were the ones the inference was carrying, an
 `embargo_world`. (The "23 observed" figure is 15 + the 8 adjudicator cases, not the 23 that were in
 `disqualifying_flag`; conflating the two briefly made this look like a pure no-op.) The branch gains a
 real fitted entry (0.95, n=8, raw 1.000) and a backwards `signals → policy` import goes away.
-Decisions are unchanged — both branches deny — so the +0.03 is calibration only.
+Decisions are unchanged — both branches deny.
+
+**Correction: B2 is exactly score-neutral; the +0.03 came from something else that rode along in the
+same commit.** Refitting the table on the *pre-B2* eval reproduces every shipped value except
+`embargo_world`, which proves the numeric movement was not caused by B2 at all. The old table dated
+to `f0e7f62` — fitted when **dev was 114.43** — and was never refit through P1b, P2, the P3 parse
+work, or rows 16 and 18. So `mib/confidence_table.json` had been ~5 dev points stale for the entire
+run of that work. Decomposed on dev (calibration /20):
+
+| config | calib | Δ |
+| --- | ---: | ---: |
+| pre-B2 code + old table (the 119.10 baseline) | 15.32 | — |
+| **B2 code** + old table | 15.32 | **0.00** |
+| pre-B2 code + **refit table** | 15.35 | **+0.03** |
+| both (shipped `HEAD`) | 15.35 | +0.03 |
+
+B2's entire runtime effect is: `embargo_world` gains an entry and 8 dev cases attribute to it instead
+of `disqualifying_flag`. The staleness refresh moved 10 branches (largest: `clean_approve`
+0.871 → 0.95, `review_flag` 0.645 → 0.687, `missing_visa` 0.392 → 0.446, `transit_visa` 0.95 → 0.929)
+and is worth +0.03 by itself. That it was only +0.03 despite five points of drift is because the
+high-volume branches (`adjudicator_finding`, `disqualifying_flag`) were already clamped at 0.95.
+
+**Standing hazard:** nothing refits `confidence_table.json` automatically, and nothing warns when it
+goes stale. It silently encodes the accuracy of whatever pipeline last ran `scripts/fit_confidence.py`.
+`mib/confidence_table.meta.json` now stamps what it was fitted on — check it before trusting a
+calibration number, and refit after any change that moves branch membership.
 
 **Row 23 — cross-case correlation, gated on an ablation.** `vocab.REVOKED_SPONSORS` carries three ids
 "inferred from train labels". They are not overfit (row 21 re-mines them from every fold) but they are
