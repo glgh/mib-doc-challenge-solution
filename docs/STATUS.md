@@ -4,7 +4,9 @@ _Last updated: 2026-07-23. Rewrite this file in place; do not append._
 
 The front page. [experiments.md](experiments.md) has one scored row per change,
 [ALGORITHM.md](ALGORITHM.md) describes how the pipeline works, [BACKGROUND.md](BACKGROUND.md) holds
-the evidence behind the constants, and [CLAUDE.md](../CLAUDE.md) briefs a newcomer on the problem.
+the evidence behind the constants, [SIGNAL-SPACE.md](SIGNAL-SPACE.md) maps the evidence-modality
+investigation (which discarded signals pay and which leak), and [CLAUDE.md](../CLAUDE.md) briefs a
+newcomer on the problem.
 This file answers the two questions those don't: **what has been tried**, and **where are we right
 now**.
 
