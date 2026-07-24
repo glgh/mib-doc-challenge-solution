@@ -35,8 +35,8 @@ value being thrown away early. Orchestration is `mib/runner.py` (`read_case` = S
 `predict_from_evidence` = S3→emit); the CLI is `solution.py`.
 
 **Shipped configuration today:** rules decider (`MIB_DECIDER=rules`), skew restoration
-(`MIB_RESTORE=skew`). The learned decider and the `turn`/`bands` restorations are built and
-measured but off by default.
+(`MIB_RESTORE=skew`), exhaustive OCR (early-stop off, `MIB_EARLY_STOP=0`). The learned decider
+and the `turn`/`bands` restorations are built and measured but off by default.
 
 ---
 
@@ -75,9 +75,11 @@ what recovers text (a 300-DPI retry bought +0.21 for 43× runtime and was revert
 | `turn` | try 90° / 270° when nothing has read yet (180° never wins) |
 | `bands` | "shredder" realign — read per-row shift off the printed page border, roll each band back to the common left margin |
 
-Work stops early once `evidence_score >= GOOD_ENOUGH (6)`. `reads_for` keeps **every** reading;
-`best()` picks the highest score, earliest read breaking ties. `skew_sweep` is exposed so
-`scripts/visualize_restore.py` plots the exact curve the pipeline decides on.
+By default every variant is OCR'd and `best()` keeps the highest `evidence_score` (earliest read
+breaks ties). `MIB_EARLY_STOP=1` restores the old behaviour of stopping once `evidence_score >=
+GOOD_ENOUGH (6)`, which measured **−0.21 dev** — it settled for the first good-enough variant and
+spent the most OCR on the hardest pages (docs/experiments.md row 16). `reads_for` keeps **every**
+reading. `skew_sweep` is exposed so `scripts/visualize_restore.py` plots the exact curve.
 
 > **Hazard:** S2 page-quality scoring calls `parse.key_for`, so a `KEY_MAP` edit can change which
 > OCR variant wins and silently invalidate the page-text cache. S2 is therefore *not* a pure
@@ -188,8 +190,10 @@ EV[NEEDS_REVIEW] = 8·pN + 2·pA + 2·pD
 
 with an optional `MIB_CFA_VETO` (default `1.0` = pure EV) demoting a learned APPROVED to
 NEEDS_REVIEW once `P(DENIED)` exceeds the threshold. Honest OOF gain vs. rules: **+1.16
-classification pts** (dev 5-fold). It currently shows **5 CFAs** on a train-fit dev A/B — whether
-CFA 0 is a hard gate or a priced cost is an unreconciled decision (see STATUS.md hazards).
+classification pts** (dev 5-fold). Honest OOF CFA count is **12** (dev 5-fold, `experiments.md`);
+the in-sample train-fit dev read shows only 5, so quoting 5 beside the OOF gain understates the
+risk ~2.4×. Whether CFA 0 is a hard gate or a priced cost is an unreconciled decision (see
+STATUS.md hazards).
 
 ## Confidence + emit (`mib/confidence.py`, `mib/emit.py`)
 
@@ -219,6 +223,7 @@ ids are dropped with a stderr warning. `MIB_DEBUG_JSONL` writes the per-case dia
 | --- | --- | --- |
 | `MIB_DECIDER` | `rules` | which decider ships (`rules` \| `mlp`) |
 | `MIB_RESTORE` | `skew` | scan restoration level (`off` \| `skew` \| `turn` \| `bands`) |
+| `MIB_EARLY_STOP` | `0` | `1` stops OCR at the first good-enough variant; default reads every variant and keeps best-of-all (+0.21 dev) |
 | `MIB_CFA_VETO` | `1.0` | P(DENIED) that demotes a learned APPROVED to NEEDS_REVIEW (1.0 = pure EV) |
 | `MIB_CASE_BUDGET_S` | `120` | per-case OCR wall-clock bound; overrun drops remaining pages to text layer |
 | `MIB_WORKERS` | `4` | pool size (the contract gives 4 vCPU) |

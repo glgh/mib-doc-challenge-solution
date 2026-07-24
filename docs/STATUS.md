@@ -13,8 +13,11 @@ now**.
 ## Where things are
 
 **Committed: dev 115.43, CFA 0, 0 missing rows.** Shipped config is `MIB_RESTORE=skew` with the
-rules decider. **In flight (uncommitted): ~117.98**, which would be the best result yet — the
-previous best-ever, 116.88, required `MIB_RESTORE=bands`, whose runtime does not fit the budget.
+rules decider. **In flight (uncommitted): dev 118.63, CFA 0** — this session decoupled the stage
+seams (constants single-source, `best()` above the cache, signals→merged + observed/derived flag
+split) and made **exhaustive OCR the default** (early-stop off, +0.21; `experiments.md` row 16).
+The earlier ~117.98 P3-parse figure is superseded by this clean same-machine A/B; `bands` remains
+over budget.
 
 | step | commit | dev | note |
 | --- | --- | ---: | --- |
@@ -173,6 +176,7 @@ joined `skew`-derived text against `bands`-derived predictions and produced conf
 | 4 | Is CFA 0 a hard gate or a priced cost? | **a decision, not a measurement** — see hazards |
 | 5 | Where do the remaining 16.66 classification points go? | `fee_unknown` 7.37 and `b13_census` 5.37 are the two big cells, and neither is an OCR problem |
 | 6 | Does the dev→holdout gap still hold? | holdout untouched since 113.46 at `v1`; read only at a milestone |
+| 7 | Is hidden-line *content* worth mining as a signal? | untried — see note below |
 
 **Docker parity (question 2) is partially answered.** The container has now been run under the
 exact contract flags for the first time: image **0.13 GiB** against a 4 GiB cap, `--network none`,
@@ -180,6 +184,17 @@ read-only root, tmpfs `/tmp`, 4 cpu / 8 GiB — it runs and writes correct outpu
 ran at 1.11 s/PDF, extrapolating to **~1.55 h for 5,000** against the 8.3 h budget, which agrees
 with the laptop projection. **This is not yet a real answer**: 12 PDFs contain none of the heavy
 tail (p99 57s, max 107s per case), and every laptop timing in this repo was taken under load.
+
+**On question 7 (untried lever).** Today hidden spans are split off in `stages/extract` and barred
+from *evidence*: no field value can source from them (`textmatch.sourceable_text` = visible + OCR
+only) and no policy branch reads them — `test_hidden_text_cannot_change_the_output` guards this.
+But their *presence* is already a signal: `features.hidden_present` (`hidden_lines > 0`) feeds the
+learned decider. What is **not** used is the hidden *content*. `textmatch.hidden_text()` reconstructs
+the hidden string but has no runtime caller — only tests reference it. The lever: mine that content
+as a **flag only** — e.g. a hidden `SPN-####`/date/flag that conflicts with the visible value could
+raise `sponsor_mismatch`/`identity_conflict` or an injection tell. Hard constraint: it may only ever
+*flag*, never source a value or flip a branch toward the hidden value, or we reward the injection the
+guard exists to defeat. Unmeasured; no row yet.
 
 **On question 5**, the evidence is already in and it points away from OCR:
 
@@ -217,8 +232,9 @@ the branches whose job was to catch missing data.**
 position is that catastrophic false approvals are now *priced, not banned* — expected-points argmax
 already charges −4 for one, with `MIB_CFA_VETO` as a tunable demotion threshold. The extraction
 side has been treating CFA 0 as a hard gate and rejected changes on that basis. Both positions are
-defensible; the learned decider currently shows **5 CFAs** on a train-fit dev A/B. This needs a
-deliberate decision, not resolution by whoever commits last.
+defensible. The honest out-of-fold count is **12 CFAs** (dev 5-fold, `experiments.md`); the
+often-quoted **5** is an in-sample train-fit dev read that understates the real risk ~2.4×. This
+needs a deliberate decision, not resolution by whoever commits last.
 
 **Parallel sessions interfere, and the interference looks like a result.** The journal records a
 phantom "extraction changed under mlp" that was actually an in-flight `packet.py` edit landing
