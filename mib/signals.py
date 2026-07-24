@@ -5,7 +5,7 @@ policy. Signals must be validated on train before policy may act on them.
 """
 import re
 
-from . import parse, policy, vocab
+from . import parse, vocab
 from .parse import SPONSOR_RE, norm_name
 
 # Flags are asserted on these documents; scanning others invites false positives
@@ -136,12 +136,22 @@ def derive(packet, values):
         flags.add("sponsor_mismatch")
     if identity_conflict(packet, values):
         flags.add("identity_conflict")
-    # Full-embargo origin implies the flag even when no document states it:
-    # train shows 50/50 of these carry planetary_embargo. (Not inferred for
-    # Wolf-1061c — its denials mostly lack the flag.) Inference drives policy
-    # only; it is not evidence, so it does not enter emit_flags.
-    if values.get("home_world") in policy.FULL_EMBARGO_WORLDS:
-        flags.add("planetary_embargo")
+    # No planetary_embargo inference here. It used to be added for any
+    # FULL_EMBARGO_WORLDS origin, which duplicated policy's `embargo_world`
+    # branch and — being one position earlier in the cascade — shadowed it into
+    # dead code: 0 of 700 dev cases ever reached `embargo_world`, and because the
+    # fitter never saw a sample the branch was absent from confidence_table.json
+    # and silently answered from the hand-set fallback.
+    #
+    # The 31 full-embargo dev cases split 15 / 8 / 8: fifteen carry an *observed*
+    # planetary_embargo and still deny via `disqualifying_flag`, eight are settled
+    # earlier by an adjudicator finding, and eight had no observed flag at all —
+    # those are the ones the inference was carrying, and they now land on
+    # `embargo_world`, the branch actually written for them. Same decision either
+    # way (both deny), so this is attribution and calibration, not points.
+    #
+    # Deleting it leaves one home for the rule and drops a backwards
+    # signals -> policy import.
     return {
         "flags": flags,
         "emit_flags": observed,

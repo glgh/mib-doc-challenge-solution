@@ -163,10 +163,52 @@ def test_emitted_flags_exclude_policy_only_inferences(cases, actual):
                         + "\n  ".join(leaked))
 
 
-def test_inferred_flag_drives_policy_but_is_not_emitted():
-    """The observed/derived split, pinned independently of the fixture: an embargo
-    home world infers planetary_embargo, which must DENY the case yet stay out of
-    the emitted risk_flags because no slip stated it."""
+def _branch_probes():
+    """One synthetic (values, sig) per cascade branch, built by overriding a case
+    that would otherwise approve cleanly. Ordering matters: each probe only has to
+    defeat the branches above it, which is exactly what makes an unreachable
+    branch impossible to construct."""
+    from mib import parse, policy, vocab
+
+    clean_values = {"home_world": "Mars Dome-7", "visa_class": "XW-1",
+                    "sponsor_id": "SPN-1234", "fee_status": "paid",
+                    "arrival_date": "2026-06-01"}
+    clean_sig = {"flags": set(), "finding": None,
+                 "has_biometric": True, "has_flag_evidence": True}
+    stale = (policy.STALE_CUTOFF.replace(year=policy.STALE_CUTOFF.year - 1)).isoformat()
+    overrides = [
+        ({}, {"finding": "DENIED"}),
+        ({}, {"flags": {next(iter(parse.DISQUALIFYING_FLAGS))}}),
+        ({"home_world": next(iter(policy.FULL_EMBARGO_WORLDS))}, {}),
+        ({"home_world": next(iter(policy.PARTIAL_EMBARGO_WORLDS))}, {}),
+        ({"sponsor_id": next(iter(vocab.REVOKED_SPONSORS))}, {}),
+        ({"visa_class": "TRANSIT-7"}, {}),
+        ({"fee_status": "unpaid"}, {}),
+        ({"fee_status": "unknown"}, {}),
+        ({"arrival_date": stale}, {}),
+        ({"fee_status": "waived"}, {}),
+        ({"arrival_date": None}, {}),
+        ({}, {"flags": {next(iter(parse.REVIEW_FLAGS))}}),
+        ({"sponsor_id": None}, {}),
+        ({"visa_class": None}, {}),
+        ({}, {"has_flag_evidence": False}),
+        ({}, {}),                                     # clean_approve
+    ]
+    for value_over, sig_over in overrides:
+        yield {**clean_values, **value_over}, {**clean_sig, **sig_over}
+
+
+def test_embargo_world_denies_without_fabricating_a_flag():
+    """An embargo home world must DENY on its own branch, and must not invent a
+    risk flag to do it.
+
+    `signals.derive` used to add planetary_embargo for any FULL_EMBARGO_WORLDS
+    origin. That duplicated this rule and, sitting one position earlier in the
+    cascade, shadowed `embargo_world` into dead code — 0 of 700 dev cases reached
+    it and the confidence fitter never saw a sample, so it silently used the
+    hand-set fallback. The rule now lives only in policy. This pins both halves:
+    the denial still happens, and `risk_flags` still reports only what a document
+    actually stated."""
     from mib import policy, signals
     from mib.packet import Packet
 
@@ -175,9 +217,30 @@ def test_inferred_flag_drives_policy_but_is_not_emitted():
               "arrival_date": "2026-06-01", "sponsor_id": "SPN-1234",
               "fee_status": "paid"}
     sig = signals.derive(Packet(case_id="MIB-000000"), values)
-    assert "planetary_embargo" in sig["flags"]           # available to policy
-    assert "planetary_embargo" not in sig["emit_flags"]  # but not visible evidence
-    decision, _branch = policy.adjudicate(values, sig)
-    assert decision == "DENIED"
+    assert "planetary_embargo" not in sig["flags"]       # never inferred
+    assert "planetary_embargo" not in sig["emit_flags"]  # and never evidence
+    decision, branch = policy.adjudicate(values, sig)
+    assert (decision, branch) == ("DENIED", "embargo_world")
     record = emit.build_record("MIB-000000", values, sig["emit_flags"], decision, 0.5)
     assert "planetary_embargo" not in record["risk_flags"]
+
+
+def test_every_confidence_branch_is_reachable():
+    """Every branch named in the confidence table must be constructible.
+
+    Scope, honestly: this builds `sig` directly, so it proves the *cascade* can
+    reach each branch — it would not have caught the `embargo_world` bug, where
+    policy could reach the branch but `signals.derive` populated a flag that
+    always won first. `test_embargo_world_denies_without_fabricating_a_flag` is
+    the guard for that, because it goes through `signals.derive`. This one
+    catches the other half: a branch deleted or reordered out of reach while its
+    confidence entry stays behind, which fails silently (the fitter sees no
+    samples, no entry lands in the fitted table, and the fallback quietly
+    answers instead)."""
+    from mib import confidence, policy
+
+    reached = set()
+    for values, sig in _branch_probes():
+        reached.add(policy.adjudicate(values, sig)[1])
+    missing = sorted(set(confidence.FALLBACK) - reached)
+    assert not missing, f"branch(es) in the confidence table no case can reach: {missing}"

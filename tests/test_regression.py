@@ -16,17 +16,17 @@ def test_policy_constants_have_a_single_source():
     run every case. They now share one definition; this pins that so the drift
     cannot return (identity, not equality: a re-copied literal would fail here)."""
     from mib import features, policy, signals
-    from mib.packet import Packet
 
     assert features.REVOKED is vocab.REVOKED_SPONSORS
     assert features.FULL_EMBARGO is policy.FULL_EMBARGO_WORLDS
     assert features.PARTIAL_EMBARGO is policy.PARTIAL_EMBARGO_WORLDS
     assert features.STALE_CUTOFF is policy.STALE_CUTOFF
-    # signals infers planetary_embargo off the same set (drawn from policy here,
-    # so a re-inlined divergent copy in signals would drop this world and fail).
-    world = next(iter(policy.FULL_EMBARGO_WORLDS))
-    sig = signals.derive(Packet(case_id="MIB-000000"), {"home_world": world})
-    assert "planetary_embargo" in sig["flags"]
+    # signals used to be a third copy-site: it inferred planetary_embargo off
+    # FULL_EMBARGO_WORLDS, which both duplicated policy's `embargo_world` branch
+    # and shadowed it into dead code. The rule lives in policy alone now, so the
+    # invariant is that signals does not reach for policy at all.
+    assert not hasattr(signals, "policy"), \
+        "signals imports policy again — the embargo rule has a second home"
 
 
 def test_bands_rung_deskews_before_deshredding(monkeypatch):
