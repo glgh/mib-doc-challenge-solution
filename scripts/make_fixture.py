@@ -60,7 +60,7 @@ def coverage(case):
 
 
 def main(dump_path, per_branch=5, eval_dir=None):
-    eval_dir = Path(eval_dir or ROOT / f"output/ab_{config.DEFAULT_RESTORE}")
+    eval_dir = Path(eval_dir or ROOT / f"output/ab_{config.RESTORE}")
     dump_meta, records = cache.read(dump_path)
     debug_path = eval_dir / "debug.jsonl"
     eval_meta_path = eval_dir / "meta.json"
@@ -131,7 +131,7 @@ def main(dump_path, per_branch=5, eval_dir=None):
 
 
 if __name__ == "__main__":
-    level = config.DEFAULT_RESTORE
+    level = config.RESTORE
     main(sys.argv[1] if len(sys.argv) > 1 else ROOT / f"output/cache/train_{level}.jsonl",
          int(sys.argv[2]) if len(sys.argv) > 2 else 5,
          sys.argv[3] if len(sys.argv) > 3 else None)

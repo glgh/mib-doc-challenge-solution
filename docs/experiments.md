@@ -61,7 +61,7 @@ Wall is left as "contended" deliberately — the run took ~50 min against the ca
 
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
-| 16 | 2026-07-23 | (dirty) | **Default OCR to exhaustive** — early-stop off (`mib/config.early_stop`, `MIB_EARLY_STOP=1` restores): try every geometric variant and keep best-of-all instead of stopping at `GOOD_ENOUGH` | **118.63** | 62.33 | 40.99 | 15.31 | 0 | 2.05s/case | keep |
+| 16 | 2026-07-23 | (b926403) | **Default OCR to exhaustive** — early-stop off (`mib/config.early_stop`, `MIB_EARLY_STOP=1` restores): try every geometric variant and keep best-of-all instead of stopping at `GOOD_ENOUGH` | **118.63** | 62.33 | 40.99 | 15.31 | 0 | 2.05s/case | keep |
 
 Clean same-machine A/B, both caches rebuilt fresh from current HEAD (dev-700 via `score_split.py`): early-stop **ON 118.42** (extr 40.84, class 62.24, risk_flags 503) → **OFF 118.63** (+0.21; extr +0.15, class +0.09, CFA 0), for **1.51 → 2.05 s/case**. Early-stop was a false economy: it halted at the first `evidence_score ≥ 6` reading and settled for a worse variant, spending the *most* OCR on the hardest pages (which never clear the bar). The +0.21 is a **floor** — it keeps the per-*page* `best()`; per-*field* selection across all variants (defer-selection, the next step) sits on top and also removes S2's parser-vocab dependency. Two caveats that must travel with this: (1) the baseline here is the progressive-restoration branch, well above row 15's 115.20 from intervening unlogged work; (2) **2.05 s/case is this 10-core laptop / 4 workers, not the 4 vCPU contract** — comfortably under the 6 s budget here, but the ship gate is still `run_docker_submission.py` under real limits, never run. The A/B is now provenance-guarded: `early_stop` is a critical stamp key, so an exhaustive cache can't be silently joined with an early-stop one.
 
@@ -110,7 +110,7 @@ Measured while doing it: `case_id` voting agrees with the filename on **all 1,00
 
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
-| 18 | 2026-07-23 | (uncommitted) | OCR-robust risk-flag extraction: value-first fuzzy match with a pure-python confusion-weighted edit distance (`mib/vocab.match_flag_token`), scanning flag-bearing docs in `signals.observed_flags`/`has_flag_evidence` | 119.09 | 62.41 | 41.36 | 15.32 | 0 | — | keep |
+| 18 | 2026-07-23 | (b926403) | OCR-robust risk-flag extraction: value-first fuzzy match with a pure-python confusion-weighted edit distance (`mib/vocab.match_flag_token`), scanning flag-bearing docs in `signals.observed_flags`/`has_flag_evidence` | 119.10 | 62.41 | 41.36 | 15.32 | 0 | 515s | keep |
 
 **Substrate = replay on `output/cache/train_skew.jsonl` (early_stop off), dev split; delta vs the same-cache P3 baseline (118.63): +0.46** (extraction +0.37, classification +0.08, calibration +0.01). Isolated by replaying the identical frozen page text with vs. without the change, so OCR variance cannot contaminate the delta.
 
@@ -118,4 +118,121 @@ The defect: `signals.observed_flags` exact-matched `token in ALL_FLAGS` against 
 
 Against the corrected P3 baseline on this cache: **46 cases gain a flag, 0 phantom** (every added flag is in truth), **0 true flags removed**, and **2 adjudication flips, both NEEDS_REVIEW→DENIED with truth DENIED** (safe direction, CFA stays 0). Guards proven by unit tests (`tests/test_regression.py`): explicit `none`/`clear`, option legends, and negated sentences (`cleared of biohazard_red`) all yield nothing; the injection differential tests still pass because `_raw` never holds hidden text.
 
-**Caveat — number is provisional.** The substrate is a no-early-stop cache (richer OCR than the shipped pipeline), and the recovered-case count depends on which OCR a run produces — `read_case` is non-deterministic (see STATUS hazards). A real full-pipeline eval and the non-determinism investigation are both pending; the delta's *sign and safety* (positive, 0 phantom, 0 CFA) are the durable findings.
+**Confirmed by a full-pipeline eval (2026-07-23, HEAD `17f82ae`, `output/eval_head`):** the committed
+tree runs the real pipeline end-to-end on the 1,000-PDF train set at **dev 119.10** (class 62.41, extr
+41.36, calib 15.32, CFA 0, 0 missing) in 515s — matching the row-18 cache replay to within 0.01, so the
+provisional caveat is discharged. `read_case` non-determinism is still real (it moves ~0.01) but does
+not move the sign or safety. The non-determinism investigation remains open.
+
+**Learned decider re-measured on the 119.10 substrate — edge inverted, promotion shelved (2026-07-23,
+`output/eval_head`, dev 5-fold OOF, `scripts/train_decision.py`):**
+
+| decider | class /80eq | Brier | CFA |
+| --- | ---: | ---: | ---: |
+| **rules baseline** | **62.41** | **0.1169** | **0** |
+| calibrated logistic + conf-correctness *(the shipped `export_decision.py` recipe)* | 61.91 | 0.1229 | 14 |
+| logistic + branch (uncalibrated) | 62.37 | 0.1326 | 23 |
+| MLP(16, α=1) + cal | 63.14 | 0.1378 | 20 |
+| MLP(32) + branch | 60.16 | 0.2013 | 28 |
+
+The learned decider's advantage over rules has **inverted**: it was +1.16 class pts on the 115.20
+substrate (bake-off above), and is **−0.50** here, with **14 CFAs vs rules' 0** and a worse Brier. The
+mechanism is staleness, not a bug: the learned decider is a *residual-corrector on the rules cascade*,
+and the flag-extraction (row 18) + P3 parse work strengthened rules to the point that there is no
+residual left to correct — it now adds noise and false approvals. Divergence-by-branch confirms it
+bleeds where it diverges: `fee_unknown` (n=50) **−0.73** and `fee_unpaid` (n=2) −0.17 swamp its gains
+(`missing_arrival` +0.26, `missing_sponsor` +0.13, `b13_census` +0.09), and `fee_unknown` is a
+data-availability wall (fee genuinely absent from the document — STATUS Q5), not an ML-winnable cell.
+The CFA veto cannot rescue it: reaching CFA-parity with rules needs t≤0.05 → 58.50 (−3.9). It is
+**strictly dominated** — no veto setting both matches CFA=0 and beats rules' class points.
+
+The overfitting guard held: the best *naive* dev read, **MLP(16) at 63.14**, wins only by carrying
+**20 CFAs** and a worse Brier — a catastrophic-false-approval pattern that fails the interview bar
+regardless of raw score (MLP already showed 31 CFA on the prior substrate). Holdout was **not** read:
+the dev-OOF measurement already says "don't promote," so there is no frozen model worth a holdout read.
+**Decision: keep `MIB_DECIDER=rules` (already the default); the shipped `decision_model.npz` is
+`d6427f8`-trained and now silently scores drifted features, so it is frozen and marked superseded — not
+a live promotion candidate — until there is an edge the rules cascade cannot capture.**
+
+---
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 19 | 2026-07-23 | (dirty) | **Runtime gate: first-ever contract-limits Docker run** (`scripts/run_docker_submission.py`) of the shipped `skew` config, scored on the container's own output | **119.17** | 62.51 | 41.30 | 15.36 | 0 | **0.54 s/PDF** | keep — baseline |
+
+Row 19 is a **runtime measurement**, not a scoring change: the shipped `skew`/psm11/rules config, but
+run for the first time under the *exact* Docker contract (`--network none --cpus 4 --memory 8g
+--pids-limit 512 --read-only --tmpfs /tmp:…size=2g`, image **0.13 GiB**) rather than on a contended
+laptop. Two results, both new:
+
+- **Runtime fits with ~11× headroom, and the heavy tail was a contention artifact.** 1,000 PDFs in
+  **542 s wall → 0.54 s/PDF** (budget 6), projecting to **0.75 h for 5,000** (budget 8.3 h). Per-case
+  `cost_ms`: mean 2.16 s, p50 2.01, p90 4.14, p99 6.43, **max 8.33 s**. The laptop figures this repo
+  feared (p99 57 s, max 107 s) were contention, not the pipeline — on 4 dedicated vCPU the tail is
+  tame. Wall = compute (2160 s) / 4 workers, self-consistent. **This dissolves the runtime objection
+  that gated `turn`/`bands` and would gate dual-PSM: even a 2× OCR cost lands far under budget.**
+  (STATUS open-question 2 answered; question 3's premise — that `turn`/`bands` are unaffordable — is
+  now in doubt and should be re-measured directly.)
+- **The shipped container reproduces the host score, and the host↔container OCR skew is score-neutral
+  and CFA-safe.** Container dev **119.17** (class 62.51 / extr 41.30 / calib 15.36 / CFA 0 / Brier
+  0.1159) vs host `eval_head` **119.10** — within nondeterminism. Parity vs `eval_head` at the row
+  level: 0 case-id diffs, but **7/1000 adjudications (0.70%)** and ~4 % of `applicant_name` differ,
+  because the container's Debian `tesseract` is a *different build* than the host's — not run-to-run
+  jitter. The differences roughly cancel in aggregate (class +0.10, extr −0.06) and **CFA stays 0**,
+  so the host replay loop is a faithful proxy for the shipped artifact. Recorded as a standing caveat:
+  the ship number ultimately comes from container output, not host replay.
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 20 | 2026-07-23 | (dirty) | **Dual-pass Tesseract PSM 3+11** (`MIB_OCR_PASSES=dual`): a PSM 3 read per image alongside PSM 11, `best()` keeps the stronger | **119.96** | 62.76 | 41.84 | 15.36 | 0 | unresolved | **flag-gated, NOT shipped** |
+
+**+0.87 dev over its own baseline, at CFA 0 — and still not shipped, because the cost never got a
+clean measurement.** Both caches were rebuilt from the current tree so the only difference is the
+flag (`train_skew_psm11.jsonl` vs `train_skew_dual.jsonl`); the psm11 side replays to **119.09**
+against the committed `eval_head` 119.10, which validates the substrate before reading the delta.
+
+| cache | Extr | Class | Calib | Total | CFA | Brier |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| psm11 (baseline) | 41.36 | 62.41 | 15.32 | 119.09 | 0 | 0.1169 |
+| **dual** | **41.84** | **62.76** | **15.36** | **119.96** | **0** | **0.1160** |
+
+Gains on both axes (4 more `correct`, 4 fewer `conservative_review`), Brier slightly better, CFA 0.
+
+**Why it is off anyway — the cost is a tail, not a factor.** "Dual" doubles the *number* of OCR calls,
+but PSM 3 is a different algorithm from PSM 11: PSM 11 skips layout analysis and hunts text blobs,
+while PSM 3 runs the full pipeline (connected components → blob classification → column detection →
+line/baseline finding → reading order). On the geometrically destroyed scans this corpus is built from,
+PSM 3 tries to infer a page structure that does not exist, and noise inflates the component count that
+its grouping stage is superlinear in. So it is slowest exactly where the pages are worst — and our
+exhaustive variant fan-out (`{embedded, render} × {none, deskew}`) multiplies it by ~4 per scan page.
+
+Measured on the host (1,000 cases): psm11 511 s vs dual 2396 s, per-case p50 1948→4145 ms (2.1×),
+p99 5977→63110 ms (10.6×), **max 7879→106718 ms (13.5×)**. The distribution is the point:
+
+| population | n | median slowdown |
+| --- | ---: | ---: |
+| 0 scan pages (text-layer only) | 149 | 1.0× |
+| 1–2 scan pages | 498 | 1.7× |
+| 3+ scan pages | 353 | 1.7× |
+| **worst 5% of cases** | 50 | **10–13.5×** |
+
+The worst 5% carry **33% of all the added cost**, and the top 8 are all near-fully-scanned packets —
+so it tracks *damage severity*, not page count. The median case behaves like the naive "2×" intuition.
+
+**The contract-limits run did not survive.** `run_docker_submission.py --ocr-passes dual` died at
+486/1000 after 1094 s (`unexpected EOF`, exit 125) and took the Docker daemon with it (`/version` and
+`/info` returned 500 afterwards). The host was contended by an unrelated GUI process at the time, so
+the crash is not attributable to dual alone — but two things did happen on the record: the **120 s
+per-case OCR budget fired** (`MIB-000243: OCR budget spent, text layer only for page 3+`), which is a
+silent quality regression, and the run produced no usable timing. **Decision: keep `MIB_OCR_PASSES=psm11`
+(the default, and now pinned in the `Dockerfile`), exactly as `turn`/`bands` are kept reachable but
+unbanked.** Reviving dual means gating the PSM 3 pass rather than running it on every image.
+
+Incidental: 486 valid rows survived the crash on disk — the row-17 streaming-write robustness working
+under a real container death, where the old `pool.map` design would have left an empty file.
+
+**Open, and it decides the gate direction:** we do not yet know *which* pages produced the +0.87,
+because the cache stores only the chosen line list, not the winning variant. The plan assumed PSM 3
+should run on pages *below* `GOOD_ENOUGH`; the cost data hints the opposite (PSM 3 earns its keep on
+dense intact forms and burns time on wreckage it cannot segment). Recording the winning variant is a
+one-line instrument and is the prerequisite for any gated retry.

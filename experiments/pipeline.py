@@ -12,8 +12,6 @@ carried through. Stages compose left to right: orientation -> deskew -> deshred.
 import sys
 from pathlib import Path
 
-import numpy as np
-
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -29,7 +27,7 @@ def _mean_run(mask, axis):
 
     Total ink / number of run-starts. For horizontal text the vertical runs are
     the longer ones — glyph stems span the x-height uninterrupted, while
-    horizontal runs are chopped at every inter-character gap (docs/damage-geometry).
+    horizontal runs are chopped at every inter-character gap (docs/BACKGROUND §4).
     """
     total = mask.sum()
     if total == 0:
@@ -100,95 +98,8 @@ def deshred_border(gray):
     return ("deshred/border (skip)", None) if out is None else ("deshred/border", out)
 
 
-# --- deshred: content cross-correlation (the candidate) ---------------------
-
-def _offset_profile(gray):
-    off = imaging._band_offsets(gray)
-    if off is None:
-        return None
-    filled = off.copy()
-    last = np.nanmedian(off)
-    for y in range(len(filled)):
-        if not np.isnan(filled[y]):
-            last = filled[y]
-        filled[y] = last
-    return filled
-
-
-def _seams(off, jump=15):
-    return [int(s) + 1 for s in np.flatnonzero(np.abs(np.diff(off)) > jump)]
-
-
-def _bands(off, jump=15, min_rows=25):
-    bounds = [0, *_seams(off, jump), len(off)]
-    return [(a, b) for a, b in zip(bounds, bounds[1:]) if b - a >= min_rows]
-
-
-def _best_shift(profile, ref, span=160):
-    ref = ref - ref.mean()
-    best_s, best_c = 0, -1.0
-    for s in range(-span, span + 1, 2):
-        p = np.roll(profile, s).astype(float)
-        p -= p.mean()
-        denom = (np.linalg.norm(p) * np.linalg.norm(ref)) or 1.0
-        c = float(p @ ref) / denom
-        if c > best_c:
-            best_c, best_s = c, s
-    return best_s
-
-
-def _shift_block(block, s):
-    """Slide a row-block horizontally by s px, padding paper-white (no wrap)."""
-    if not s:
-        return block
-    out = np.full_like(block, 255)
-    w = block.shape[1]
-    if abs(s) >= w:
-        return out
-    if s > 0:
-        out[:, s:] = block[:, :w - s]
-    else:
-        out[:, :w + s] = block[:, -s:]
-    return out
-
-
-def deshred_content(gray, min_move=8, tol=28):
-    """Border proposes, content confirms — applied per row.
-
-    Fine alignment comes from the border's *per-row* shift (what makes the
-    shipped realign_bands align 045 well). Safety comes from the *content*
-    cross-correlation: a band is corrected only when its text shift agrees with
-    its border shift (|Δ| ≤ tol). 037's form-rule bands disagree (content ~0,
-    border large) → left untouched, so the clean line no longer garbles. Within a
-    confirmed band the shift is taken per row, so it tracks a border that isn't
-    perfectly flat. Returns None if no band is both moved and confirmed."""
-    off = _offset_profile(gray)
-    if off is None:
-        return "deshred/content (no border)", None
-    bands = _bands(off)
-    if len(bands) < 2:
-        return "deshred/content (no bands)", None
-    ink = (gray < INK)
-    ref_a, ref_b = max(bands, key=lambda ab: ab[1] - ab[0])
-    ref_profile = ink[ref_a:ref_b].sum(axis=0)
-    ref_off = np.nanmedian(off[ref_a:ref_b])
-    out = gray.copy()
-    applied, moved = [], False
-    for a, b in bands:
-        border_shift = int(round(ref_off - np.nanmedian(off[a:b])))
-        content_shift = _best_shift(ink[a:b].sum(axis=0), ref_profile)
-        if abs(border_shift) < min_move or abs(content_shift - border_shift) > tol:
-            continue                                   # not moved, or content disagrees
-        for y in range(a, b):                          # per-row fine alignment
-            s = int(round(ref_off - off[y]))
-            if s:
-                out[y:y + 1] = _shift_block(gray[y:y + 1], s)
-        applied.append(border_shift)
-        moved = True
-    if not moved:
-        return "deshred/content (none confirmed)", None
-    return f"deshred/content applied={applied}", out
-
-
-# The stage sequence the bench renders, in order.
-STAGES = [deskew, deshred_border, deshred_content]
+# Content cross-correlation was the other deshred candidate and is deleted, not
+# shelved: the OCR A/B (findings.md, 2026-07-23) has it trailing the border
+# method on every true positive. Cross-correlating column ink-profiles between
+# bands that hold *different text* is not a shift estimator — on 045 it railed to
+# the ±160 span limit — so the idea is wrong at the root, not undertuned.

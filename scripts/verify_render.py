@@ -23,16 +23,19 @@ from mib import cache, config  # noqa: E402
 
 
 def main(cache_path, n_scans=4, n_random=2):
-    import os
-
     meta, records = cache.read(cache_path)
-    if meta and meta.get("restore"):
-        # Compare like with like: the cache's config, not the current default.
-        os.environ["MIB_RESTORE"] = meta["restore"]
+    # The restoration level is no longer selectable, so a cache built at another
+    # level cannot be reproduced and any diff against it would be the config
+    # talking, not the code. Refuse rather than report a meaningless mismatch.
+    stamped = (meta or {}).get("restore")
+    if stamped and stamped != config.RESTORE:
+        raise SystemExit(
+            f"cache was built at restore={stamped!r} but this code only produces "
+            f"{config.RESTORE!r}; rebuild it with scripts/dump_text.py before comparing.")
     from mib import runner
 
     print(f"cache:   {config.describe(meta)}")
-    print(f"reading: restore={config.restore_level()}\n")
+    print(f"reading: restore={config.RESTORE}\n")
 
     by_ocr = sorted((r for r in records if not r.get("error")),
                     key=lambda r: -sum(len(p["ocr_lines"]) for p in r["pages"]))
@@ -64,7 +67,7 @@ def main(cache_path, n_scans=4, n_random=2):
 
 
 if __name__ == "__main__":
-    level = config.DEFAULT_RESTORE
+    level = config.RESTORE
     sys.exit(main(sys.argv[1] if len(sys.argv) > 1
                   else ROOT / f"output/cache/train_{level}.jsonl",
                   int(sys.argv[2]) if len(sys.argv) > 2 else 4,

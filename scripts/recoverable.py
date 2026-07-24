@@ -172,7 +172,7 @@ def report(dump_path, eval_dir=None, split="dev", branch=None):
 
 
 if __name__ == "__main__":
-    level = config.DEFAULT_RESTORE
+    level = config.RESTORE
     report(sys.argv[1] if len(sys.argv) > 1 else ROOT / f"output/cache/train_{level}.jsonl",
            sys.argv[2] if len(sys.argv) > 2 else ROOT / f"output/ab_{level}",
            sys.argv[3] if len(sys.argv) > 3 else "dev",

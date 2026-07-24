@@ -110,7 +110,7 @@ def main(cache_path, out_dir=None, reference=None):
 if __name__ == "__main__":
     import argparse
 
-    level = config.DEFAULT_RESTORE
+    level = config.RESTORE
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("cache", nargs="?",
                     default=str(ROOT / f"output/cache/train_{level}.jsonl"))

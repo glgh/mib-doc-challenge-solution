@@ -13,9 +13,8 @@ The file carries a provenance header (mib/config.py) naming the render config
 and code revision that produced it, because the whole value of the cache is that
 other tools join against it — and a join across configs is wrong, not noisy.
 
-Usage: scripts/dump_text.py [input_dir] [out.jsonl] [restore_level]
+Usage: scripts/dump_text.py [input_dir] [out.jsonl]
 """
-import os
 import sys
 import time
 from multiprocessing import Pool
@@ -42,8 +41,7 @@ def dump_one(pdf_path):
     }
 
 
-def main(input_dir, out_path, restore):
-    os.environ["MIB_RESTORE"] = restore        # inherited by the pool workers
+def main(input_dir, out_path):
     from mib import cache, config
 
     pdfs = sorted(Path(input_dir).glob("*.pdf"))
@@ -68,9 +66,7 @@ def main(input_dir, out_path, restore):
 
 
 if __name__ == "__main__":
-    from mib.config import DEFAULT_RESTORE
+    from mib.config import RESTORE
 
-    restore = sys.argv[3] if len(sys.argv) > 3 else DEFAULT_RESTORE
     main(sys.argv[1] if len(sys.argv) > 1 else CH / "data/train",
-         sys.argv[2] if len(sys.argv) > 2 else ROOT / f"output/cache/train_{restore}.jsonl",
-         restore)
+         sys.argv[2] if len(sys.argv) > 2 else ROOT / f"output/cache/train_{RESTORE}.jsonl")

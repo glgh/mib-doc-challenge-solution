@@ -151,7 +151,7 @@ costs one pass, a wrong decision discards a page's text). Best untapped signal i
 **page border** — constant width, so its edges give skew precisely and its per-row left edge *is*
 the band offset that `imaging.realign_bands()` keys off; present even on near-textless pages.
 
-**Results** (dev 700, cumulative `MIB_RESTORE`, CFA 0 at every level):
+**Results** (dev 700, cumulative restoration levels as they were then selectable, CFA 0 at every level):
 
 | Level | Total | Extraction | Classification | Calibration |
 | --- | ---: | ---: | ---: | ---: |

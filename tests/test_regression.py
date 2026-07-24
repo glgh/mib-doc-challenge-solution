@@ -37,18 +37,21 @@ def test_bands_rung_deskews_before_deshredding(monkeypatch):
     from mib import imaging
     from mib.stages import render
 
-    monkeypatch.setenv("MIB_RESTORE", "bands")
-    deskewed, deshredded = object(), object()
+    deskewed, deshredded, turned = object(), object(), object()
     seen = {}
     monkeypatch.setattr(imaging, "skew_angle", lambda g: 3.0)   # past MIN_SKEW
     monkeypatch.setattr(imaging, "rotate", lambda g, deg: deskewed)
+    # The turn rung runs unconditionally, so it must be stubbed too or it would
+    # hand this fake page to PIL. Its output is irrelevant here; what matters is
+    # that deshred is handed the *deskewed* image and not one of these.
+    monkeypatch.setattr(imaging, "turn", lambda g, quarter: turned)
 
     def fake_realign(base):
         seen["realign_arg"] = base
         return deshredded
     monkeypatch.setattr(imaging, "realign_bands", fake_realign)
 
-    variants = dict(render._restorations(object(), lambda: 1))   # 1 < WEAK, > 0
+    variants = dict(render._restorations(object()))
     assert variants.get("deshred") is deshredded          # deshred is produced
     assert "bands" not in variants                        # under the old name
     assert seen["realign_arg"] is deskewed                # deskew came first

@@ -34,9 +34,9 @@ every candidate per field, every rule predicate per case) so no improvement is f
 value being thrown away early. Orchestration is `mib/runner.py` (`read_case` = S1+S2,
 `predict_from_evidence` = S3→emit); the CLI is `solution.py`.
 
-**Shipped configuration today:** rules decider (`MIB_DECIDER=rules`), skew restoration
-(`MIB_RESTORE=skew`), exhaustive OCR (early-stop off, `MIB_EARLY_STOP=0`). The learned decider
-and the `turn`/`bands` restorations are built and measured but off by default.
+**Shipped configuration today:** rules decider (`MIB_DECIDER=rules`), the full restoration ladder
+(fixed in code), exhaustive OCR — every geometric variant is read and the best kept, with no
+early stop to switch off. The learned decider is built and measured but off by default.
 
 ---
 
@@ -65,9 +65,9 @@ of well-formed values (case-id / sponsor / date regex, plus visa / species / wor
 words). Values matter because the shredder clips the left margin: a rescued line reads
 `mnsor ID: SPN-5809` — label gone, value intact and worth the points.
 
-**Geometric restoration cascade** (`MIB_RESTORE`, cumulative levels `off < skew < turn < bands`,
-default `skew`). Damaged scans are *transformed*, not low-resolution — undoing the geometry is
-what recovers text (a 300-DPI retry bought +0.21 for 43× runtime and was reverted):
+**Geometric restoration cascade** (fixed in code, not selectable — every rung runs on every weak
+page). Damaged scans are *transformed*, not low-resolution — undoing the geometry is what recovers
+text (a 300-DPI retry bought +0.21 for 43× runtime and was reverted):
 
 | level | what it does |
 | --- | --- |
@@ -75,11 +75,12 @@ what recovers text (a 300-DPI retry bought +0.21 for 43× runtime and was revert
 | `turn` | try 90° / 270° when nothing has read yet (180° never wins) |
 | `bands` | "shredder" realign — read per-row shift off the printed page border, roll each band back to the common left margin |
 
-By default every variant is OCR'd and `best()` keeps the highest `evidence_score` (earliest read
-breaks ties). `MIB_EARLY_STOP=1` restores the old behaviour of stopping once `evidence_score >=
-GOOD_ENOUGH (6)`, which measured **−0.21 dev** — it settled for the first good-enough variant and
-spent the most OCR on the hardest pages (docs/experiments.md row 16). `reads_for` keeps **every**
-reading. `skew_sweep` is exposed so `scripts/visualize_restore.py` plots the exact curve.
+Every variant is OCR'd and `best()` keeps the highest `evidence_score` (earliest read breaks ties).
+An earlier design stopped once `evidence_score >= GOOD_ENOUGH (6)`; it measured **−0.21 dev** — it
+settled for the first good-enough variant and spent the most OCR on the hardest pages
+(docs/experiments.md row 16) — and has been removed, so there is no longer a switch for it. Cost is
+bounded by `MIB_CASE_BUDGET_S`, not by skipping variants. `reads_for` keeps **every** reading.
+`skew_sweep` is exposed so `scripts/visualize_restore.py` plots the exact curve.
 
 > **Hazard:** S2 page-quality scoring calls `parse.key_for`, so a `KEY_MAP` edit can change which
 > OCR variant wins and silently invalidate the page-text cache. S2 is therefore *not* a pure
@@ -222,8 +223,6 @@ ids are dropped with a stderr warning. `MIB_DEBUG_JSONL` writes the per-case dia
 | var | default | effect |
 | --- | --- | --- |
 | `MIB_DECIDER` | `rules` | which decider ships (`rules` \| `mlp`) |
-| `MIB_RESTORE` | `skew` | scan restoration level (`off` \| `skew` \| `turn` \| `bands`) |
-| `MIB_EARLY_STOP` | `0` | `1` stops OCR at the first good-enough variant; default reads every variant and keeps best-of-all (+0.21 dev) |
 | `MIB_CFA_VETO` | `1.0` | P(DENIED) that demotes a learned APPROVED to NEEDS_REVIEW (1.0 = pure EV) |
 | `MIB_CASE_BUDGET_S` | `120` | per-case OCR wall-clock bound; overrun drops remaining pages to text layer |
 | `MIB_WORKERS` | `4` | pool size (the contract gives 4 vCPU) |

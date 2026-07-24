@@ -788,9 +788,10 @@ TEMPLATE = """<title>Repairing the plate before OCR</title>
   look at the score, repair, OCR again. Every repaired page burns a pass that was
   always going to fail. Skew and axis are both measurable in milliseconds without
   OCR, so the flow should be detect-then-repair. Not yet implemented.</p>
-  <p><b>Shipped level.</b> <code>MIB_RESTORE=skew</code> is the default;
-  <code>turn</code> and <code>bands</code> score higher on the dev split but their
-  runtime has never been measured under the container&rsquo;s 4 vCPU limit.</p>
+  <p><b>Shipped level.</b> The full ladder &mdash; deskew, then quarter-turn, then
+  shred-band realignment &mdash; runs on every weak page. It is fixed in code, not
+  selectable: the lower rungs existed to A/B the ladder, and that A/B is on the
+  record in <code>docs/experiments.md</code>.</p>
 </footer>
 
 </div>

@@ -1,6 +1,6 @@
 # Status: what we tried, where things are
 
-_Last updated: 2026-07-22 (late). Rewrite this file in place; do not append._
+_Last updated: 2026-07-23. Rewrite this file in place; do not append._
 
 The front page. [experiments.md](experiments.md) has one scored row per change,
 [ALGORITHM.md](ALGORITHM.md) describes how the pipeline works, [BACKGROUND.md](BACKGROUND.md) holds
@@ -12,12 +12,18 @@ now**.
 
 ## Where things are
 
-**Committed: dev 115.43, CFA 0, 0 missing rows.** Shipped config is `MIB_RESTORE=skew` with the
-rules decider. **In flight (uncommitted): dev 118.63, CFA 0** — this session decoupled the stage
-seams (constants single-source, `best()` above the cache, signals→merged + observed/derived flag
-split) and made **exhaustive OCR the default** (early-stop off, +0.21; `experiments.md` row 16).
-The earlier ~117.98 P3-parse figure is superseded by this clean same-machine A/B; `bands` remains
-over budget.
+**Committed: dev 119.10, CFA 0, 0 missing rows** (HEAD `17f82ae`, verified 2026-07-23 by a fresh
+full-pipeline eval on the current tree — `output/eval_head`, 515s for 1,000 PDFs). Shipped config is the
+full restoration ladder (fixed in code) with the **rules** decider. The stage-seam decoupling, exhaustive-OCR default
+(row 16), P3 parse fixes, and OCR-robust flag extraction (row 18) that earlier drafts of this file
+logged as "in flight / uncommitted" are all committed now (`ba59fcd`, `b926403`); `bands` remains
+over budget. The sections below still narrate that work as a dirty tree — read them as history, not
+current state.
+
+**The learned decider is shelved.** Re-measured on this 119.10 substrate, its edge over rules
+**inverted** (was +1.16 class pts at 115.20, now −0.50 with 14 CFAs vs rules' 0 — see rejected list
+and `experiments.md`). `MIB_DECIDER` stays `rules` (the default); `mib/decision_model.npz` is frozen
+and superseded, not a live promotion candidate.
 
 | step | commit | dev | note |
 | --- | --- | ---: | --- |
@@ -26,7 +32,7 @@ over budget.
 | P1a staged seams + records | `b5542cb` | 115.20 | pure refactor, byte-identical |
 | P1b per-field candidate preference | `0285f25` | **115.43** | extraction 38.76 → 39.00 |
 | P2 runner robustness | `0aa7031` | 115.43 | score-neutral by design |
-| P3 parse fixes | *uncommitted* | **~117.98** | provisional — see below |
+| P3 parse fixes | `b926403` | **119.10** | committed (with rows 16, 18); loose-key kept + dates hardened, suite green |
 
 Two sessions have been working this repo in parallel today:
 
@@ -35,10 +41,17 @@ Two sessions have been working this repo in parallel today:
 | extraction pipeline | `mib/{records,runner,config,cache,packet,parse,vocab}.py`, `mib/stages/`, `tests/`, most of `scripts/` | `ff497f6`, `b5542cb`, `0285f25`, `0aa7031` |
 | decision layer | `mib/{features,decision}.py`, `mib/decision_model.npz`, `scripts/{train,export}_decision.py`, the S5 block in `mib/runner.py` | `adff813`, `a21fc36` |
 
-### The dirty tree
+### The P3 parse work — RESOLVED (the rest of this section is history)
 
-The working tree holds the P3 parse work: `mib/{packet,parse,policy,signals,vocab}.py`,
-`tests/test_regression.py`, and the regenerated fixture. It is **not one change** and should not be
+> **Resolved 2026-07-23.** Everything below is **committed** (`b926403`), tree clean on `mib/`, suite
+> **green** (`28 passed, 1 xfailed`), dev **119.10** confirmed by full eval (`output/eval_head`). Two
+> corrections to the narrative that follows: (1) **loose key matching was KEPT, not dropped** — the
+> root cause was fixed instead: `parse.valid_value` now rejects non-existent dates (`2026-03-41`,
+> `2026-02-30`, `2026-13-01` all fail), so the "should come out" verdict no longer applies; (2) the
+> characterization **value snapshot** was retired (`57e4e60`), so the "4 tests fail" note is obsolete.
+
+The working tree held the P3 parse work: `mib/{packet,parse,policy,signals,vocab}.py`,
+`tests/test_regression.py`, and the regenerated fixture. It is **not one change** and was not
 committed as one:
 
 **Solid** — suite green, CFA 0, five new regression tests, measured at 117.98 (`output/replay_p3d`):
@@ -97,6 +110,15 @@ Mechanism, not just the delta — the delta is in [experiments.md](experiments.m
 
 The more useful half. Each of these looked reasonable and was killed by a measurement.
 
+- **Promoting the learned decider on the current substrate** (−0.50 class, +14 CFA). The calibrated
+  logistic beat rules by +1.16 class pts when rules scored 61.27 (the 115.20 substrate). Rules then
+  climbed to 62.41 (flag extraction + P3 parse), and a re-measurement on `output/eval_head` (dev
+  5-fold OOF) found the edge **inverted**: 61.91 vs 62.41, Brier .1229 vs .1169, 14 CFA vs 0. The
+  learned decider is a residual-corrector on rules, so a stronger cascade leaves it nothing to correct.
+  It bleeds most on `fee_unknown` (Δ−0.73), a data-availability wall, not an ML-winnable cell. No CFA
+  veto both matches rules' CFA=0 and beats its class points — it is strictly dominated. The best naive
+  dev read (MLP(16), 63.14) is the overfit trap: it buys the raw points with 20 CFAs. Kept the rules
+  decider; froze the npz as superseded. Holdout was deliberately **not** read on a model being rejected.
 - **Vocabulary passthrough for unseen values** (−0.08, then −0.04 after the preference fix).
   `mib/vocab.py`'s docstring promises unseen values pass through so private-set values survive;
   only `declared_purpose` delivers it, and a strict-xfail test was standing by to confirm the bug.
@@ -106,6 +128,17 @@ The more useful half. Each of these looked reasonable and was killed by a measur
   vocabulary lists *are* those enumerations. A fourteenth world would be expected ~77 times in a
   sample that size, so the universe is closed and there was nothing to rescue. The xfail is now an
   ordinary test asserting the deletion is deliberate.
+- **Dual-pass Tesseract PSM 3+11** (+0.87 dev, CFA 0 — *not shipped*). The top competitor's recipe,
+  and it does score: extraction +0.48, classification +0.35, Brier slightly better, CFA still 0
+  (experiments.md row 20). It is off because the cost never got a clean number. PSM 3 runs full layout
+  analysis (components → columns → lines → reading order) where PSM 11 just hunts text blobs, so on
+  geometrically destroyed scans it tries to infer a structure that isn't there and pays superlinearly
+  in the noise-inflated component count — slowest exactly where pages are worst, then multiplied ~4×
+  by our variant fan-out. Median case 1.7× (the naive "2×" intuition holds), but the **worst 5% run
+  10–13.5× and carry a third of the added cost**, the 120 s per-case budget fired on a real case, and
+  the contract-limits timing run died at 486/1000 taking the Docker daemon with it. Kept reachable and
+  flag-gated exactly like `turn`/`bands`. Reviving it means *gating* the PSM 3 pass, and the gate
+  direction is unknown until we record which pass actually won the pages that gained.
 - **Corroborated loose key matching** (+0.29, admits invalid dates). See the dirty-tree section.
 - **`b13_census` → APPROVED wholesale** (+0.80–0.91 by attribution). Manufactures false approvals
   on the 12 truly-denied cases in that branch. **Split the branch, never flip it.**
@@ -170,20 +203,32 @@ joined `skew`-derived text against `bands`-derived predictions and produced conf
 
 | # | question | what would settle it |
 | --- | --- | --- |
-| 1 | Is ~117.98 real? | finish the cache rebuild (stopped at 300/1000), replay, re-score |
-| 2 | Does the pipeline fit the runtime budget? | a representative Docker parity run — see below |
-| 3 | Can `turn`/`bands` (+1.68) be made affordable? | detect-first geometry: measure skew/orientation once, apply one transform, OCR once |
-| 4 | Is CFA 0 a hard gate or a priced cost? | **a decision, not a measurement** — see hazards |
+| 1 | ~~Is ~117.98 real?~~ **ANSWERED** | dev **119.10** confirmed by full-pipeline eval (HEAD `17f82ae`, `output/eval_head`, 1,000 PDFs, 515s); ~117.98 and its partial cache rebuild superseded |
+| 2 | ~~Does the pipeline fit the runtime budget?~~ **ANSWERED** | full contract-limits run: 0.54 s/PDF, 0.75 h/5,000, ~11× headroom (`scripts/run_docker_submission.py`) |
+| 3 | Can `turn`/`bands` (+1.68) be made affordable? | premise weakened: skew fits at 11× headroom, so the tail may already be affordable — **time `turn`/`bands` through the gate** before assuming detect-first is required |
+| 4 | ~~Is CFA 0 a hard gate or a priced cost?~~ **MOOT** | learned decider shelved; rules run at CFA 0 with no veto. Revives only with the learned decider (then the honest count is 12 OOF CFAs) |
 | 5 | Where do the remaining 16.66 classification points go? | `fee_unknown` 7.37 and `b13_census` 5.37 are the two big cells, and neither is an OCR problem |
 | 6 | Does the dev→holdout gap still hold? | holdout untouched since 113.46 at `v1`; read only at a milestone |
 | 7 | Is hidden-line *content* worth mining as a signal? | untried — see note below |
 
-**Docker parity (question 2) is partially answered.** The container has now been run under the
-exact contract flags for the first time: image **0.13 GiB** against a 4 GiB cap, `--network none`,
-read-only root, tmpfs `/tmp`, 4 cpu / 8 GiB — it runs and writes correct output. A 12-PDF sample
-ran at 1.11 s/PDF, extrapolating to **~1.55 h for 5,000** against the 8.3 h budget, which agrees
-with the laptop projection. **This is not yet a real answer**: 12 PDFs contain none of the heavy
-tail (p99 57s, max 107s per case), and every laptop timing in this repo was taken under load.
+**Docker parity (question 2) is now answered.** `scripts/run_docker_submission.py` runs the container
+under the exact contract flags (image **0.13 GiB** vs 4 GiB cap, `--network none`, read-only root,
+tmpfs `/tmp`, 4 cpu / 8 GiB) over the **full 1,000-PDF** train set — not the earlier 12-PDF sample.
+Result: **542 s wall → 0.54 s/PDF** (budget 6), projecting to **0.75 h for 5,000** (budget 8.3 h),
+per-case `cost_ms` mean 2.16 / p90 4.14 / p99 6.43 / **max 8.33 s**. The heavy tail this repo feared
+(p99 57 s, max 107 s) was **contention on the shared laptop, not the pipeline** — on 4 dedicated vCPU
+it disappears. So `skew` fits at ~11× headroom, which is the lever that reopens `turn`/`bands` and
+makes room for a second OCR pass (see experiments.md row 19).
+
+Two facts fall out of the same run:
+- **The shipped container reproduces the host score.** Scoring the container's own predictions:
+  dev **119.17** (class 62.51 / extr 41.30 / calib 15.36 / CFA 0) vs host `eval_head` 119.10 — within
+  nondeterminism. So the host replay loop is a faithful proxy for what actually ships.
+- **But host and container OCR are not byte-identical**, because the container's Debian `tesseract` is a
+  different build than the host's: 7/1000 adjudications (0.70 %) and ~4 % of `applicant_name` differ
+  between the two full runs. The differences roughly cancel (class +0.10, extr −0.06) and **CFA stays
+  0**, so this is a caveat, not a defect — but the number that ultimately ships comes from container
+  output, and any final ship-decision score should be read there, not only from a host replay.
 
 **On question 7 (untried lever).** Today hidden spans are split off in `stages/extract` and barred
 from *evidence*: no field value can source from them (`textmatch.sourceable_text` = visible + OCR
@@ -228,13 +273,14 @@ places — unreadable flags now return `None`, and the risk-concealment census a
 line was *read*, not whether a slip was *detected*. Generally: **when extraction improves, re-check
 the branches whose job was to catch missing data.**
 
-**The two workstreams disagree about the CFA gate, and it is unreconciled.** The decision-layer
-position is that catastrophic false approvals are now *priced, not banned* — expected-points argmax
-already charges −4 for one, with `MIB_CFA_VETO` as a tunable demotion threshold. The extraction
-side has been treating CFA 0 as a hard gate and rejected changes on that basis. Both positions are
-defensible. The honest out-of-fold count is **12 CFAs** (dev 5-fold, `experiments.md`); the
-often-quoted **5** is an in-sample train-fit dev read that understates the real risk ~2.4×. This
-needs a deliberate decision, not resolution by whoever commits last.
+**The CFA-gate disagreement is moot for now — the learned decider is shelved.** The decision-layer
+position was that catastrophic false approvals should be *priced, not banned* (EV-argmax charges −4,
+with `MIB_CFA_VETO` as a demotion knob); the extraction side treated CFA 0 as a hard gate. The
+question only bit while the learned decider was a promotion candidate — and the 2026-07-23
+re-measurement retired it (strictly dominated by rules, which already run at CFA 0). The shipped
+pipeline emits 0 CFAs on dev with no veto needed. If the learned decider is ever revived, this
+decision comes back with it, and the honest number to argue from is the **12** out-of-fold CFAs (dev
+5-fold), not the in-sample **5** that understated the risk ~2.4×.
 
 **Parallel sessions interfere, and the interference looks like a result.** The journal records a
 phantom "extraction changed under mlp" that was actually an in-flight `packet.py` edit landing
@@ -249,9 +295,18 @@ documents. Only `scripts/run_docker_submission.py` under the real limits settles
 
 ## Immediate next steps
 
-1. Drop the loose-key change, regenerate the fixture, confirm the suite is green, commit the solid
-   P3 work with the score marked provisional.
-2. Finish the cache rebuild on a quiet machine; re-score; correct the number if it moved.
-3. Representative Docker parity run over the full train corpus under contract limits.
-4. Decide the CFA question (hazard 3) before either workstream builds further on its assumption.
-5. Then either detect-first geometry (question 3) or the `b13_census` split (question 5).
+Done since this list was written: P3 parse committed (loose-key kept + dates hardened), suite green,
+119.10 confirmed by full eval, learned decider shelved (which mooted the CFA-gate decision), and the
+full-corpus Docker parity run (Q2) came back at 0.54 s/PDF with ~11× headroom. What's left:
+
+1. **Re-price the `turn`/`bands` prize on the 119.10 substrate** before building any detect-first
+   machinery. The +1.68 (Q3) predates exhaustive OCR (row 16) + flag extraction (row 18), and the
+   Docker result removed the affordability argument — so the only open question is whether turn/bands
+   still *buys score*. Replay A/B (turn/bands vs skew, dev, CFA 0); cheap, do it first. The learned
+   decider's +1.16 → −0.50 inversion is the cautionary precedent for a prize measured on old substrate.
+2. Decide the runtime-budget split between **dual-PSM** (`MIB_OCR_PASSES=dual`, in flight) and
+   `turn`/`bands` — both now spend the same ~11× headroom, so they compete.
+3. If step 1 says turn/bands still pays: wire orientation into `mib/imaging.py` + `render.py`, measure
+   the **dev-population** A/B (not the 13-case hard set), guard on `render`'s own frozen label set
+   (the vocab-coupling hazard), held to CFA 0. Otherwise the higher-leverage lever is the `b13_census`
+   split (question 5) — `fee_unknown`/`b13_census` are where the points are, and neither is reading-limited.

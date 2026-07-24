@@ -8,10 +8,10 @@ another mixes two pipelines, so every "the value is in the text but we failed to
 extract it" verdict is measured against text the predicting run never saw. That
 happened, and nothing caught it. Hence: producers stamp, consumers check.
 
-P1 replaces the environment read with a frozen config object threaded from the
-entrypoint; this module is where that object will live. `restore_level()` is
-already the single owner of the answer, so `mib.ocr` asks rather than re-parsing
-the environment itself.
+P1 replaces the remaining environment reads with a frozen config object threaded
+from the entrypoint; this module is where that object will live. Everything the
+pipeline's shape depends on is already owned here, so stages ask rather than
+re-parsing the environment themselves.
 """
 import datetime
 import os
@@ -20,40 +20,55 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Geometric scan restoration, cumulative: each level includes the ones before it.
-RESTORE_LEVELS = ("off", "skew", "turn", "bands")
-DEFAULT_RESTORE = "skew"
+# Geometric scan restoration. S2 always runs the full ladder — deskew,
+# quarter-turn, shred-band realignment — because it recovers turned/skewed/
+# shredded scan pages that no cheaper rung reaches. The selectable `off`/`skew`/
+# `turn` rungs are gone: they existed to A/B the ladder (experiments.md rows
+# 11-14, still on the record) and to retreat if the full ladder overran the
+# budget, but the submission runs the image with no `-e`, so the retreat was
+# always a rebuild — i.e. a checkout — not a flag.
+#
+# Kept as a stamp constant so caches written before the removal stay joinable,
+# and so a legacy `skew` cache is still correctly *refused* rather than silently
+# mixed into a bands run.
+RESTORE = "bands"
 
 SCHEMA = 1
 
 # A mismatch here means the two artifacts describe different pipelines and any
 # join across them is meaningless.
-CRITICAL_KEYS = ("restore", "early_stop")
+CRITICAL_KEYS = ("restore", "early_stop", "ocr_passes")
 # A mismatch here is usually just as invalidating, but the working tree is
 # routinely dirty mid-phase and rebuilding every artifact per commit is not
 # affordable, so it warns instead of failing.
 ADVISORY_KEYS = ("git_rev",)
 
 
-def restore_level():
-    level = os.environ.get("MIB_RESTORE", DEFAULT_RESTORE).lower()
-    return level if level in RESTORE_LEVELS else DEFAULT_RESTORE
+OCR_PASS_MODES = ("psm11", "dual")
+DEFAULT_OCR_PASSES = "psm11"
 
 
-def at_least(level):
-    return RESTORE_LEVELS.index(restore_level()) >= RESTORE_LEVELS.index(level)
+def ocr_passes():
+    """How many Tesseract page-segmentation passes S2 runs per image.
 
-
-def early_stop():
-    """Whether S2 stops OCRing a page once a reading looks 'good enough'.
-
-    Off by default: an exhaustive read (every geometric variant, keep the best)
-    scored +0.21 dev over stopping early — the early stop was settling for a worse
-    variant — for ~0.5s/case of a 6s budget (see docs/experiments.md). Opt back in
-    with MIB_EARLY_STOP=1. Critical + stamped: a cache built one way must never be
-    joined with predictions built the other, exactly like `restore`.
+    `psm11` (default): the single sparse-text pass this corpus was tuned on.
+    `dual`: also run PSM 3 (full auto layout) per image and let `best()` keep the
+    stronger reading — the top competitor's recipe. PSM 3 reads dense/tabular forms
+    that PSM 11 fragments; PSM 11 wins on the scattered fragments a restored scan
+    leaves. Critical + stamped: dual-pass changes which reading wins, so its page
+    text must never be joined with a single-pass cache (exactly like `restore`).
+    Off by default so the change lands score-neutral until measured; opt in with
+    MIB_OCR_PASSES=dual.
     """
-    return os.environ.get("MIB_EARLY_STOP", "0") == "1"
+    mode = os.environ.get("MIB_OCR_PASSES", DEFAULT_OCR_PASSES).lower()
+    return mode if mode in OCR_PASS_MODES else DEFAULT_OCR_PASSES
+
+
+# S2 reads every geometric variant and keeps the best; the early stop that used
+# to be selectable here is gone (it measured −0.21 dev, experiments.md row 16).
+# The key stays in the stamp as a frozen False so that caches built before the
+# removal — which are not in git, `output/` being ignored — remain joinable.
+EARLY_STOP = False
 
 
 # Decider config is stamped for visibility (shown by `describe`) but deliberately
@@ -88,8 +103,9 @@ def stamp(**extra):
     rev, dirty = _git_state()
     return {
         "schema": SCHEMA,
-        "restore": restore_level(),
-        "early_stop": early_stop(),
+        "restore": RESTORE,
+        "early_stop": EARLY_STOP,
+        "ocr_passes": ocr_passes(),
         "decider": decider(),
         "cfa_veto": cfa_veto(),
         "git_rev": rev,
@@ -104,9 +120,11 @@ def describe(meta):
         return "UNSTAMPED"
     dirty = "+dirty" if meta.get("git_dirty") else ""
     back = " (backfilled)" if meta.get("backfilled") else ""
-    es = " early_stop" if meta.get("early_stop") else ""
+    es = " early_stop" if meta.get("early_stop") else ""      # legacy caches only
+    passes = meta.get("ocr_passes")
+    ocr = f" ocr={passes}" if passes and passes != DEFAULT_OCR_PASSES else ""
     dec = f" decider={meta['decider']}" if meta.get("decider") else ""
-    return f"restore={meta.get('restore', '?')}{es}{dec} rev={meta.get('git_rev') or '?'}{dirty}{back}"
+    return f"restore={meta.get('restore', '?')}{es}{ocr}{dec} rev={meta.get('git_rev') or '?'}{dirty}{back}"
 
 
 def require_agreement(labelled):
@@ -137,8 +155,8 @@ def require_agreement(labelled):
         if key in CRITICAL_KEYS:
             raise SystemExit(
                 f"\nrefusing to join artifacts from different pipelines: {message}\n"
-                f"rebuild the stale input at the config you want to measure, e.g.\n"
-                f"  MIB_RESTORE=<level> scripts/dump_text.py <pdf_dir> <cache.jsonl>\n")
+                f"rebuild the stale input at the current config, e.g.\n"
+                f"  scripts/dump_text.py <pdf_dir> <cache.jsonl>\n")
         print(f"  WARNING: {message} — results may mix code revisions.")
     if any(m.get("git_dirty") for _n, m in stamped):
         print("  note: at least one input was built from a dirty tree; "

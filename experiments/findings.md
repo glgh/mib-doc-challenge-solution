@@ -2,6 +2,100 @@
 
 Dated notes from detector R&D. Newest first.
 
+## 2026-07-23 — faint-scan reading-failure class (021 p2, 129 p0); the pre-OCR normalization gap
+
+A second failure mode, **optical not geometric**, worth coming back to. Two pages
+read as ~nothing usable and it is not damage any restoration here addresses:
+
+| case | mean | ink@<128 | what it is | fields parsed |
+| --- | ---: | ---: | --- | ---: |
+| MIB-000021 p2 | 243 | 3.5% | Registry Extract | 0 |
+| MIB-000129 p0 | 248 | 2.1% | **Manual Adjudicator Note** (top trust tier) | 0 |
+
+Mechanism:
+- `INK = 128` is a *measurement* threshold (skew / `_band_offsets` / orientation),
+  **never applied to the OCR input** — tesseract is fed the raw grayscale and does
+  its own internal Otsu (`render.reads_for` writes original bytes or
+  `to_png_bytes(gray)`; no thresholding, no contrast normalization anywhere).
+- On a faint page the strokes sit at ~190–230, so `(gray < 128)` captures almost
+  nothing → `skew_sweep` hits its `len(ys) < 50` guard and returns `None` ("too
+  little ink"). So the faint page is **doubly** hurt: our geometry detectors go
+  blind *and* tesseract gets low global contrast. `INK`'s comment ("glyphs are
+  near-black") is simply false here.
+
+Enhancement tried, all yielding **only garbage lines**: autocontrast(cutoff 1),
+otsu (degenerates to threshold 255 on these bright pages), linear stretch 195→250,
++`MinFilter(3)` stroke-thicken, +2× upscale, across PSM 11/6/4/3. Best fragment
+ever recovered is 129's "Manual Adjudicator Note" header, barely. So these two are
+**probably genuinely degraded** (broken/dropped strokes), not merely faint —
+whether a human can read them is unresolved and needs an eyeball.
+
+**Deferred lever (do not lose): a guarded faint-page normalization** applied
+*before* both measurement and OCR, gated on a faintness signal (e.g. page mean >
+~230 **and** `(gray<128)` fraction < ~1–2%) so good pages stay untouched (global
+autocontrast would amplify speckle/JPEG noise into fake ink and mislead the
+INK-based detectors). Payoffs, ranked by certainty:
+1. **Certain / a real bug fix:** un-blinds geometry on faint pages — today we
+   cannot even deskew them because the ink mask is empty.
+2. **Uncertain:** OCR lift on the *moderately*-faint tail (NOT 021/129, which
+   enhancement does not rescue). Must be sized on the population via
+   `recoverable.py` `+ocr`, held to CFA 0, and eyeballed (real text vs noise).
+
+Prototype in `experiments/` before touching the pipeline. Tracked in
+`hard_cases.jsonl` as the two `ocr`-track cases.
+
+## 2026-07-23 — OCR A/B kills content-correlation deshred; the guard is the answer
+
+Ran `repair_bench.py --set hard --ocr` — the first OCR-level A/B of
+`deshred_content` (the border-proposes/content-confirms fusion) against
+`deshred_border` (shipped `realign_bands`). Evidence score per case, on the image
+after orient+deskew:
+
+| case | shred | deskew | border | content |
+| --- | --- | ---: | ---: | ---: |
+| MIB-000037 p0 | **False** | 9 | 9 | 9 |
+| MIB-000221 p0 | False | 6 | 6 | 6 |
+| MIB-000189 p2 | False | 14 | 14 | 14 |
+| MIB-000045 p2 | True | 3 | **6** | 3 |
+| MIB-000013 p2 | True | 7 | **9** | 8 |
+| MIB-000125 p4 | True | 0 | **2** | 1 |
+| MIB-000165 p1 | True | **6** | 2 | 3 |
+| MIB-000237 p1 | True | 12 | 12 | 12 |
+
+**Content trails border on every true positive.** Instrumenting the per-band
+shifts shows why, and it's fatal to the idea: cross-correlating *column
+ink-profiles between bands that hold different text* is not a shift estimator. On
+045's high-ink bands (ink 2045, 1887, 2490) `content_shift` rails to −124/−152/−160
+(the ±160 span limit) — it aligns unrelated ink distributions and drifts to the
+edge. So the content gate rejects the real bands and under-corrects. And on 037 it
+does the opposite of the design: `content_shift ≈ border_shift` on nearly every
+band (both −30, −46, −54…), so it would *fire*. The signal separates neither
+direction. **Content-correlation deshred is abandoned.**
+
+**The bigger finding — the 037 hazard was overstated.** OCR'd 037 before/after
+`realign_bands` at the field level:
+
+```
+037 before:  Applicant: Arivara Zavoss   Declared Purpose: nrealta consunt (garbage)
+037 after :  Appiicarit: arivard Zavoss  Declared Purpose: medical consult (RECOVERED)
+045 before:  Le Snqnsauavaciation…  Purpose -tnpronraine   (no sponsor line)
+045 after :  Sponsor Attestation…   Purpose: diplomatic   Sponsor: SPN-2847
+```
+
+Border-deshred on 037 mildly hurts the applicant (`Arivara`→`arivard`) but *fixes*
+declared purpose — net roughly neutral, ev-flat at 9. Not the "corrupts the one
+image we OCR" catastrophe the plan built around. Meanwhile 045 is a decisive win.
+
+**Conclusion / direction.** Precise shred *detection* is not the lever. The border
+corrector (`realign_bands`) is broadly beneficial; its only real regression here is
+165 (6→2, order-sensitivity), and that is exactly what a **bounded OCR guard**
+catches — OCR the pre-deshred and post-deshred images, `best()` keeps the max.
+Answering the user's open question directly: **the guard is needed** (for 165), and
+keeping it makes detection precision non-critical, so we don't need a razor-sharp
+shred detector at all. The runtime win comes from the *orientation* detector
+(done, 13/13), which removes the blind turn-90/turn-270 fan-out; deshred stays a
+cheap 2-way guarded step (1 OCR typical, 2 on pages with a full-width border).
+
 ## 2026-07-23 — orientation false-positives from form rules; asymmetric threshold
 
 The first `orientation` cut (anisotropy, turn when ratio < 0.95) wrongly turned
