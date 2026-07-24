@@ -41,7 +41,7 @@ def _mean_run(mask, axis):
 
 def _top_mass(gray):
     """Fraction of ink in the top third — the intake form's dense block sits high."""
-    ink = (gray < INK)
+    ink = imaging.ink_mask(gray)
     if ink.sum() == 0:
         return 0.0
     return ink[: ink.shape[0] // 3].sum() / ink.sum()
@@ -62,7 +62,7 @@ def orientation(gray, turn_margin=0.20):
     turn_margin — and default to upright through the whole ambiguous band. True
     turns are far more anisotropic (ratio ≤ 0.65) so nothing real is lost.
     """
-    ink = (gray < INK)
+    ink = imaging.ink_mask(gray)
     v, h = _mean_run(ink, 0), _mean_run(ink, 1)
     ratio = v / max(1e-6, h)
     conf = abs(ratio - 1.0)

@@ -17,9 +17,64 @@ MAX_SKEW = 8.0       # degrees; beyond this the page is turned, not skewed
 SKEW_STEP = 0.25
 MIN_SKEW = 0.5       # below this, rotating costs an OCR pass and buys nothing
 
+# Adaptive ink mask for faint/gray scans, where the glyphs sit well above INK so
+# the fixed `gray < INK` mask is nearly empty and every geometry detector goes
+# blind (see ink_mask). Tuned on the train scan census: a normal page has genuine
+# dark ink, a faint page's ink is gray — so the threshold only adapts when the base
+# mask is starved AND the ink density jumps as the threshold is raised.
+PAPER_CUT = 245      # exclude the paper spike before thresholding the remainder
+INK_CEIL = 230       # hard cap: never call anything lighter than this "ink"
+STARVED = 0.01       # base-mask ink fraction below this may be a faint page
+FAINT_HI = 210       # where faint gray ink lives
+FAINT_RATIO = 5.0    # ink >=5x denser at FAINT_HI than at the base => gray, not black
+MIN_ADAPT_PX = 200   # too few sub-paper pixels => blank page, don't fabricate ink
+
 
 def to_gray(image_bytes):
     return np.asarray(Image.open(io.BytesIO(image_bytes)).convert("L"))
+
+
+def _otsu(values):
+    """Otsu's threshold over a 1-D intensity array: the histogram valley that best
+    splits it into two classes (dark ink / lighter background), by maximising the
+    between-class variance in one cumulative pass. `values` are ints in [0, 255]."""
+    hist = np.bincount(values, minlength=256).astype(np.float64)
+    total = hist.sum()
+    if total == 0:
+        return None
+    weight = np.cumsum(hist)
+    mean = np.cumsum(hist * np.arange(256))
+    mean_total = mean[-1]
+    w0, w1 = weight, total - weight
+    m0 = mean / np.where(w0 == 0, 1, w0)
+    m1 = (mean_total - mean) / np.where(w1 == 0, 1, w1)
+    between = w0 * w1 * (m0 - m1) ** 2
+    return int(np.argmax(between))
+
+
+def ink_mask(gray, thresh=INK):
+    """Boolean ink mask for the geometry detectors, adaptive on faint/gray scans.
+
+    Normally just `gray < thresh`, so black-ink pages are byte-identical to the
+    fixed-threshold behaviour. Only when that mask is *starved* (fraction < STARVED)
+    AND the ink is clearly gray rather than sparse-black (>=FAINT_RATIO denser by
+    FAINT_HI than at `thresh`) is the threshold re-derived by Otsu over the
+    below-paper range, capped at INK_CEIL. A near-blank page (too little sub-paper
+    ink) keeps the base mask rather than have a threshold invented from noise.
+    """
+    base = gray < thresh
+    frac = base.mean()
+    if frac >= STARVED:
+        return base
+    if (gray < FAINT_HI).mean() < FAINT_RATIO * max(frac, 1e-6):
+        return base                     # ink already dark (sparse-black), leave it
+    sub = gray[gray < PAPER_CUT]
+    if sub.size < MIN_ADAPT_PX:
+        return base                     # blank: don't fabricate ink from noise
+    t = _otsu(sub.astype(np.int64))
+    if t is None:
+        return base
+    return gray < min(t, INK_CEIL)
 
 
 def skew_sweep(gray):
@@ -35,7 +90,7 @@ def skew_sweep(gray):
     measure, which is the flat-zero case the caller reports as 0 degrees.
     """
     angles = np.arange(-MAX_SKEW, MAX_SKEW + 1e-9, SKEW_STEP)
-    ink = np.asarray(Image.fromarray((gray < INK).astype(np.uint8) * 255).resize(
+    ink = np.asarray(Image.fromarray(ink_mask(gray).astype(np.uint8) * 255).resize(
         (max(1, gray.shape[1] // 3), max(1, gray.shape[0] // 3)), Image.BILINEAR)) > 40
     ys, xs = np.nonzero(ink)
     if len(ys) < 50:
@@ -77,7 +132,7 @@ def _band_offsets(gray):
     the left member's x is that band's displacement. Rows without a readable
     border inherit the last known shift, which is what makes a band coherent.
     """
-    dark = gray < 150
+    dark = ink_mask(gray, thresh=150)
     spans = []
     for row in dark:
         xs = np.flatnonzero(row)
