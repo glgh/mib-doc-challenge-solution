@@ -69,6 +69,26 @@ zero non-DIP approvals — policy inference the manual explicitly invites, not p
 **Revoked-under-DIP-1 is fine** (11/11 such cases APPROVED — sponsor not required for DIP-1). Snap
 must never *fabricate* a revoked id by digit-translation (`mib/vocab.py` guards this).
 
+**The structural evidence is stronger than the outcome table, and it needs no labels.** A sponsor id
+is per-case data — each packet carries its own — so the occurrence spectrum over the 1,000-case train
+corpus should be flat at 1. It is not; it is bimodal, with nothing in between:
+
+| appears | 1× | 2× | … | 9× | 16× | 18× | 22× |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| distinct ids | 734 | 23 | — | 1 | 1 | 3 | 1 |
+
+The six ids above the gap are **exactly** the six revoked sponsors, published and inferred alike. So
+recurrence alone recovers the list without consulting a single label, which is why the inference is
+sound rather than lucky: the generator gives every ordinary case a fresh sponsor and reuses only the
+policy-level ones. Two independent confirmations followed. `scripts/audit_constants.py` re-mines the
+same three ids from **every** 4/5 fold of dev (row 21, zero fitting bias), and `mib/corpus.py` detects
+all three label-free after they are ablated, restoring 62.41/80 and CFA 0 from an ablated 60.61/1
+(row 23).
+
+The residual exposure is **coverage, not correctness**: the list cannot see a revoked sponsor that
+exists only in the private set, and a missed one falls through to `clean_approve` — the −4 outcome.
+That is what `mib/corpus.py` exists to cover.
+
 ### Embargo worlds
 
 | World | Rule | Evidence |

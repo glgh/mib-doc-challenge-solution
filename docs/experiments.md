@@ -236,3 +236,155 @@ because the cache stores only the chosen line list, not the winning variant. The
 should run on pages *below* `GOOD_ENOUGH`; the cost data hints the opposite (PSM 3 earns its keep on
 dense intact forms and burns time on wreckage it cannot segment). Recording the winning variant is a
 one-line instrument and is the prerequisite for any gated retry.
+
+---
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 21 | 2026-07-24 | (dirty) | **Overfitting audit** (`scripts/audit_constants.py`): 5-fold within dev, every label-fitted constant refit from in-fold cases only, scored out-of-fold | **118.86** | 62.41 | 41.36 | 15.09 | 0 | — | measurement |
+| 22 | 2026-07-24 | (dirty) | **B2** — delete the `planetary_embargo` inference in `signals.derive`; the `embargo_world` branch it shadowed now fires (8 dev cases) and gets a fitted confidence entry | **119.13** | 62.41 | 41.36 | 15.35 | 0 | — | keep |
+| 23 | 2026-07-24 | (dirty) | **C** — `mib/corpus.py`: label-free recurring-sponsor detection + post-stream revision in `solution.py`. No-op on the shipped config; measured by ablation | 119.13 | 62.41 | 41.36 | 15.35 | 0 | — | keep |
+
+**Row 21 — the fitted constants are not the overfit (2026-07-24, `output/audit_oof`, replay on
+`train_skew.jsonl`, dev).** Four constants are fitted by looking at train labels: `STALE_CUTOFF`,
+`FULL/PARTIAL_EMBARGO_WORLDS`, the three mined `REVOKED_SPONSORS` ids, and `confidence_table.json`.
+Refitting each from 4/5 of dev and scoring the held-out fifth attributes the gap:
+
+| refit | Class /80 | Calib /20 | CFA | Δ total |
+| --- | ---: | ---: | ---: | ---: |
+| none (control — must reproduce the baseline) | 62.41 | 15.32 | 0 | — |
+| `STALE_CUTOFF` | 62.41 | 15.32 | 0 | 0.00 |
+| `REVOKED_SPONSORS` (3 mined ids) | 62.41 | 15.32 | 0 | 0.00 |
+| `FULL`/`PARTIAL_EMBARGO_WORLDS` | 62.41 | 15.32 | 0 | 0.00 |
+| `confidence_table.json` | 62.41 | 15.09 | 0 | −0.23 |
+| all four | 62.41 | 15.09 | 0 | **−0.23** |
+
+**The honest dev number is 118.86 against a reported 119.10 — a fitting bias of −0.23, entirely the
+confidence table.** The decision constants do not move at all: every fold re-mines *identical* entity
+lists (2 full-embargo worlds, 1 partial, the same 3 sponsor ids), and the `STALE_CUTOFF` refits land
+between 2025-11-08 and 2026-01-02 — all inside the empty band separating the corpus's stale arrivals
+(≤2025-11-15) from its fresh ones (≥2026-01-15), so they are the same decision boundary written
+differently. A shrinkage sweep confirms the table needs no fix either: OOF calibration is 15.10 /
+**15.09** / 15.07 / 15.05 / 15.01 at `SHRINK_K` = 5 / **10** / 20 / 40 / 80, so the shipped k=10 is
+already optimal and the only defect was *reporting* 15.32 as if it generalized.
+
+Two methodology notes, both of which changed the answer:
+
+- **The miners must read the label columns, not extracted values.** A first pass mined `home_world`
+  from the pipeline's own output (87.9% accurate) and reported −1.23 with a CFA. That was the audit's
+  own extraction noise: Wolf-1061c is 32/32 denied non-DIP by the labels but only 22/26 by
+  extraction, so it dropped out of the partial-embargo list and `MIB-000752` became a false approval.
+  Constants are derived from labelled data, so a fold-refit has to be too.
+- **A no-refit control is mandatory.** The first attribution run passed live module objects for the
+  constants it was *not* refitting, and the in-place patcher cleared them before copying — so those
+  runs silently executed with empty embargo sets and an empty confidence table. The control (refit
+  nothing → exactly 119.10) is what caught it.
+
+**Scope, stated plainly:** this varies four *fitted values*. It does not vary the cascade's structure
+— which branches exist, in what order — or the ~10 hand-tuned thresholds (`match_flag_token` 0.7/0.15,
+`_CONFUSION_COST` 0.3, the `snap` cutoffs, the `len(found) <= 3` legend guard). Those were also
+selected on dev and are the more likely source of the v1 dev→holdout gap (115.43 → 113.46, −1.97),
+which this result does **not** explain away.
+
+**Row 22 — one rule, two homes, and the wrong one won.** `signals.derive` added `planetary_embargo`
+for any `FULL_EMBARGO_WORLDS` origin. That duplicated policy's `embargo_world` branch and, sitting one
+position earlier in the cascade, shadowed it into dead code: **0 of 700 dev cases ever reached
+`embargo_world`**, and because `fit_confidence.py` never saw a sample the branch was *absent from
+`confidence_table.json`* and silently answered from the hand-set 0.9 fallback. The 31 full-embargo dev
+cases split **15 / 8 / 8**: fifteen carry an *observed* planetary_embargo and legitimately keep
+denying via `disqualifying_flag`, eight are settled earlier by an adjudicator finding, and **eight had
+no observed flag at all** — those were the ones the inference was carrying, and they now land on
+`embargo_world`. (The "23 observed" figure is 15 + the 8 adjudicator cases, not the 23 that were in
+`disqualifying_flag`; conflating the two briefly made this look like a pure no-op.) The branch gains a
+real fitted entry (0.95, n=8, raw 1.000) and a backwards `signals → policy` import goes away.
+Decisions are unchanged — both branches deny — so the +0.03 is calibration only.
+
+**Row 23 — cross-case correlation, gated on an ablation.** `vocab.REVOKED_SPONSORS` carries three ids
+"inferred from train labels". They are not overfit (row 21 re-mines them from every fold) but they are
+a *coverage* risk: a hardcoded list cannot see a revoked sponsor that exists only in the private set,
+and a missed one falls through to `clean_approve` — a false approval. Ablating the three ids costs
+**−1.80 classification points and produces exactly that CFA** (21 cases move; 18 fall to NEEDS_REVIEW
+branches, 1 to `clean_approve`).
+
+`mib/corpus.py` recovers them without a single label. Sponsor ids are per-case data — each packet
+carries its own — except for the ones that are not, and the occurrence spectrum over 1,000 train cases
+is starkly bimodal with nothing in between: **734 ids appear 1×, 23 appear 2×, then 1 at 9×, 1 at 16×,
+3 at 18×, 1 at 22×** — and those six are exactly the six revoked sponsors. The detector splits the
+spectrum at the largest *ratio* gap (2→9 is 4.5×; the largest *absolute* gap, 9→16, is the wrong
+statistic and would miss `SPN-9090` at 9×) and validates its own precondition: the gap must clear 3×
+and the flagged set must stay under 5% of distinct ids, else it abstains.
+
+| config | Class /80 | CFA | detected | revised |
+| --- | ---: | ---: | --- | ---: |
+| full hardcoded list | 62.41 | 0 | — | — |
+| 3 mined ids ablated | 60.61 | **1** | — | — |
+| ablated + `corpus.revise` | **62.41** | **0** | the 3 ablated ids | 25 |
+| shipped list + `corpus.revise` | 62.41 | 0 | none | **0** |
+
+Perfect recall, zero false positives, and a **provable no-op on the shipped config** — which is also
+why the ablation is the only possible test: on train the detector finds only ids the list already has.
+Two limitations that must travel with it: it **abstains below ~1,000 cases** (at n=250/500 the
+revoked ids' counts fall too close to the 2× bucket to clear the ratio gate, so it reports nothing
+rather than guessing — safe, since the hardcoded list stands), and it is **transductive**: the same
+PDF can score differently depending on what else is in the input directory. The action is the same
+rule policy already applies to a known revoked sponsor — non-DIP only, higher-precedence branches
+untouched, and it can only ever tighten a decision toward DENIED.
+
+Wiring note: the revision runs *after* the stream, as a rewrite of already-written rows via
+`os.replace`, never as a barrier before the first write. `solution.py` streams because the contract
+stops the container at 30,000 s and scores whatever is on disk; killed early, the file is exactly what
+today's pipeline produces (pinned by `test_killed_run_leaves_valid_provisional_output`).
+
+---
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 24 | 2026-07-24 | (dirty) | **Label-free distribution-shift check on the 5,000-case validation set** (`output/val_shift`) — no labels consulted, so it costs no holdout read and can be repeated on the private set's output | — | — | — | — | — | — | measurement |
+
+Three of the four fitted constants were checked against unseen data by looking only at the *shape* of
+the validation extractions. Two transfer cleanly, one lost its margin, and one distribution moved
+enough to matter.
+
+**Sponsor recurrence transfers exactly — the same six ids, at 5× the corpus.**
+
+| corpus | distinct ids | occurrence spectrum | detector output |
+| --- | ---: | --- | --- |
+| train (1,000) | 763 | 734×1, 23×2, ‖ 1×9, 1×16, 3×18, 1×22 | the 6 known revoked |
+| validation (5,000) | 2,996 | 2339×1, 542×2, 99×3, 9×4, 1×5, ‖ 73, 76, 90, 103, 109, 118 | **the same 6** |
+
+Zero new ids, zero missing. The low end is busier at 5,000 cases (542 ids appear twice), but the gap
+from 5 to 73 is **14.6×** against the detector's 3× gate, so the split is even less ambiguous than on
+train. Two consequences: the hardcoded list *does* transfer to validation, and `mib/corpus.py` is
+therefore a no-op there too — its value stays purely private-set insurance, exactly as row 23 framed
+it, now confirmed on 5,000 unseen packets rather than argued.
+
+**`STALE_CUTOFF` transfers, but its margin collapsed from 37 days to 2.** The 2026-01-02 constant was
+chosen as the midpoint of an empty band in the train arrival dates. That band is a small-sample
+artifact — validation fills it in:
+
+| corpus | nearest arrival below | nearest at/above | margin | within ±7d | `stale_arrival` fires |
+| --- | --- | --- | ---: | ---: | ---: |
+| train | 2025-12-09 | 2026-01-15 | 37 d | 0 / 842 | 1.30% |
+| validation | 2025-12-31 | 2026-01-02 | **2 d** | 6 / 4,230 | 1.28% |
+
+The cutoff still sits exactly inside the (now 2-day) gap, and the branch fires at an essentially
+identical rate on both corpora — so the constant is right and it generalizes. What is gone is the
+*slack*: the max-margin argument in `policy.py:19-23` is a train-only property. Exposure is small
+(6 validation cases within ±7 days, 20 within ±14), so this is a documented risk, not a change.
+
+**Render damage shifted 2×, which independently vindicates rejecting the `b13_census` prize.**
+
+| corpus | packets with no scan page | page counts (3/4/5/6) |
+| --- | ---: | --- |
+| train | 149/1000 = **14.9%** | 37.8 / 22.0 / 26.7 / 13.5% |
+| validation | 365/5000 = **7.3%** | 31.4 / 25.5 / 26.6 / 16.5% |
+
+`n_scan_pages == 0` — the single feature the +2.0 `b13_census` model keyed on (see STATUS, rejected
+list) — describes **half as many** validation packets as train ones. A rule or model tuned to that
+population would have fired on a substantially different slice of the private set. This is the
+concrete confirmation that the artifact was a generator property and not a case property.
+
+**Decision mix is otherwise stable**, which is the reassuring half: NEEDS_REVIEW 55.7 → 54.1%, DENIED
+34.8 → 34.3%, APPROVED 9.5 → 11.5%; branch order is unchanged with `adjudicator_finding` 25.8 → 27.5%
+and `fee_unknown` 21.9 → 24.5%. The two cells that hold the unreachable loss are, if anything,
+slightly *larger* on validation.

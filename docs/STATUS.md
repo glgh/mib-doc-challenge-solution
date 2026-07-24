@@ -25,6 +25,26 @@ current state.
 and `experiments.md`). `MIB_DECIDER` stays `rules` (the default); `mib/decision_model.npz` is frozen
 and superseded, not a live promotion candidate.
 
+**Decision-layer ML is now closed, not merely shelved (2026-07-24).** The last apparent prize — a
++2.0-point split of `b13_census` — traced to a data-generation artifact, and `fee_unknown` has no
+signal at all. Both are in the rejected list; question 5 is answered and the remaining classification
+loss is not reachable by any decider over these features.
+
+**The rules cascade is far less overfit than assumed, and the audit says where to look next.**
+`scripts/audit_constants.py` refits every label-fitted constant 5-fold within dev and scores
+out-of-fold: **honest dev 118.86 vs reported 119.10, a bias of −0.23 that is entirely the confidence
+table** (row 21). `STALE_CUTOFF`, the embargo world lists, and the three mined revoked-sponsor ids
+re-mine *identically* from every fold and cost nothing. That is a good result but a narrow one — it
+does not explain the v1 dev→holdout gap of −1.97, so the cascade's *structure* (branch order, which
+branches exist, ~10 hand-tuned thresholds) is now the prime suspect and is unaudited (question 8).
+
+**Correction on cross-case inference.** An earlier reading of the anti-gaming rules argued against
+computing corpus-level statistics at runtime. That was backwards: the submission already shipped a
+*hardcoded list of sponsor ids derived from train labels*, and a runtime statistic uses no labels and
+no per-PDF keys, so it is strictly the less exposed of the two. `mib/corpus.py` now recovers the
+mined ids from recurrence structure alone (row 23), gated on an ablation because on the shipped
+config it is a provable no-op.
+
 | step | commit | dev | note |
 | --- | --- | ---: | --- |
 | pre-P0.5 shipped default | `d6427f8` | 114.50 | container shipped `off` while the log's headline read 116.88 |
@@ -110,6 +130,23 @@ Mechanism, not just the delta — the delta is in [experiments.md](experiments.m
 
 The more useful half. Each of these looked reasonable and was killed by a measurement.
 
+- **Splitting `b13_census` — the last apparent ML prize, and it was a generator artifact.** The cell
+  holds 6.25 points of loss and models find real signal in it: a random forest on the 66 features gets
+  +2.01 class points (nested CV +2.11), which would have been the largest lever in the repo. It is not
+  real. The signal is `n_scan_pages`, a *render* property rather than document evidence, and it leaks
+  the label corpus-wide — **48.6% APPROVED for packets with no scan pages vs 25.1% for packets with
+  them** — because the generator applies scan damage preferentially to DENIED cases. Every
+  legitimate-looking alternative turned out to be the same split wearing a different hat: `clean` is a
+  strict *subset* of `registry=CLEAR` (intersection = 68 = |clean|) and of "no sponsor doc", and
+  conditioned on render state `registry=CLEAR` carries nothing (37.5% vs 30.8% APPROVED among scanned
+  packets, n=8). Strip render + registry features and the gain collapses 2.01 → **0.86 with *more*
+  CFAs (10 vs 9)** — fewer points for more false approvals is a model guessing, not finding structure.
+  And it is unbuyable regardless: inside the 68 clean packets the truth is still 48/12/**8 DENIED**,
+  and nothing in the feature space separates those 8 (a full-feature model turns 7 of them into false
+  approvals). The CFA-0 gate was doing its job by refusing this. `fee_unknown` is deader still — all
+  four model families lose to the rules baseline *and* every one adds CFAs. **Decision-layer ML is
+  closed**, not shelved: seven model families now, ranking by regularization strength rather than
+  capacity, which is an information limit and not a hypothesis-class one.
 - **Promoting the learned decider on the current substrate** (−0.50 class, +14 CFA). The calibrated
   logistic beat rules by +1.16 class pts when rules scored 61.27 (the 115.20 substrate). Rules then
   climbed to 62.41 (flag extraction + P3 parse), and a re-measurement on `output/eval_head` (dev
@@ -207,7 +244,9 @@ joined `skew`-derived text against `bands`-derived predictions and produced conf
 | 2 | ~~Does the pipeline fit the runtime budget?~~ **ANSWERED** | full contract-limits run: 0.54 s/PDF, 0.75 h/5,000, ~11× headroom (`scripts/run_docker_submission.py`) |
 | 3 | Can `turn`/`bands` (+1.68) be made affordable? | premise weakened: skew fits at 11× headroom, so the tail may already be affordable — **time `turn`/`bands` through the gate** before assuming detect-first is required |
 | 4 | ~~Is CFA 0 a hard gate or a priced cost?~~ **MOOT** | learned decider shelved; rules run at CFA 0 with no veto. Revives only with the learned decider (then the honest count is 12 OOF CFAs) |
-| 5 | Where do the remaining 16.66 classification points go? | `fee_unknown` 7.37 and `b13_census` 5.37 are the two big cells, and neither is an OCR problem |
+| 5 | ~~Where do the remaining 16.66 classification points go?~~ **ANSWERED — and they are not reachable** | `fee_unknown` (7.11) has no signal: four model families all lose to the rules baseline and all add CFAs. `b13_census` (6.25) has signal, but it is the `n_scan_pages` render artifact — worth +0.86 with 10 CFAs once stripped, and the 8 DENIED inside its clean subset are inseparable. See the rejected list |
+| 8 | Does the fitted-constant audit generalize to the cascade's *structure*? | **open, and it is the real question.** `audit_constants.py` says the four fitted values cost only −0.23 (row 21), which does **not** explain the v1 dev→holdout gap of −1.97. Branch order, which branches exist, and ~10 hand-tuned thresholds were also picked on dev and are unaudited |
+| 9 | ~~Do the fitted constants survive contact with unseen data?~~ **ANSWERED, label-free** | row 24, `output/val_shift` (5,000 validation packets). Sponsor recurrence transfers **exactly** — same six ids, gap 14.6×. `STALE_CUTOFF` is correct but its margin fell 37 d → **2 d** (train's empty band was a small-sample artifact); 6 cases sit within ±7 d, so it is a logged risk, not a change. Render damage **halved** (14.9% → 7.3% clean packets), independently confirming the `b13_census` artifact would not have transferred |
 | 6 | Does the dev→holdout gap still hold? | holdout untouched since 113.46 at `v1`; read only at a milestone |
 | 7 | Is hidden-line *content* worth mining as a signal? | untried — see note below |
 
@@ -255,6 +294,28 @@ guard exists to defeat. Unmeasured; no row yet.
 
 Each of these has cost time once already.
 
+**Render-derived features carry the generator's damage-vs-label coupling.** Thirteen of the 66
+features in `mib/features.py` describe how the PDF was *produced* rather than what it says:
+`n_pages`, `n_scan_pages`, `n_ocr_fields`, `worst_doc_rank`, `n_fields_missing`, `n_corrections`,
+`hidden_present`, and the six `has_*` doc-presence flags. The generator damages DENIED packets more
+often (48.6% vs 25.1% APPROVED, clean vs scanned), so every one of these is a partial label proxy
+whose relationship to the truth is a property of the data generator and has no reason to survive to a
+private test set. This is what made the `b13_census` prize look real. They are inert today because the
+learned decider is shelved — deleting them is churn, but **nothing new may condition on them**, and
+any future model that scores well should be re-checked with them removed before it is believed.
+
+**A miner that reads extracted values measures its own extraction noise.** The first pass of
+`audit_constants.py` mined `home_world` from pipeline output (87.9% accurate) and reported a −1.23
+fitting bias with a CFA. Both were the audit's own errors: Wolf-1061c is 32/32 denied non-DIP by the
+labels but 22/26 by extraction, so it fell out of the partial-embargo list. Constants are derived from
+labelled data; anything re-deriving them must read the label columns.
+
+**An in-place monkeypatch needs copies, not the live objects.** `audit_constants.patched` clears its
+targets before writing them, so passing `policy.FULL_EMBARGO_WORLDS` itself as the "keep this one
+unchanged" value emptied it. Three attribution runs executed with empty embargo sets and an empty
+confidence table and looked plausible. The no-refit control (must reproduce the baseline exactly) is
+what caught it and is why that control is not optional.
+
 **S3's vocabulary silently drives S2's OCR.** `stages/render.evidence_score` scores a page by how
 many labels `parse.key_for` recognizes. Adding one `KEY_MAP` entry (`purpose`) changed which OCR
 variant won — **in both directions** — and invalidated the page-text cache. `verify_render.py`
@@ -297,7 +358,14 @@ documents. Only `scripts/run_docker_submission.py` under the real limits settles
 
 Done since this list was written: P3 parse committed (loose-key kept + dates hardened), suite green,
 119.10 confirmed by full eval, learned decider shelved (which mooted the CFA-gate decision), and the
-full-corpus Docker parity run (Q2) came back at 0.54 s/PDF with ~11× headroom. What's left:
+full-corpus Docker parity run (Q2) came back at 0.54 s/PDF with ~11× headroom. Then, 2026-07-24: ML
+closed for good (question 5 answered), the constant audit landed at −0.23, `embargo_world` un-shadowed,
+and `mib/corpus.py` added. What's left, highest leverage first:
+
+0. **Audit the cascade's structure, not just its constants** (question 8). Row 21 cleared the four
+   fitted values at −0.23, which leaves the −1.97 v1 dev→holdout gap unexplained. Branch order and the
+   ~10 hand-tuned thresholds are the remaining candidates and nothing has measured them. Do this
+   before spending a holdout read, since a holdout read cannot tell you *which* choice is overfit.
 
 1. **Re-price the `turn`/`bands` prize on the 119.10 substrate** before building any detect-first
    machinery. The +1.68 (Q3) predates exhaustive OCR (row 16) + flag extraction (row 18), and the

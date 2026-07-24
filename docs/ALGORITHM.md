@@ -218,6 +218,29 @@ at the 30,000 s limit is scored on real partial output rather than an empty file
 ids are dropped with a stderr warning. `MIB_DEBUG_JSONL` writes the per-case diagnostic sidecar
 (branch, provenance, census) beside a config-stamped `meta.json`; predictions stay schema-clean.
 
+### S6 — corpus revision (`mib/corpus.py`)
+
+The one stage that is not per-case, and it runs last for that reason: a sponsor id can only be
+recognized as a *policy entity* rather than case data by how often it recurs across the input
+directory, which is unknown until every case has been read.
+
+`recurring_sponsors` counts extracted sponsor ids, splits the occurrence spectrum at its largest
+**ratio** gap, and returns the ids above it — but only if the split is defensible: the gap must clear
+3×, the flagged set must stay under 5% of distinct ids, and the corpus must hold at least 50 cases.
+Otherwise it abstains and the published + validated `vocab.REVOKED_SPONSORS` list stands alone. On
+train it recovers exactly the six known revoked ids, so it changes nothing; its value is coverage of
+ids that exist only in the private set (see `experiments.md` row 23 for the ablation that measures it).
+
+`revise` then applies the *same* rule policy applies to a known revoked sponsor — non-DIP visas only,
+higher-precedence branches (`adjudicator_finding`, `disqualifying_flag`, `embargo_world`,
+`embargo_world_partial`) left untouched — so it can only ever tighten a decision toward DENIED.
+
+Deliberately a **rewrite of already-written rows**, via a sibling temp file and `os.replace`, never a
+barrier before the first write: the streaming above exists precisely so a killed container is scored
+on partial output, and holding everything back until the corpus was complete would trade that away.
+Killed early, the file is exactly what the per-case pipeline produced. A failure inside the revision
+is caught and logged, keeping the provisional rows.
+
 ## Environment knobs
 
 | var | default | effect |
