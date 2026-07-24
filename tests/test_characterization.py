@@ -1,15 +1,19 @@
-"""The refactor safety net.
+"""Fixture-hosted checks that survive behaviour change.
 
-Runs the real downstream pipeline (`runner.predict_from_evidence`) against frozen
-page text and asserts the emitted record is unchanged, field by field. Any
-behavior change in parse / merge / signals / policy / confidence / emit shows up
-here in milliseconds instead of in a 40-minute eval.
+The per-field value snapshot that used to live here was retired: the pipeline's
+extracted *values* are meant to improve, so byte-freezing them turned the file red
+on every intended gain and demanded a regen — a treadmill, not a safety net, and one
+that only restated what stronger gates already prove. The division of labour now:
 
-When a change is *intended*, regenerate with scripts/make_fixture.py and review
-the diff — the fixture is the record of what the pipeline currently does.
+  * value-level drift during a *pure refactor* -> scripts/replay.py (all 1,000 cases
+    against a reference run, stronger than a 71-case snapshot);
+  * properties that must hold whatever the pipeline does -> test_invariants.py;
+  * specific past bugs -> test_regression.py.
+
+What stays here is what a fixture uniquely adds without churning: the coverage
+guarantee that lets those invariants actually fail, and the determinism the whole
+cache/replay architecture rests on.
 """
-import pytest
-
 from conftest import predict
 
 
@@ -35,29 +39,6 @@ def test_fixture_covers_the_policy_surface(characterization, cases):
                                trusted_text(c["pages"])) for c in cases), \
         ("fixture contains no policy-inferred risk flag, so the evidence-source "
          "invariant cannot fail — rebuild with scripts/make_fixture.py")
-
-
-@pytest.mark.parametrize("field", [
-    "case_id", "applicant_name", "species_code", "home_world", "visa_class",
-    "sponsor_id", "arrival_date", "declared_purpose", "risk_flags",
-    "fee_status", "adjudication", "confidence",
-])
-def test_records_unchanged(cases, actual, field):
-    """Per-field so a diff names the field that moved, not just 'a record changed'."""
-    diffs = []
-    for case, (record, _debug) in zip(cases, actual):
-        expected = case["expected_record"][field]
-        if record[field] != expected:
-            diffs.append(f"{case['stem']}: {expected!r} -> {record[field]!r}")
-    assert not diffs, f"{field} changed in {len(diffs)} case(s):\n  " + "\n  ".join(diffs)
-
-
-def test_branches_unchanged(cases, actual):
-    diffs = []
-    for case, (_record, debug) in zip(cases, actual):
-        if debug["branch"] != case["expected_branch"]:
-            diffs.append(f"{case['stem']}: {case['expected_branch']} -> {debug['branch']}")
-    assert not diffs, "policy branch changed:\n  " + "\n  ".join(diffs)
 
 
 def test_deterministic(cases):

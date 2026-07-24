@@ -3,9 +3,10 @@
 
 Reads page text from a materialized dump (scripts/dump_text.py) rather than
 re-reading PDFs, so the expensive stage is paid for once and every derived
-artifact is consistent with it. Both halves of each fixture case come from the
-same page text, so the fixture also pins determinism: re-running the downstream
-stages against the stored text must reproduce the stored record exactly.
+artifact is consistent with it. The stored record is kept for the coverage checks
+(test_fixture_covers_the_policy_surface), not byte-frozen: the per-field value
+snapshot was retired, so intended extraction gains no longer turn the suite red.
+Value-level drift is caught by scripts/replay.py, properties by test_invariants.py.
 
 Sampling is stratified by policy branch and drawn from the dev split only. The
 fixture compares our output against our own output, never against labels, so it
