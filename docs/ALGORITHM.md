@@ -76,11 +76,15 @@ text (a 300-DPI retry bought +0.21 for 43× runtime and was reverted):
 | `turn` | try 90° / 270° when nothing has read yet (180° never wins) |
 | `bands` | "shredder" realign — read per-row shift off the printed page border, roll each band back to the common left margin |
 
-Every variant is OCR'd and `best()` keeps the highest `evidence_score` (earliest read breaks ties).
-An earlier design stopped once `evidence_score >= GOOD_ENOUGH (6)`; it measured **−0.21 dev** — it
-settled for the first good-enough variant and spent the most OCR on the hardest pages
-(docs/experiments.md row 16) — and has been removed, so there is no longer a switch for it. Cost is
-bounded by `runner.CASE_OCR_BUDGET_S`, not by skipping variants. `reads_for` keeps **every** reading.
+Every variant is OCR'd and **every reading crosses the seam** (rows 30, `4afeb58`): `read_case`
+returns the whole ensemble per page, the cache stores it (with each reading's `evidence_score`, so
+replay-time selection is pure), and the winner is chosen downstream — `records.best_read` picks the
+page's *primary* reading (defines the document), while losing readings survive as
+`Packet.variant_docs` for the per-field vote and the flag scan. An earlier design stopped OCR once
+`evidence_score >= GOOD_ENOUGH (6)`; it measured **−0.21 dev** — it settled for the first
+good-enough variant and spent the most OCR on the hardest pages (docs/experiments.md row 16) — and
+has been removed, so there is no longer a switch for it. Cost is bounded by
+`runner.CASE_OCR_BUDGET_S`, not by skipping variants.
 `skew_sweep` is exposed so `scripts/visualize_restore.py` plots the exact curve.
 
 > **Hazard:** S2 page-quality scoring calls `parse.key_for`, so a `KEY_MAP` edit can change which
@@ -119,17 +123,21 @@ bounded by `runner.CASE_OCR_BUDGET_S`, not by skipping variants. `reads_for` kee
 field-manual trust order — and the first valid candidate wins (this per-field preference is worth
 +0.23 dev; it stops a correct `Miravoss` losing to a garbled `Mirayoss`). Then **manual
 corrections** (`Manual correction: <field> is <value>`, the signed-note tier) override everything
-at rank 0.
+at rank 0. Finally the **variant vote** (row 30, +0.74 dev with the flag union): any field whose
+winner was OCR-sourced (or missing) is settled by plurality over valid normalized values across
+the whole OCR ensemble — losing variants included, ties first-seen in generation order. Clean
+text-layer and manual-note values are never outvoted; vote-settled fields carry provenance
+doc_type `VOTE_DOC` (99).
 
 **`signals.derive`** turns evidence into named signals for policy:
 
 | signal | source |
 | --- | --- |
-| `flags` | `observed_flags` (B-13 + registry status line), plus derived `sponsor_mismatch` and `identity_conflict` (the `planetary_embargo` inference was deleted in `068e99e` — it shadowed policy's `embargo_world` branch, and emitted flags are observed-only) |
+| `flags` | `observed_flags` (B-13 + registry status line, scanned across the primary reading **and every losing variant** as a union — row 30 measured zero hallucinations), plus derived `sponsor_mismatch` and `identity_conflict` (the `planetary_embargo` inference was deleted in `068e99e` — it shadowed policy's `embargo_world` branch, and emitted flags are observed-only) |
 | `finding` | `Finding: APPROVED\|DENIED\|NEEDS_REVIEW` on a Manual Adjudicator Note (highest trust) |
 | `waiver_code` | first non-empty waiver code on any doc |
 | `has_biometric` | a B-13 was detected |
-| `has_flag_evidence` | the B-13's flag line was actually *read* (`observed_flags` present), not merely that a slip exists |
+| `has_flag_evidence` | the B-13's flag line was actually *read* (`observed_flags` present) in any reading of the slip — losing variants count — not merely that a slip exists |
 
 ## S5 — adjudication (`mib/runner.py` seam)
 

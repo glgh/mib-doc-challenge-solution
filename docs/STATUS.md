@@ -14,9 +14,12 @@ now**.
 
 ## Where things are
 
-**Committed: dev 121.36, CFA 0, 0 missing rows** (HEAD `fbb3d97`, row 28 — the first score measured
-on the full-ladder substrate the code actually ships; the 119.10–119.27 numbers quoted before
-2026-07-24 were skew-substrate replays. The 119.10 base was verified 2026-07-23 by a full-pipeline
+**Committed: dev 122.10, CFA 0, 0 missing rows** (row 30, `4afeb58` — the keystone: the OCR
+ensemble crosses the seam intact, non-text fields are settled by a plurality vote across all
+readings, and risk flags union across losing variants. Attribution is clean: the same fresh
+ensemble dump replayed with frozen pre-keystone behavior scores exactly the row-28 baseline
+121.36, so the merge is worth +0.74 on identical substrate. The 119.10–119.27 numbers quoted
+before 2026-07-24 were skew-substrate replays; 119.10 was verified 2026-07-23 by a full-pipeline
 eval, `output/eval_head`, 515s for 1,000 PDFs). Shipped config is the
 full restoration ladder (fixed in code) with the **rules** decider. The stage-seam decoupling, exhaustive-OCR default
 (row 16), P3 parse fixes, and OCR-robust flag extraction (row 18) that earlier drafts of this file
@@ -266,6 +269,8 @@ joined `skew`-derived text against `bands`-derived predictions and produced conf
 | 3 | ~~Can `turn`/`bands` (+1.68) be made affordable?~~ **ANSWERED on score** (row 28): the ladder is worth **+2.09** on the current substrate (dev 121.36, CFA 0) and already ships (`c905f00`). Remaining half: laptop cost is ~2.4×/case vs skew — **re-run the Docker gate** to confirm the budget (skew had ~11× headroom, so a 2.4× tail should fit; the gate decides a revert, not an adoption) |
 | 4 | ~~Is CFA 0 a hard gate or a priced cost?~~ **MOOT** | learned decider shelved; rules run at CFA 0 with no veto. Revives only with the learned decider (then the honest count is 12 OOF CFAs) |
 | 5 | ~~Where do the remaining 16.66 classification points go?~~ **ANSWERED — and they are not reachable** | `fee_unknown` (7.11) has no signal: four model families all lose to the rules baseline and all add CFAs. `b13_census` (6.25) has signal, but it is the `n_scan_pages` render artifact — worth +0.86 with 10 CFAs once stripped, and the 8 DENIED inside its clean subset are inseparable. See the rejected list |
+| 6 | Can the `illegible_biometrics` structural gap be read or argued? (~+0.8 dev ceiling) | 223 truth cases carry it; only 83 print it; current recall 54%, and the 103 misses are condition-derived — the B-13 is present but so damaged it isn't even detected as a document (76/103). Every cheap discriminator failed: dead pages are geometrically identical (612×792, aspect 1.3) and their debris carries no type tokens (findings.md 2026-07-25). Would settle it: a dead-page **doc-typer** (ensemble-wide fuzzy B-13 tokens, or census elimination — which expected doc is unaccounted for), or an organizer-ruling-compatible emission argument (an unreadable slip *is* visible evidence of illegibility) |
+| 7 | Does Tesseract word-level confidence (TSV `conf` column) resolve the valid-vs-valid vote ties? | Capture TSV in `_tesseract` (same recognition pass, one dump regen), store per-line conf in `Read`, and A/B a conf-weighted vote offline on the ensemble cache. The earlier variant-merge probe found ties where generation order picks wrong in one direction each (025 date / 037 name) and only word conf wins both |
 | 8 | Does the fitted-constant audit generalize to the cascade's *structure*? | **open, and it is the real question.** `audit_constants.py` says the four fitted values cost only −0.23 (row 21), which does **not** explain the v1 dev→holdout gap of −1.97. Branch order, which branches exist, and ~10 hand-tuned thresholds were also picked on dev and are unaudited |
 | 9 | ~~Do the fitted constants survive contact with unseen data?~~ **ANSWERED, label-free** | row 24, `output/val_shift` (5,000 validation packets). Sponsor recurrence transfers **exactly** — same six ids, gap 14.6×. `STALE_CUTOFF` is correct but its margin fell 37 d → **2 d** (train's empty band was a small-sample artifact); 6 cases sit within ±7 d, so it is a logged risk, not a change. Render damage **halved** (14.9% → 7.3% clean packets), independently confirming the `b13_census` artifact would not have transferred |
 | 6 | Does the dev→holdout gap still hold? | holdout untouched since 113.46 at `v1`; read only at a milestone |
