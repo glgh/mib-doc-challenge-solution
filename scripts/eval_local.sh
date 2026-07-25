@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Local eval loop: run the pipeline on the public train set, score one split
 # with the challenge's official scorer. Usage: scripts/eval_local.sh [dev|holdout|all]
-# Holdout discipline: score holdout only at milestones (see docs/PLAN.md).
+# Holdout discipline: score holdout only at milestones (see docs/STATUS.md).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

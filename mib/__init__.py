@@ -7,7 +7,7 @@ Stages run in order and do not call each other; `runner` sequences them and
     stages/render   — S2 OCR of scan-only pages → Read[]  (impure, expensive)
     parse           — S3 doc-type detection, key/value parsing, vocabularies
     packet          — S4 case assembly: active case id, census, field merge
-    signals         — derived fraud signals (see docs/fraud-signals.md)
+    signals         — derived fraud signals (taxonomy: docs/BACKGROUND.md §3)
     policy          — S5 adjudication rule engine (named branches, manual order)
     confidence      — branch → calibrated confidence
     emit            — record assembly + output validation (schema safety net)

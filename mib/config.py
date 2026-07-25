@@ -71,20 +71,6 @@ def ocr_passes():
 EARLY_STOP = False
 
 
-# Decider config is stamped for visibility (shown by `describe`) but deliberately
-# NOT in CRITICAL_KEYS yet: a page-text cache is decider-independent, so enforcing
-# it would false-positive cache<->eval joins until `require_agreement` learns to
-# skip keys absent from some inputs. Promoting to critical is a follow-up.
-def decider():
-    """Which S5 decider produced an eval artifact (`rules` | `mlp`)."""
-    return os.environ.get("MIB_DECIDER", "rules").lower()
-
-
-def cfa_veto():
-    """The learned decider's P(DENIED) demotion threshold (`MIB_CFA_VETO`)."""
-    return os.environ.get("MIB_CFA_VETO", "1.0")
-
-
 def _git_state():
     try:
         rev = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"],
@@ -106,8 +92,6 @@ def stamp(**extra):
         "restore": RESTORE,
         "early_stop": EARLY_STOP,
         "ocr_passes": ocr_passes(),
-        "decider": decider(),
-        "cfa_veto": cfa_veto(),
         "git_rev": rev,
         "git_dirty": dirty,
         "created": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -123,7 +107,9 @@ def describe(meta):
     es = " early_stop" if meta.get("early_stop") else ""      # legacy caches only
     passes = meta.get("ocr_passes")
     ocr = f" ocr={passes}" if passes and passes != DEFAULT_OCR_PASSES else ""
-    dec = f" decider={meta['decider']}" if meta.get("decider") else ""
+    # Legacy stamps may carry a `decider` key (the learned decider, deleted);
+    # shown so an old mlp eval artifact is still identifiable as one.
+    dec = f" decider={meta['decider']}" if meta.get("decider") not in (None, "rules") else ""
     return f"restore={meta.get('restore', '?')}{es}{ocr}{dec} rev={meta.get('git_rev') or '?'}{dirty}{back}"
 
 

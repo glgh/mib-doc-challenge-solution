@@ -90,16 +90,3 @@ def from_case(pages, ocr_lines):
         "image_count": p.image_count,
         "is_scan_only": p.is_scan_only,
     } for p in pages]
-
-
-def read_meta(path):
-    """The header alone, without paying to parse the body."""
-    path = Path(path)
-    if not path.exists():
-        return None
-    with open(path) as f:
-        line = f.readline()
-    if not line.strip():
-        return None
-    rec = json.loads(line)
-    return rec[META_KEY] if isinstance(rec, dict) and META_KEY in rec else None

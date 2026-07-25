@@ -22,9 +22,9 @@ def test_fixture_covers_the_policy_surface(characterization, cases):
 
     Coverage is asserted here rather than defended inside each test because the
     failure mode is silent: a fixture with no inferred risk flag does not fail
-    test_every_emitted_risk_flag_has_an_evidence_source, it makes that test pass
-    vacuously — and flips its strict-xfail marker to XPASS, which reads like a
-    defect was fixed when nothing changed but the sample.
+    test_emitted_flags_exclude_policy_only_inferences (test_invariants.py), it
+    makes that test pass vacuously — which reads like the property holds when
+    nothing changed but the sample.
     """
     from mib.textmatch import trusted_text, unsourced_flags
 

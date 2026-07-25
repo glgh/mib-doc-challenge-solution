@@ -1,4 +1,4 @@
-"""Derived fraud signals (taxonomy and validation status: docs/fraud-signals.md).
+"""Derived fraud signals (taxonomy and validation status: docs/BACKGROUND.md §3).
 
 Every function here turns raw packet evidence into a named signal consumed by
 policy. Signals must be validated on train before policy may act on them.

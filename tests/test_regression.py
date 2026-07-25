@@ -9,22 +9,16 @@ from mib import parse, vocab
 
 
 def test_policy_constants_have_a_single_source():
-    """Embargo sets, the revoked-sponsor set, and the stale cutoff were copied
-    across the rules engine, the derived signals, and the ML features. They were
-    identical, so an edit to one policy fact silently changed the rules branch
-    but not the ML feature or the emitted flag — a live hazard since both deciders
-    run every case. They now share one definition; this pins that so the drift
-    cannot return (identity, not equality: a re-copied literal would fail here)."""
-    from mib import features, policy, signals
+    """Policy facts (embargo sets, revoked sponsors, the stale cutoff) were once
+    copied across the rules engine, the derived signals, and the deleted ML
+    features — identical copies, so an edit to one silently missed the others.
+    What remains to pin: signals used to be a copy-site too (it inferred
+    planetary_embargo off FULL_EMBARGO_WORLDS, which duplicated policy's
+    `embargo_world` branch and shadowed it into dead code). The rule lives in
+    policy alone now, so the invariant is that signals does not reach for policy
+    at all."""
+    from mib import signals
 
-    assert features.REVOKED is vocab.REVOKED_SPONSORS
-    assert features.FULL_EMBARGO is policy.FULL_EMBARGO_WORLDS
-    assert features.PARTIAL_EMBARGO is policy.PARTIAL_EMBARGO_WORLDS
-    assert features.STALE_CUTOFF is policy.STALE_CUTOFF
-    # signals used to be a third copy-site: it inferred planetary_embargo off
-    # FULL_EMBARGO_WORLDS, which both duplicated policy's `embargo_world` branch
-    # and shadowed it into dead code. The rule lives in policy alone now, so the
-    # invariant is that signals does not reach for policy at all.
     assert not hasattr(signals, "policy"), \
         "signals imports policy again — the embargo rule has a second home"
 

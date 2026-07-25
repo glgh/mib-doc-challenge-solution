@@ -14,7 +14,7 @@ from pathlib import Path
 
 from mib import config, corpus, emit, runner
 
-WORKERS = int(os.environ.get("MIB_WORKERS", "4"))       # the contract gives 4 vCPU
+WORKERS = 4                                             # the contract gives 4 vCPU
 
 
 def _safe_predict(pdf):

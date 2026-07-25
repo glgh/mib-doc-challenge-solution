@@ -25,7 +25,7 @@ OCR is exhaustive: every variant is produced and read, and `best()` keeps the
 strongest. An earlier design stopped as soon as a reading looked good enough;
 that measured −0.21 dev (experiments.md row 16) because it settled for a worse
 variant while spending the most OCR on the hardest pages, which never cleared
-the bar anyway. The per-case wall-clock bound (`MIB_CASE_BUDGET_S`, mib.runner)
+the bar anyway. The per-case wall-clock bound (`runner.CASE_OCR_BUDGET_S`)
 is what keeps this affordable, not skipping work.
 
 `reads_for` returns **every** reading it produced, not just the winner — the

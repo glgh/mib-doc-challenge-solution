@@ -1,8 +1,8 @@
 """Properties that must hold for every emitted record, whatever the pipeline does.
 
-Two of these currently fail and are marked xfail(strict=True): they encode
-defects the restructure is meant to fix, so they turn into hard failures the
-moment the fix lands and the marker must come off.
+(Historical note: two invariants here once encoded known defects as strict
+xfails; both fixes landed and the markers came off — everything below is a hard
+requirement.)
 """
 import re
 

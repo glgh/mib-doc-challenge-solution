@@ -10,7 +10,6 @@ That split is the whole point: `scripts/replay.py` re-runs the second half over
 a stored page-text cache in seconds, so a parse or policy change is measurable
 without paying for OCR again.
 """
-import os
 import sys
 import time
 
@@ -29,8 +28,9 @@ from .stages import extract, render
 # What it actually bounds is the unbounded shape underneath: tesseract is capped
 # at 20s per call, but a many-page scan tried at several variants each has no
 # ceiling, and the contract stops the container at a fixed wall time and scores
-# whatever was written. Retune only against the Docker parity run.
-CASE_OCR_BUDGET_S = float(os.environ.get("MIB_CASE_BUDGET_S", "120"))
+# whatever was written. Retune only against the Docker parity run; experiments
+# override per-call via `read_case(pdf, budget_s=...)`, not the environment.
+CASE_OCR_BUDGET_S = 120.0
 
 
 def read_case(pdf_path, budget_s=None):
@@ -102,22 +102,9 @@ def predict_from_evidence(pages, ocr_lines, stem):
         "hidden_lines": sum(len(p.hidden_lines) for p in pages),
         "n_fields_missing": sum(1 for f in packet.parse.FIELDS if not values.get(f)),
         "n_corrections": len(packet.manual_corrections(pkt)),
-        "rules_decision": decision,
     }
-    # S5 decider swap: the learned decider always runs for the sidecar (permanent
-    # A/B on every eval); MIB_DECIDER=mlp promotes its outputs into the record.
-    # Failure falls back to the rules record — a missing/stale model file must
-    # degrade the score, never crash a case.
-    decider = os.environ.get("MIB_DECIDER", "rules").lower()
-    debug["decider"] = decider
-    try:
-        from . import decision as learned
-        mlp_dec, mlp_conf, mlp_probs = learned.decide(record, debug)
-        debug["mlp_decision"], debug["mlp_confidence"], debug["mlp_probs"] = \
-            mlp_dec, mlp_conf, mlp_probs
-        if decider == "mlp":
-            record = emit.build_record(pkt.case_id, values, sig["emit_flags"],
-                                       mlp_dec, mlp_conf)
-    except Exception as exc:  # noqa: BLE001
-        debug["mlp_error"] = str(exc)
+    # The learned decider that used to swap in here (MIB_DECIDER=mlp) was
+    # deleted after decision-layer ML was closed: its edge over rules inverted
+    # to −0.50 with 14 CFAs once rules strengthened (experiments.md row 18
+    # follow-up; STATUS.md). Recoverable from git history if ever revived.
     return record, debug

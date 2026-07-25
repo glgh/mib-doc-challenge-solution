@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render what the scan-restoration ladder does to a page, as a standalone report.
 
-`docs/damage-geometry.md` argues from aggregate numbers that the unreadable scan
+`docs/BACKGROUND.md` §4 argues from aggregate numbers that the unreadable scan
 pages are geometrically transformed rather than optically degraded. That argument
 is hard to check and easy to half-believe without seeing a page. This produces
 the picture: for each exemplar, the plate as OCR first sees it beside the plate
