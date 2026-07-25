@@ -4,7 +4,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from . import parse, textmatch, vocab
-from .parse import DOC_ADJUDICATOR, DOC_BIOMETRIC, DOC_INTAKE, DOC_REGISTRY, DOC_SPONSOR
+from .parse import DOC_ADJUDICATOR, DOC_BIOMETRIC, DOC_REGISTRY, DOC_SPONSOR
 from .records import Candidate
 
 SRC_TEXT = 0  # clean digital text layer
@@ -22,10 +22,6 @@ class Packet:
 
     def has_doc(self, dtype):
         return any(d == dtype for d, _, _ in self.docs)
-
-    @property
-    def intake(self):
-        return self.doc(DOC_INTAKE)
 
     @property
     def biometric(self):

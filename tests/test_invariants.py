@@ -6,8 +6,6 @@ requirement.)
 """
 import re
 
-import pytest
-
 from conftest import predict
 from mib import emit
 

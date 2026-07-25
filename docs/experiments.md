@@ -466,3 +466,14 @@ gains are broad, not one field: sponsor_id +21 cases, home_world +22, arrival_da
   197 conservative reviews), so per the standing refit hazard (row 22) the table should be refit on
   this substrate and measured as its own row; the 15.54 calibration above is with the stale table.
 - Dev only; holdout untouched (last read 113.46 at `v1`).
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 29 | 2026-07-24 | (dirty) | **Dead-code sweep, score-neutral by construction**: deleted the unreferenced `Packet.intake` property (its `DOC_INTAKE` import with it) and nine unused imports (`gallery_ocr_inputs.py` ×6 — the script now uses only `visualize_restore` + PIL — plus `np` in `repair_bench.py`, `Counter` in `reads_probe.py`, `pytest` in `test_invariants.py`) | — | — | — | — | — | — | keep — suite 42 passed / 1 xfailed |
+
+Row 29 is the residue after row 27's sweep: an AST scan of all 47 files (every def/class
+cross-referenced against every use site repo-wide) found nothing else. Checked and deliberately
+kept: `EARLY_STOP` (frozen for cache-stamp joinability), the `MIB_DECIDER` tombstone comment in
+`runner.py`, and the four zero-doc-reference dev scripts (`repair_gallery`, `probe_variant_merge`,
+`gallery_ocr_inputs`, `make_splits` — all live instruments). No eval run: nothing removed was
+reachable from the container path or the suite.

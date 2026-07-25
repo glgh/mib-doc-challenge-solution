@@ -19,7 +19,6 @@ import json
 import random
 import sys
 import tempfile
-from collections import Counter
 from multiprocessing import Pool
 from pathlib import Path
 

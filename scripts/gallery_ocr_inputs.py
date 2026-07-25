@@ -13,22 +13,17 @@ so it is cheap and does not disturb a concurrent dump.
 Usage: scripts/gallery_ocr_inputs.py [out.html] [census.jsonl]
 """
 import base64
-import html
 import io
 import json
 import sys
-import tempfile
 from pathlib import Path
 
-import numpy as np
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 CH = ROOT.parent / "mib-doc-challenge"
 
-from mib import imaging                       # noqa: E402
-from mib.stages import extract, render        # noqa: E402
 import visualize_restore as vr                # noqa: E402  (sibling script)
 
 THUMB_W = 300          # contact-sheet cell; legible headers, dense grid
