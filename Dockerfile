@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Tesseract is a hard dependency, not an optional extra: ~25% of packets carry
-# their visible content only as pixels, and mib/ocr.py shells out to it.
+# their visible content only as pixels, and mib/stages/render.py shells out to it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       tesseract-ocr tesseract-ocr-eng \
   && rm -rf /var/lib/apt/lists/*
