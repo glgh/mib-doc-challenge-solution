@@ -215,21 +215,61 @@ def _preference(cand):
     return (cand.source, cand.doc_type)
 
 
+VOTE_DOC = 99  # provenance doc_type marking a value settled by the variant vote
+
+
+def _variant_vote(field_name, kvs):
+    """Plurality over valid, normalized values for one field across OCR readings.
+
+    Ties break first-seen, which is generation order: cheapest variant first
+    within a page, pages in document order — the same bias `best_read` has.
+    Returns (representative raw value, agreement count) or (None, 0).
+    """
+    counts, rep = Counter(), {}
+    for kv in kvs:
+        v = kv.get(field_name)
+        if not v or not parse.valid_value(field_name, v):
+            continue
+        key = textmatch.normalize(v)
+        counts[key] += 1
+        rep.setdefault(key, v)
+    if not counts:
+        return None, 0
+    top = max(counts, key=lambda k: counts[k])
+    return rep[top], counts[top]
+
+
 def merge_fields(packet, provenance=None):
     """Best value per schema field: manual corrections override, then documents
-    in trust order.
+    in trust order, then a plurality vote across the whole OCR ensemble for any
+    field the text layer (or a signed note) did not supply.
 
-    If `provenance` is a dict it is filled with fname -> (doc_type, source).
+    The vote is why `variant_docs` exists: a reading `best_read` rejected for
+    the page can still hold the best copy of one field, and agreement across
+    independently-restored variants is strong evidence for an OCR value. Clean
+    text-layer values are never outvoted — text layers don't misread.
+
+    If `provenance` is a dict it is filled with fname -> (doc_type, source);
+    vote-settled fields carry doc_type VOTE_DOC.
     """
+    prov = {} if provenance is None else provenance
     values = {}
     for cand in sorted(candidates(packet), key=_preference):
         if not cand.valid or cand.field_name in values:
             continue
         values[cand.field_name] = cand.value
-        if provenance is not None:
-            provenance[cand.field_name] = (cand.doc_type, cand.source)
+        prov[cand.field_name] = (cand.doc_type, cand.source)
     for fname, value in manual_corrections(packet).items():
         values[fname] = value
-        if provenance is not None:
-            provenance[fname] = (0, 0)  # rank-0: signed manual note
+        prov[fname] = (0, 0)  # rank-0: signed manual note
+    ocr_kvs = ([kv for _, kv in packet.variant_docs] +
+               [kv for _, src, kv in packet.docs if src == SRC_OCR])
+    if ocr_kvs:
+        for fname in parse.FIELDS:
+            if prov.get(fname, (0, SRC_OCR))[1] == SRC_TEXT:
+                continue  # clean text-layer (or manual-note) value stays
+            value, _agree = _variant_vote(fname, ocr_kvs)
+            if value:
+                values[fname] = value.strip()
+                prov[fname] = (VOTE_DOC, SRC_OCR)
     return values

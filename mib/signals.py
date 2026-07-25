@@ -48,9 +48,19 @@ def observed_flags(packet):
     'values outlast labels' property S2's evidence_score relies on. `_raw` holds
     only visible + OCR text (assemble never stores hidden_lines there), so this
     reads trusted evidence by construction; the injection differential tests hold.
+
+    Losing OCR variants (packet.variant_docs) are scanned too, as a plain union:
+    a flag legible only in the deskewed-but-not-chosen reading is still visible
+    evidence. Measured on the hard-set ensemble (experiments/flag_probe.py):
+    every flag recovered this way was true, none hallucinated — the per-line
+    legend/negation guards hold on garbled variants as well.
     """
     flags = set()
     for dtype, _src, kv in packet.docs:
+        if dtype in FLAG_DOC_TYPES:
+            for line in kv.get("_raw", []):
+                flags |= _flags_in_line(line)
+    for dtype, kv in packet.variant_docs:
         if dtype in FLAG_DOC_TYPES:
             for line in kv.get("_raw", []):
                 flags |= _flags_in_line(line)
@@ -61,16 +71,21 @@ def has_flag_evidence(packet):
     """Whether the B-13 slip's risk line was actually read — a flag or an explicit
     'none'/'clear' — versus unreadable debris. Lets the risk-concealment census in
     policy tell 'flags: none' from 'flags: <unreadable>'; unreadable is not clear.
+
+    A losing variant that read the risk line counts: the evidence was legible in
+    some reading of the slip, even if `best_read` preferred another.
     """
-    bio = packet.biometric
-    if bio.get("observed_flags") is not None:   # parsed key present (incl. 'none')
-        return True
-    for line in bio.get("_raw", []):
-        if _flags_in_line(line):
+    bios = [packet.biometric] + [kv for d, kv in packet.variant_docs
+                                 if d == parse.DOC_BIOMETRIC]
+    for bio in bios:
+        if bio.get("observed_flags") is not None:   # parsed key present (incl. 'none')
             return True
-        low = line.lower()
-        if "flag" in low and re.search(r"\b(none|clear)\b", low):
-            return True
+        for line in bio.get("_raw", []):
+            if _flags_in_line(line):
+                return True
+            low = line.lower()
+            if "flag" in low and re.search(r"\b(none|clear)\b", low):
+                return True
     return False
 
 
