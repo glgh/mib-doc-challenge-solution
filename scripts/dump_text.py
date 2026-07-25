@@ -29,15 +29,15 @@ def dump_one(pdf_path):
     from mib import cache, runner
     t0 = time.time()
     try:
-        pages, ocr_lines = runner.read_case(pdf_path)
+        pages, reads_by_page = runner.read_case(pdf_path)
         err = None
     except Exception as exc:                      # keep going; record the failure
-        pages, ocr_lines, err = [], {}, f"{type(exc).__name__}: {exc}"
+        pages, reads_by_page, err = [], {}, f"{type(exc).__name__}: {exc}"
     return {
         "stem": pdf_path.stem,
         "cost_ms": round((time.time() - t0) * 1000),
         "error": err,
-        "pages": cache.from_case(pages, ocr_lines),
+        "pages": cache.from_case(pages, reads_by_page),
     }
 
 

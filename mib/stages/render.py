@@ -45,7 +45,7 @@ from .. import imaging
 from ..config import ocr_optical as _ocr_optical
 from ..config import ocr_passes as _ocr_passes
 from ..parse import ALL_FLAGS, CASE_ID_RE, DATE_RE, SPONSOR_RE, VISA_CLASSES, key_for
-from ..records import Read
+from ..records import Read, best_read
 from ..vocab import HOME_WORLDS, SPECIES, clean_ocr_line
 
 MIN_EMBEDDED_WIDTH = 1000
@@ -200,17 +200,8 @@ def reads_for(doc, page, page_no):
 
 
 def best(reads):
-    """The reading the pipeline acts on: highest evidence score, earliest wins ties.
-
-    Ties break toward the earlier read because `_sources` yields the embedded
-    raster before the re-render and restorations run cheapest-first, so the
-    earlier read is the one that cost less to obtain.
-    """
-    chosen = None
-    for r in reads:
-        if chosen is None or r.quality > chosen.quality:
-            chosen = r
-    return chosen
+    """The strongest reading (records.best_read); kept as S2's public name."""
+    return best_read(reads)
 
 
 def best_lines(reads):

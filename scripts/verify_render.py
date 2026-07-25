@@ -44,13 +44,19 @@ def main(cache_path, n_scans=4, n_random=2):
     mid = len(by_ocr) // 2
     sample = by_ocr[:n_scans] + by_ocr[mid:mid + n_random]
 
+    # Pre-ensemble caches lack the per-page `reads` list; against those the
+    # comparison covers the primary reading only (still a real S1/S2 check).
+    with_reads = all("reads" in p for rec in sample for p in rec["pages"])
+
+    def page_key(p):
+        base = (p["visible_lines"], p["hidden_lines"], p["ocr_lines"], p["image_count"])
+        return base + ((p.get("reads"),) if with_reads else ())
+
     bad = 0
     for rec in sample:
-        pages, ocr_lines = runner.read_case(CH / f"data/train/{rec['stem']}.pdf")
-        got = [(p["visible_lines"], p["hidden_lines"], p["ocr_lines"], p["image_count"])
-               for p in cache.from_case(pages, ocr_lines)]
-        want = [(p["visible_lines"], p["hidden_lines"], p["ocr_lines"], p["image_count"])
-                for p in rec["pages"]]
+        pages, reads_by_page = runner.read_case(CH / f"data/train/{rec['stem']}.pdf")
+        got = [page_key(p) for p in cache.from_case(pages, reads_by_page)]
+        want = [page_key(p) for p in rec["pages"]]
         ok = got == want
         bad += not ok
         n_ocr = sum(len(p["ocr_lines"]) for p in rec["pages"])

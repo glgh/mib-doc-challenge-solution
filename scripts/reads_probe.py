@@ -80,10 +80,9 @@ def probe_case(cid):
             if p.is_scan_only:
                 prod[p.page_no] = render.reads_for(doc, doc[p.page_no], p.page_no)
                 crop[p.page_no] = _crop_reads(doc, p.page_no)
-        ocrA = {no: render.best_lines(rs) for no, rs in prod.items()}
-        ocrB = {no: render.best_lines(prod[no] + crop[no]) for no in prod}
-        recA, _ = runner.predict_from_evidence(pages, ocrA, cid)
-        recB, _ = runner.predict_from_evidence(pages, ocrB, cid)
+        readsB = {no: prod[no] + crop[no] for no in prod}
+        recA, _ = runner.predict_from_evidence(pages, prod, cid)
+        recB, _ = runner.predict_from_evidence(pages, readsB, cid)
         prod_kv = [_fields_from_reading(r.lines) for no in prod for r in prod[no]]
         crop_kv = [_fields_from_reading(r.lines) for no in prod for r in crop[no]]
     res = {"cid": cid, "truth_adj": truth["adjudication"],

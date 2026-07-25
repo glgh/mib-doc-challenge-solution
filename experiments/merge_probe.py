@@ -87,8 +87,12 @@ def main():
         if cid not in TRUTH:
             continue
         truth = TRUTH[cid]
-        pages, ocr_best = dr.reconstruct(rec, dr.strategy_best)
-        pkt = packet.assemble(pages, ocr_best, cid)
+        # Since the keystone, "best" here is the live pipeline's own merge
+        # (which includes the variant vote), so this probe now measures the
+        # raw strategies against the shipped behavior rather than against a
+        # winner-take-all baseline.
+        pages, reads = dr.reconstruct(rec)
+        pkt = packet.assemble(pages, reads, cid)
         reads_lines = case_readings(rec)
         n_scored += 1
         for s in STRATS:

@@ -14,8 +14,7 @@ be silently mixed with one built at a different optical setting.
 Usage:
   experiments/dump_reads.py                         # dump the hard-set cases
   experiments/dump_reads.py --cases MIB-000047,...  [out.jsonl]
-  experiments/dump_reads.py --replay best   <cache.jsonl>   # reconstruct + predict, timed
-  experiments/dump_reads.py --replay union  <cache.jsonl>   # naive line-union strategy
+  experiments/dump_reads.py --replay <cache.jsonl> [out]    # reconstruct + predict, timed
 """
 import os
 import sys
@@ -64,7 +63,7 @@ def dump_one(cid):
             "error": err, "pages": pages_out}
 
 
-# --- reconstruction: cache record -> (pages, ocr_lines) under a merge strategy ---
+# --- reconstruction: cache record -> (pages, reads_by_page) -----------------
 
 def _reads(page_rec):
     return [records.Read(page_no=page_rec["page_no"], lines=r["lines"],
@@ -72,30 +71,21 @@ def _reads(page_rec):
             for r in (page_rec["reads"] or [])]
 
 
-def strategy_best(reads):
-    """The shipped collapse: the single highest-evidence reading's lines."""
-    return render.best_lines(reads)
+def reconstruct(case_rec):
+    """Rebuild (pages, reads_by_page) so runner.predict_from_evidence can run.
 
-
-def strategy_union(reads):
-    """Naive union: every reading's lines concatenated (max-ev, max-noise)."""
-    return [l for r in reads for l in r.lines]
-
-
-STRATEGIES = {"best": strategy_best, "union": strategy_union}
-
-
-def reconstruct(case_rec, strategy):
-    """Rebuild (pages, ocr_lines) so runner.predict_from_evidence can run — with
-    ocr_lines chosen by `strategy` over the stored ensemble. `best` reproduces the
-    live pipeline exactly (proves the dump is faithful)."""
-    pages, ocr_lines = [], {}
+    Since the keystone (ensemble across the seam), selection and per-field
+    merging live in the pipeline itself, so a replay just hands over the stored
+    ensemble; the strategy machinery this module used to carry moved into
+    packet.merge_fields / signals."""
+    pages, reads_by_page = [], {}
     for p in case_rec["pages"]:
         pages.append(records.Page(page_no=p["page_no"], visible_lines=list(p["visible_lines"]),
                                   hidden_lines=list(p["hidden_lines"]), image_count=p["image_count"]))
-        if p["reads"] is not None:
-            ocr_lines[p["page_no"]] = strategy(_reads(p))
-    return pages, ocr_lines
+        rs = _reads(p) if p["reads"] is not None else []
+        if rs:
+            reads_by_page[p["page_no"]] = rs
+    return pages, reads_by_page
 
 
 def do_dump(cases, out):
@@ -112,17 +102,16 @@ def do_dump(cases, out):
     print(f"wrote {len(cases)} cases in {time.time() - t0:.0f}s ({config.describe(meta)})")
 
 
-def do_replay(strategy_name, cache_path, out_pred):
+def do_replay(cache_path, out_pred):
     meta, records_ = cache.read(cache_path)
-    strat = STRATEGIES[strategy_name]
-    print(f"replaying {len(records_)} cases with strategy={strategy_name!r} "
+    print(f"replaying {len(records_)} cases through the live pipeline "
           f"(no OCR) — cache {config.describe(meta)}", flush=True)
     t0 = time.time()
     import json
     with open(out_pred, "w") as f:
         for rec in records_:
-            pages, ocr_lines = reconstruct(rec, strat)
-            record, _dbg = runner.predict_from_evidence(pages, ocr_lines, rec["stem"])
+            pages, reads_by_page = reconstruct(rec)
+            record, _dbg = runner.predict_from_evidence(pages, reads_by_page, rec["stem"])
             f.write(json.dumps(record, sort_keys=True) + "\n")
     print(f"replayed in {time.time() - t0:.1f}s -> {out_pred}  "
           f"({len(records_)} cases, {1000 * (time.time() - t0) / max(1, len(records_)):.0f} ms/case)")
@@ -131,10 +120,9 @@ def do_replay(strategy_name, cache_path, out_pred):
 def main():
     args = sys.argv[1:]
     if args and args[0] == "--replay":
-        strat = args[1]
-        cache_path = Path(args[2])
-        out_pred = Path(args[3]) if len(args) > 3 else cache_path.with_suffix(f".pred_{strat}.jsonl")
-        do_replay(strat, cache_path, out_pred)
+        cache_path = Path(args[1])
+        out_pred = Path(args[2]) if len(args) > 2 else cache_path.with_suffix(".pred.jsonl")
+        do_replay(cache_path, out_pred)
         return
     cases = None
     out = ROOT / "output/cache/reads_hard.jsonl"

@@ -34,18 +34,19 @@ CASE_OCR_BUDGET_S = 120.0
 
 
 def read_case(pdf_path, budget_s=None):
-    """S1 + S2 for one PDF -> (pages, ocr_lines_by_page).
+    """S1 + S2 for one PDF -> (pages, reads_by_page).
 
     The document is opened once and held across both stages: rendering a scanned
     page needs the same handle S1 read from. Keeping that lifetime here is what
     lets `extract` avoid reaching forward into `render`, which is the backwards
     edge the previous `pdfio.read_pages` had.
 
-    Variant selection (`render.best`) is S2's job and runs here, so the value
-    that crosses into the pure downstream half — and into the cache — is the
-    chosen line list per page, not the ensemble of readings. `best` is impure
-    w.r.t. the parser's readability vocab, so keeping it above the cache boundary
-    is what lets the replay path consume the decision instead of re-deriving it.
+    `reads_by_page` carries EVERY reading S2 produced (page_no -> list[Read]) —
+    the seam no longer collapses the ensemble to one winner. Selection happens
+    per field at the S4 merge (`packet`), which is the point: a losing variant
+    can still hold the best copy of one field or the only legible risk flag.
+    Each Read stores the evidence score S2 computed, so downstream selection is
+    a pure function of the stored ensemble and replays faithfully from a cache.
     """
     budget = CASE_OCR_BUDGET_S if budget_s is None else budget_s
     reads = {}
@@ -61,25 +62,25 @@ def read_case(pdf_path, budget_s=None):
                 break
             reads[page.page_no] = render.reads_for(doc, doc[page.page_no],
                                                    page.page_no)
-    ocr_lines = {no: render.best_lines(rs) for no, rs in reads.items()}
-    return pages, ocr_lines
+    return pages, reads
 
 
 def predict(pdf_path):
-    pages, ocr_lines = read_case(pdf_path)
-    return predict_from_evidence(pages, ocr_lines, pdf_path.stem)
+    pages, reads_by_page = read_case(pdf_path)
+    return predict_from_evidence(pages, reads_by_page, pdf_path.stem)
 
 
-def predict_from_evidence(pages, ocr_lines, stem):
+def predict_from_evidence(pages, reads_by_page, stem):
     """Everything downstream of page text: pure, cheap, independently testable.
 
     Split from `read_case` so the characterization tests and the replay gate can
     drive the real pipeline from frozen page text without re-running OCR — and
     without re-implementing this sequence, which would let them pass while the
-    pipeline drifted underneath. `ocr_lines` is the already-chosen line list per
-    page; selection happened in `read_case`, so nothing here re-derives it.
+    pipeline drifted underneath. `reads_by_page` is the stored OCR ensemble
+    (page_no -> list[Read]); everything from selection onward happens in here,
+    so a cache replay exercises the very same code path as a live run.
     """
-    pkt = packet.assemble(pages, ocr_lines, fallback_case_id=stem)
+    pkt = packet.assemble(pages, reads_by_page, fallback_case_id=stem)
     provenance = {}
     values = packet.merge_fields(pkt, provenance)
     sig = signals.derive(pkt, values)

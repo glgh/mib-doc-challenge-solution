@@ -84,8 +84,11 @@ def main():
             continue
         truth = TRUTH[cid]
         tflags = flag_set(truth["risk_flags"])
-        pages, ocr_best = dr.reconstruct(rec, dr.strategy_best)
-        pkt = packet.assemble(pages, ocr_best, cid)
+        # Since the keystone, the baseline packet already carries variant_docs
+        # (and after the flag-union change, emit_flags includes them), so the
+        # "best" row here is the shipped behavior, not winner-take-all.
+        pages, reads = dr.reconstruct(rec)
+        pkt = packet.assemble(pages, reads, cid)
         values = packet.merge_fields(pkt)
         sig = signals.derive(pkt, values)
         inferred = sig["flags"] - sig["emit_flags"]

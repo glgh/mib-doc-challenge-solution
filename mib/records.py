@@ -69,6 +69,21 @@ class Read:
     cost_ms: int = 0
 
 
+def best_read(reads):
+    """The highest-evidence reading, or None. Earliest wins ties, because S2
+    generates readings cheapest-first, so the earlier read cost less to obtain.
+
+    Lives here (not in stages.render) because it is a pure function of stored
+    Reads that both S2 tooling and the S4 merge consult — the selection itself
+    crosses the seam now that the whole ensemble does.
+    """
+    chosen = None
+    for r in reads:
+        if chosen is None or r.quality > chosen.quality:
+            chosen = r
+    return chosen
+
+
 # --- S3 --------------------------------------------------------------------
 
 

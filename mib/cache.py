@@ -46,21 +46,21 @@ def read(path):
 
 
 def to_case(page_dicts):
-    """Cached page text -> (pages, ocr_lines), as `runner.read_case` produces.
+    """Cached page text -> (pages, reads_by_page), as `runner.read_case` produces.
 
-    The cache stores the line list S2 chose per page, so replay receives that
-    selection directly and never re-runs `render.best`. That is what keeps the
-    downstream half a pure function of the stored text: the old form rebuilt a
-    single `Read` and let replay re-select over it, which matched the live run
-    only while there was one variant and would silently diverge (all-zero
-    `quality` tie-break) the moment the format grew an ensemble.
+    The cache stores the whole OCR ensemble per page (`reads`, each with the
+    evidence score S2 computed), so replay-time selection is a pure function of
+    the stored readings and matches the live run exactly. Old-format caches
+    carry only the winner (`ocr_lines`); those rehydrate as a one-read ensemble,
+    over which every selection strategy is the identity — old caches and
+    fixtures replay unchanged.
 
     `is_scan_only` is not restored even though it is written for readability: it
     is derived, so recomputing keeps a cache from pinning a stale definition of
     "this page is a scan".
     """
-    from .records import Page
-    pages, ocr_lines = [], {}
+    from .records import Page, Read
+    pages, reads_by_page = [], {}
     for i, p in enumerate(page_dicts):
         page_no = p.get("page_no", i)
         pages.append(Page(
@@ -69,24 +69,42 @@ def to_case(page_dicts):
             hidden_lines=list(p["hidden_lines"]),
             image_count=p["image_count"],
         ))
-        if p.get("ocr_lines"):
-            ocr_lines[page_no] = list(p["ocr_lines"])
-    return pages, ocr_lines
+        if p.get("reads") is not None:
+            reads = [Read(page_no=page_no, lines=list(r["lines"]),
+                          variant=r.get("variant", ""),
+                          quality=r.get("quality", 0.0))
+                     for r in p["reads"]]
+        elif p.get("ocr_lines"):
+            reads = [Read(page_no=page_no, lines=list(p["ocr_lines"]),
+                          variant="cache")]
+        else:
+            reads = []
+        if reads:
+            reads_by_page[page_no] = reads
+    return pages, reads_by_page
 
 
-def from_case(pages, ocr_lines):
-    """(pages, ocr_lines) -> the serializable page dicts this module reads back.
+def from_case(pages, reads_by_page):
+    """(pages, reads_by_page) -> the serializable page dicts this module reads back.
 
-    `ocr_lines` is already the chosen line list per page (variant selection is
-    S2's job, done in `runner.read_case`), so the cache stores S2's decision
-    verbatim rather than re-deriving it — which is why this module no longer
-    imports `render`.
+    Every reading survives serialization — the collapse this format used to bake
+    in is exactly what the merge now needs undone. `ocr_lines` (the primary
+    reading's lines) is still written: tools that only want "the page's text"
+    (textmatch, recoverable) read it, and old-format consumers stay compatible.
     """
-    return [{
-        "page_no": p.page_no,
-        "visible_lines": p.visible_lines,
-        "hidden_lines": p.hidden_lines,
-        "ocr_lines": ocr_lines.get(p.page_no, []),
-        "image_count": p.image_count,
-        "is_scan_only": p.is_scan_only,
-    } for p in pages]
+    from .records import best_read
+    out = []
+    for p in pages:
+        reads = reads_by_page.get(p.page_no) or []
+        primary = best_read(reads)
+        out.append({
+            "page_no": p.page_no,
+            "visible_lines": p.visible_lines,
+            "hidden_lines": p.hidden_lines,
+            "ocr_lines": primary.lines if primary else [],
+            "reads": [{"variant": r.variant, "quality": r.quality,
+                       "lines": r.lines} for r in reads],
+            "image_count": p.image_count,
+            "is_scan_only": p.is_scan_only,
+        })
+    return out

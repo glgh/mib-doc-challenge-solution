@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from . import parse, textmatch, vocab
 from .parse import DOC_ADJUDICATOR, DOC_BIOMETRIC, DOC_REGISTRY, DOC_SPONSOR
-from .records import Candidate
+from .records import Candidate, best_read
 
 SRC_TEXT = 0  # clean digital text layer
 SRC_OCR = 1   # OCR of scan pixels — same doc type ranks below its text-layer peer
@@ -15,6 +15,7 @@ SRC_OCR = 1   # OCR of scan pixels — same doc type ranks below its text-layer 
 class Packet:
     case_id: str = ""
     docs: list = field(default_factory=list)  # [(doc_type, source, kv)] sorted by trust
+    variant_docs: list = field(default_factory=list)  # [(doc_type, kv)] from losing OCR variants
     scan_only_pages: int = 0                  # pages with an image but ~no visible text
 
     def doc(self, dtype):
@@ -59,17 +60,52 @@ def _repair_ocr_kv(kv):
     return kv
 
 
-def assemble(pages, ocr_lines, fallback_case_id):
+def _parse_lines(lines, ocr):
+    """One reading -> kv, the single parse path for docs and variants alike.
+
+    Prose fills only what the labelled lines did not: an explicit
+    `Purpose: research` on the same document outranks a sentence.
+    """
+    kv = parse.parse_kv(lines)
+    for fname, value in parse.parse_prose(lines).items():
+        kv.setdefault(fname, value)
+    return _repair_ocr_kv(kv) if ocr else kv
+
+
+def _decoy(lines, case_id, ocr):
+    """Does this reading belong to a different applicant?
+
+    An OCR page whose ID is one glyph off the active case is the applicant's
+    own page misread, not a decoy. Text-layer pages get no such tolerance:
+    text layers don't misread, so a near-miss ID there is a genuine decoy
+    (sequential case ids make those cheap to plant).
+    """
+    ids = set(parse.page_case_ids(lines))
+    if not ids or case_id in ids:
+        return False
+    return not ocr or not any(textmatch.plausible_misread(case_id, i) for i in ids)
+
+
+def assemble(pages, reads_by_page, fallback_case_id):
     """Build a Packet from Page records; pages of other applicants are dropped.
 
-    `ocr_lines` maps page_no -> the winning OCR reading for that page. Choosing
-    among readings is S2's job (`stages.render.best`), so this stage never has to
-    know how many variants were tried or how they were scored.
+    `reads_by_page` maps page_no -> every OCR reading S2 produced. The primary
+    reading (`records.best_read`) plays the role the single chosen reading used
+    to: it defines the page's document. The losing readings survive as
+    `variant_docs` — parsed, decoy-filtered kvs the per-field merge and the flag
+    scan consult, because a losing variant can still hold the best copy of one
+    field or the only legible risk flag.
     """
+    primary = {}
+    for pt in pages:
+        best = best_read(reads_by_page.get(pt.page_no) or [])
+        if best is not None:
+            primary[pt.page_no] = best.lines
+
     id_votes = Counter()
     for pt in pages:
         id_votes.update(parse.page_case_ids(pt.visible_lines))
-        id_votes.update(parse.page_case_ids(ocr_lines.get(pt.page_no, [])))
+        id_votes.update(parse.page_case_ids(primary.get(pt.page_no, [])))
     case_id = id_votes.most_common(1)[0][0] if id_votes else fallback_case_id
 
     packet = Packet(case_id=case_id)
@@ -77,24 +113,18 @@ def assemble(pages, ocr_lines, fallback_case_id):
         lines, source = (pt.visible_lines, SRC_TEXT)
         if pt.is_scan_only:
             packet.scan_only_pages += 1
-            if ocr_lines.get(pt.page_no):
-                lines, source = (ocr_lines[pt.page_no], SRC_OCR)
-        ids = set(parse.page_case_ids(lines))
-        if ids and case_id not in ids:
-            # An OCR page whose ID is one glyph off the active case is the
-            # applicant's own page misread, not a decoy. Text-layer pages get no
-            # such tolerance: text layers don't misread, so a near-miss ID there
-            # is a genuine decoy (sequential case ids make those cheap to plant).
-            if source != SRC_OCR or \
-                    not any(textmatch.plausible_misread(case_id, i) for i in ids):
-                continue  # decoy page for a different applicant
-        kv = parse.parse_kv(lines)
-        # Prose fills only what the labelled lines did not: an explicit
-        # `Purpose: research` on the same document outranks a sentence.
-        for fname, value in parse.parse_prose(lines).items():
-            kv.setdefault(fname, value)
-        if source == SRC_OCR:
-            kv = _repair_ocr_kv(kv)
+            if primary.get(pt.page_no):
+                lines, source = (primary[pt.page_no], SRC_OCR)
+            for r in reads_by_page.get(pt.page_no) or []:
+                if r.lines is lines or not r.lines or _decoy(r.lines, case_id, ocr=True):
+                    continue
+                kv = _parse_lines(r.lines, ocr=True)
+                kv["_raw"] = r.lines
+                kv["_page_no"] = pt.page_no
+                packet.variant_docs.append((parse.detect_doc_type(r.lines), kv))
+        if _decoy(lines, case_id, ocr=(source == SRC_OCR)):
+            continue  # decoy page for a different applicant
+        kv = _parse_lines(lines, ocr=(source == SRC_OCR))
         kv["_raw"] = lines
         kv["_page_no"] = pt.page_no
         packet.docs.append((parse.detect_doc_type(lines), source, kv))
