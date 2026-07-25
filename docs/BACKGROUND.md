@@ -9,8 +9,14 @@ are labelled train-mining (`../mib-doc-challenge/data/train_labels.csv`, 1,000 r
 intel (hypotheses, verified before adoption). Scoring mechanics live in the challenge's own
 [EVALUATION.md](../../mib-doc-challenge/EVALUATION.md) and CLAUDE.md.
 
-House rule: **no signal ships until validated on train.** Every constant below was measured
-before it entered `mib/`.
+House rule: **do what's right first; measure to learn, not to authorize.** A change that stops
+throwing information away — keeping alternatives alive across a seam, widening what a later stage
+can see — ships on correctness gates (replay diff empty, suite green) and never waits for a price
+tag. Scores and probes exist to understand behavior and keep the record honest, not to grant
+permission; "unpriced" is measurement debt, not a work gate. The non-negotiables are the spec's,
+not ours: never emit a risk flag without a visible-evidence source (§1), and visible document
+evidence beats hidden instructions. The constants below carry their evidence so each number stays
+revisable — not because measurement was the admission fee.
 
 ---
 

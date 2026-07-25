@@ -215,6 +215,11 @@ The more useful half. Each of these looked reasonable and was killed by a measur
 
 ## How to measure anything
 
+Everything in this section is an instrument, not a toll booth: the gates prove a refactor is
+correct, the instruments build understanding, and the record (experiments.md) keeps us honest.
+None of it is a precondition for doing what's architecturally right — see the house rule in
+[BACKGROUND.md](BACKGROUND.md).
+
 **The fast loop** — seconds per variant, instead of a 40-minute pipeline run:
 
 ```bash
