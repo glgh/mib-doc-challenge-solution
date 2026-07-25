@@ -10,7 +10,7 @@ the wrong axis. Undoing the geometry is what recovers the text.
 import io
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 INK = 128            # glyphs are near-black; the faint form rules sit well above
 MAX_SKEW = 8.0       # degrees; beyond this the page is turned, not skewed
@@ -171,6 +171,45 @@ def realign_bands(gray):
             out[y] = np.roll(gray[y], shift)
             moved = True
     return out if moved else None
+
+
+# --- optical restoration (behind config.ocr_optical) ------------------------
+# Faint / unevenly-lit scans read as blank to OCR and are erased by a *global*
+# binarization (the global-threshold sweep measured +0 over the ensemble,
+# experiments A1). A local-adaptive threshold and an autocontrast stretch are a
+# different operation: they recover ink the global cut washes out. Kept
+# numpy/PIL-only (no scipy) so they can enter the runtime image if the A/B earns
+# it. The scan-page miner (experiments) shows label-proven headroom on ~7 cases.
+
+def _box_mean(a, w):
+    """Mean over a wxw window centred on each pixel, via a summed-area table so
+    the whole field costs O(H*W) regardless of window size. Windows shrink at the
+    borders (clipped, not reflected), which is fine for a threshold estimate."""
+    H, W = a.shape
+    ii = np.zeros((H + 1, W + 1), dtype=np.float64)
+    ii[1:, 1:] = np.cumsum(np.cumsum(a, axis=0), axis=1)
+    r = max(1, w // 2)
+    y0, y1 = np.clip(np.arange(H) - r, 0, H), np.clip(np.arange(H) + r + 1, 0, H)
+    x0, x1 = np.clip(np.arange(W) - r, 0, W), np.clip(np.arange(W) + r + 1, 0, W)
+    Y0, Y1, X0, X1 = y0[:, None], y1[:, None], x0[None, :], x1[None, :]
+    total = ii[Y1, X1] - ii[Y0, X1] - ii[Y1, X0] + ii[Y0, X0]
+    return total / np.maximum((Y1 - Y0) * (X1 - X0), 1)
+
+
+def local_threshold(gray, w=25, k=0.34, R=128.0):
+    """Sauvola local-adaptive binarization: threshold each pixel against its
+    neighbourhood mean and standard deviation, so faint or unevenly-lit ink
+    survives where one global cut erases it. Returns a uint8 0/255 image."""
+    g = gray.astype(np.float64)
+    m = _box_mean(g, w)
+    std = np.sqrt(np.maximum(_box_mean(g * g, w) - m * m, 0.0))
+    t = m * (1 + k * (std / R - 1))
+    return np.where(gray > t, np.uint8(255), np.uint8(0))
+
+
+def autocontrast(gray):
+    """Stretch intensities so the faintest ink reaches full black (1% cutoff)."""
+    return np.asarray(ImageOps.autocontrast(Image.fromarray(gray).convert("L"), cutoff=1))
 
 
 def to_png_bytes(gray):

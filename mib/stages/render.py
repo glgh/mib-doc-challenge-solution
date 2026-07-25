@@ -42,6 +42,7 @@ from pathlib import Path
 import fitz
 
 from .. import imaging
+from ..config import ocr_optical as _ocr_optical
 from ..config import ocr_passes as _ocr_passes
 from ..parse import ALL_FLAGS, CASE_ID_RE, DATE_RE, SPONSOR_RE, VISA_CLASSES, key_for
 from ..records import Read
@@ -125,6 +126,19 @@ def _restorations(gray):
         yield "deshred", deshredded
 
 
+def _optical_restorations(gray):
+    """Optical variants (behind config.ocr_optical): local-adaptive threshold +
+    autocontrast, which recover faint/unevenly-lit ink that reads as blank and
+    that a global binarization erases. Emitted by `reads_for` ONLY when the
+    geometric ensemble read the page below GOOD_ENOUGH — the unguarded A/B showed
+    a well-formed-but-wrong binarized read can outscore and displace a correct
+    reading on a page that already reads well (dev: 11 fields recovered, 10
+    corrupted). Gating on weak geometric evidence keeps the rescues on dead pages
+    and cannot touch healthy ones."""
+    yield "adapt", imaging.local_threshold(gray)
+    yield "autocon", imaging.autocontrast(gray)
+
+
 def _sources(doc, page, tmp):
     """Page pixels to read, as (name, encoded_bytes, grayscale array): embedded
     raster first, then a 200-DPI render. The encoded bytes are kept so the
@@ -169,10 +183,19 @@ def reads_for(doc, page, page_no):
                                   quality=evidence_score(lines),
                                   cost_ms=round((time.time() - t0) * 1000)))
 
-        for name, encoded, gray in _sources(doc, page, tmp):
+        sources = list(_sources(doc, page, tmp))
+        for name, encoded, gray in sources:
             read(encoded, name)
             for variant, image in _restorations(gray):
                 read(imaging.to_png_bytes(image), f"{name}+{variant}")
+        # Optical rung, gated: only when the geometric ensemble read this page
+        # weakly (below the intact-form bar) does a binarized/contrast pass earn a
+        # place, so it cannot outscore a page that already reads well. See
+        # `_optical_restorations` for the A/B evidence behind the guard.
+        if _ocr_optical() and (not reads or max(r.quality for r in reads) < GOOD_ENOUGH):
+            for name, encoded, gray in sources:
+                for variant, image in _optical_restorations(gray):
+                    read(imaging.to_png_bytes(image), f"{name}+{variant}")
     return reads
 
 

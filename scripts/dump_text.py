@@ -49,7 +49,7 @@ def main(input_dir, out_path):
     meta = config.stamp(artifact="page_text", input_dir=str(input_dir), n_pdfs=len(pdfs))
     t0 = time.time()
     done = 0
-    with cache.open_write(out, meta) as f, Pool(4) as pool:
+    with cache.open_write(out, meta) as f, Pool(config.workers()) as pool:
         for rec in pool.imap(dump_one, pdfs):     # ordered: deterministic output
             cache.append(f, rec)
             done += 1

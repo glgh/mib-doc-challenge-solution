@@ -64,6 +64,34 @@ def ocr_passes():
     return mode if mode in OCR_PASS_MODES else DEFAULT_OCR_PASSES
 
 
+def ocr_optical():
+    """Whether S2 adds optical variants — local-adaptive threshold + autocontrast
+    (`mib.imaging`) — to the OCR ensemble. Recovers faint/unevenly-lit scans a
+    global binarization erases; the scan-page miner shows label-proven headroom.
+
+    Off by default so it lands score-neutral until measured; opt in with
+    MIB_OCR_OPTICAL=on. Stamped for visibility but deliberately NOT yet in
+    CRITICAL_KEYS: it changes which reading wins, so promote it to critical once
+    `require_agreement` tolerates keys absent from stamps written before it
+    existed — otherwise every join with an older cache false-positives on
+    None-vs-False.
+    """
+    return os.environ.get("MIB_OCR_OPTICAL", "").strip().lower() in ("on", "1", "true", "yes")
+
+
+# The Docker contract gives 4 vCPU, so the submission must default to 4 workers.
+# Local dev (this repo is developed on a 10-core M1 Max) is not resource-bound,
+# so `MIB_WORKERS` overrides it — e.g. MIB_WORKERS=9. Deliberately NOT stamped and
+# NOT in CRITICAL_KEYS: worker count is a wall-clock knob only. Every pool consumes
+# its PDFs in order (imap/map), so output is byte-identical regardless of the count
+# — a cache built at MIB_WORKERS=9 is joinable with one built at 4.
+def workers(default=4):
+    try:
+        return max(1, int(os.environ.get("MIB_WORKERS") or default))
+    except ValueError:
+        return default
+
+
 # S2 reads every geometric variant and keeps the best; the early stop that used
 # to be selectable here is gone (it measured −0.21 dev, experiments.md row 16).
 # The key stays in the stamp as a frozen False so that caches built before the
@@ -92,6 +120,7 @@ def stamp(**extra):
         "restore": RESTORE,
         "early_stop": EARLY_STOP,
         "ocr_passes": ocr_passes(),
+        "ocr_optical": ocr_optical(),
         "git_rev": rev,
         "git_dirty": dirty,
         "created": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -107,10 +136,11 @@ def describe(meta):
     es = " early_stop" if meta.get("early_stop") else ""      # legacy caches only
     passes = meta.get("ocr_passes")
     ocr = f" ocr={passes}" if passes and passes != DEFAULT_OCR_PASSES else ""
+    opt = " optical" if meta.get("ocr_optical") else ""
     # Legacy stamps may carry a `decider` key (the learned decider, deleted);
     # shown so an old mlp eval artifact is still identifiable as one.
     dec = f" decider={meta['decider']}" if meta.get("decider") not in (None, "rules") else ""
-    return f"restore={meta.get('restore', '?')}{es}{ocr}{dec} rev={meta.get('git_rev') or '?'}{dirty}{back}"
+    return f"restore={meta.get('restore', '?')}{es}{ocr}{opt}{dec} rev={meta.get('git_rev') or '?'}{dirty}{back}"
 
 
 def require_agreement(labelled):

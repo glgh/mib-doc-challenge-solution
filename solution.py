@@ -14,7 +14,7 @@ from pathlib import Path
 
 from mib import config, corpus, emit, runner
 
-WORKERS = 4                                             # the contract gives 4 vCPU
+WORKERS = config.workers()   # 4 for the Docker contract; MIB_WORKERS overrides locally
 
 
 def _safe_predict(pdf):
