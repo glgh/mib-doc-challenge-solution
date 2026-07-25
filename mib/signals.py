@@ -3,9 +3,11 @@
 Every function here turns raw packet evidence into a named signal consumed by
 policy. Signals must be validated on train before policy may act on them.
 """
+import difflib
 import re
 
 from . import parse, vocab
+from .packet import SRC_OCR
 from .parse import SPONSOR_RE, norm_name
 
 # Flags are asserted on these documents; scanning others invites false positives
@@ -112,10 +114,26 @@ def identity_conflict(packet, values):
     correction or a precedence choice that already fixed applicant_name also
     clears the conflict — otherwise this flag can fire against, and contradict,
     the very name the record reports.
+
+    OCR tolerance ('text layers don't misread', same principle as the case-id
+    decoy filter): a registry name read off pixels that is a near-miss of the
+    emitted name is evidence of AGREEMENT, not conflict — MIB-000523's
+    'Ixoul Solx' vs 'Ixoul Solix' sent a clean APPROVED to review. The 0.75
+    cutoff is max-margin on train: every true identity_conflict pair sits at
+    ratio <= 0.5 (genuinely different names), the lone OCR misread at 0.947,
+    and the band between is empty (83 mismatching pairs mined, row 33).
+    Text-layer registry names keep exact-match semantics.
     """
     reg_name = packet.registry.get("registry_name")
     name = values.get("applicant_name")
-    return bool(reg_name and name and norm_name(reg_name) != norm_name(name))
+    if not reg_name or not name or norm_name(reg_name) == norm_name(name):
+        return False
+    source = next((src for dtype, src, _kv in packet.docs
+                   if dtype == parse.DOC_REGISTRY), None)
+    if source == SRC_OCR and difflib.SequenceMatcher(
+            None, norm_name(reg_name), norm_name(name)).ratio() >= 0.75:
+        return False
+    return True
 
 
 def adjudicator_finding(packet):

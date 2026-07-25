@@ -282,3 +282,21 @@ def test_registry_fallback_ignores_boilerplate_and_debris():
     ])
     assert "registry_name" not in kv
     assert "home_world" not in kv
+
+
+def test_identity_conflict_tolerates_ocr_misread_of_registry_name():
+    """MIB-000523 (row 33): an OCR-read registry name one glyph off the emitted
+    applicant name is agreement, not conflict. A text-layer near-miss keeps
+    exact-match semantics, and genuinely different names still conflict even
+    from OCR (every true conflict pair mined at ratio <= 0.5)."""
+    from mib import signals
+    from mib.packet import SRC_OCR, SRC_TEXT, Packet
+
+    def conflict(reg_name, applicant, source):
+        p = Packet()
+        p.docs = [(parse.DOC_REGISTRY, source, {"registry_name": reg_name})]
+        return signals.identity_conflict(p, {"applicant_name": applicant})
+
+    assert not conflict("Ixoul Solx", "Ixoul Solix", SRC_OCR)      # misread
+    assert conflict("Ixoul Solx", "Ixoul Solix", SRC_TEXT)         # text is exact
+    assert conflict("Oritari Ixovara", "Zarix Ixotari", SRC_OCR)   # real conflict
