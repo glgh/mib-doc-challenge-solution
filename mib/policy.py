@@ -20,6 +20,13 @@ PARTIAL_EMBARGO_WORLDS = {"Wolf-1061c"}
 # needs a boundary constant. Train has a 48-day empty band between the latest
 # stale-denied arrival (2025-12-09) and the earliest fresh one (2026-01-26);
 # any cutoff inside fits "perfectly". Max-margin choice: the band midpoint.
+# The slack is a train-only property: on the 5,000-case validation set the band
+# narrows to 2 days (2025-12-31 / 2026-01-02, experiments.md row 24). The cutoff
+# still sits inside the gap and the branch fires at the same ~1.3% rate, so the
+# constant transfers — but 6 validation cases lie within ±7 days of it, so treat
+# it as a logged risk with no margin, not a robust boundary. Note the epoch
+# itself (arrivals cluster around 2026) is a corpus assumption this constant and
+# vocab.snap's year repair both hardcode.
 # vocab.snap repairs future-impossible OCR years (>=2028, one glyph off 2026)
 # but never past ones: a past year entering this comparison may be a misread,
 # yet "fixing" a genuine 2024 would un-stale a real denial — and a wrong DENIED

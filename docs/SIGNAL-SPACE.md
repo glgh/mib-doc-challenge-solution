@@ -96,7 +96,8 @@ correct trusted answer). Bottleneck is tesseract PSM-11 whole-page segmentation,
 `render.reads_for` yields the full ensemble offline (the `reads_probe.py` trick), so we can value
 signal-preservation **without** touching `runner.py:64`.
 
-**MEASURED THIS ROUND (n=39 dev scan, 312 field-instances; `signal_probe.py`):**
+**MEASURED THIS ROUND (n=39 dev scan, 312 field-instances; `signal_probe.py` — a scratch probe
+that was never committed, so the B1/B2 numbers below are not reproducible from this checkout):**
 
 **B1 — which ensemble signals actually track correctness** (target = did `best()`'s winning scan
 reading recover the field vs truth):

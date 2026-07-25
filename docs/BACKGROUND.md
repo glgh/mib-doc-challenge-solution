@@ -97,8 +97,11 @@ That is what `mib/corpus.py` exists to cover.
 | Eris Relay | DENIED incl. DIP-1 | 18/18 embargo, 18/18 DENIED (5/5 DIP-1) |
 | Wolf-1061c | DENIED non-DIP only | non-DIP 51/51 DENIED (mostly *without* the flag — partial embargo); DIP-1 ~normal |
 
-Full-embargo worlds also *imply* the `planetary_embargo` flag (earns `risk_flags`, weight 8); do
-**not** infer the flag for Wolf-1061c (labels usually lack it).
+In the *labels*, full-embargo worlds usually co-occur with the `planetary_embargo` flag — but the
+pipeline deliberately does **not** infer it (the inference was deleted in `068e99e`: it shadowed the
+`embargo_world` branch, and emitted flags are observed-only, pinned by
+`test_emitted_flags_exclude_policy_only_inferences`). Never infer it for Wolf-1061c (labels usually
+lack it).
 
 ### Where fields alone are not enough
 
@@ -198,13 +201,13 @@ the band offset that `imaging.realign_bands()` keys off; present even on near-te
 `bands` is +2.38 over `off`, CFA 0, Brier 0.1243 → 0.1176. Per-case: MIB-000030 extraction
 8/45 → 36/45, MIB-000131 4/45 → 27/45.
 
-**Runtime is unresolved.** The only clean figure is `skew` at 1101 s over 1,000 PDFs on a contended
-10-core laptop (mean 4.40 s/case, p99 57.5 s, max 107 s → ~1.53 h projected for 5,000 vs the 8.3 h
-budget). `turn`/`bands` are unmeasured on any sample worth quoting; a prior conclusion that
+**Runtime is resolved for `skew`, still open for the deeper rungs.** The contract-limits gate
+(`scripts/run_docker_submission.py`, experiments.md row 19, 2026-07-23) measured `skew` at
+**0.54 s/PDF with ~11× headroom** — the feared heavy tail (p99 57.5 s, max 107 s from a contended
+10-core laptop) was contention, not the pipeline (container max 8.33 s). A prior conclusion that
 "wall-clock falls as restoration deepens" was **retracted** (laptop seconds under load, not
-comparable). Deeper levels add OCR passes, so assume cost *rises* until measured. Only
-`scripts/run_docker_submission.py` under the real limits settles it — never yet run. That is why
-`skew` ships and `turn`/`bands` stay flag-gated.
+comparable). `turn`/`bands` and dual-PSM remain untimed under the gate; deeper levels add OCR
+passes, so assume cost *rises* until measured there.
 
 **Known inefficiency.** The flow is repair-after-failure (OCR → fail → repair → re-OCR); each
 repaired page burns a doomed pass. Skew and axis are both measurable in ~5 ms of numpy, so the

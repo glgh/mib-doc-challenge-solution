@@ -61,7 +61,7 @@ Wall is left as "contended" deliberately — the run took ~50 min against the ca
 
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
-| 16 | 2026-07-23 | (b926403) | **Default OCR to exhaustive** — early-stop off (`mib/config.early_stop`, `MIB_EARLY_STOP=1` restores): try every geometric variant and keep best-of-all instead of stopping at `GOOD_ENOUGH` | **118.63** | 62.33 | 40.99 | 15.31 | 0 | 2.05s/case | keep |
+| 16 | 2026-07-23 | (b926403) | **Default OCR to exhaustive** — early-stop off (now fixed in code; the `MIB_EARLY_STOP` escape hatch was later removed in c905f00, so restoring it means a checkout): try every geometric variant and keep best-of-all instead of stopping at `GOOD_ENOUGH` | **118.63** | 62.33 | 40.99 | 15.31 | 0 | 2.05s/case | keep |
 
 Clean same-machine A/B, both caches rebuilt fresh from current HEAD (dev-700 via `score_split.py`): early-stop **ON 118.42** (extr 40.84, class 62.24, risk_flags 503) → **OFF 118.63** (+0.21; extr +0.15, class +0.09, CFA 0), for **1.51 → 2.05 s/case**. Early-stop was a false economy: it halted at the first `evidence_score ≥ 6` reading and settled for a worse variant, spending the *most* OCR on the hardest pages (which never clear the bar). The +0.21 is a **floor** — it keeps the per-*page* `best()`; per-*field* selection across all variants (defer-selection, the next step) sits on top and also removes S2's parser-vocab dependency. Two caveats that must travel with this: (1) the baseline here is the progressive-restoration branch, well above row 15's 115.20 from intervening unlogged work; (2) **2.05 s/case is this 10-core laptop / 4 workers, not the 4 vCPU contract** — comfortably under the 6 s budget here, but the ship gate is still `run_docker_submission.py` under real limits, never run. The A/B is now provenance-guarded: `early_stop` is a critical stamp key, so an exhaustive cache can't be silently joined with an early-stop one.
 
@@ -74,10 +74,11 @@ What the instruments bought, all on dev at `skew` and all newly measurable:
 
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
-| 16 | 2026-07-22 | (P1b) | Per-field candidate preference: prefer the clean text-layer read, settle ties by field-manual trust order | **115.43** | 61.27 | **39.00** | 15.16 | 0 | — | keep |
+| 15b | 2026-07-22 | (P1b) | Per-field candidate preference: prefer the clean text-layer read, settle ties by field-manual trust order | **115.43** | 61.27 | **39.00** | 15.16 | 0 | — | keep |
 | — | 2026-07-22 | (P1b) | *Also tried:* vocab passthrough for unseen `home_world` / `species_code` | 115.39 | 61.27 | 38.95 | 15.16 | 0 | — | **reject** |
 
-Row 16 is the first change measured entirely through `scripts/replay.py` — seconds per variant against a cached page-text dump, rather than a 40-minute pipeline run. The full 2×2 matrix was scored in about a minute:
+(Renumbered from a duplicate "16" — the exhaustive-OCR row above is the one every "row 16" citation
+means.) Row 15b is the first change measured entirely through `scripts/replay.py` — seconds per variant against a cached page-text dump, rather than a 40-minute pipeline run. The full 2×2 matrix was scored in about a minute:
 
 | passthrough | preference | total | extr |
 | --- | --- | ---: | ---: |
@@ -104,7 +105,7 @@ Measured while doing it: `case_id` voting agrees with the filename on **all 1,00
 
 **The rejected row is the more useful one.** Passing unseen values through instead of deleting them looks like an obvious bug fix — `mib/vocab.py`'s docstring promises it, and only `declared_purpose` delivers it — and a strict-xfail test was standing by to confirm it. It measured as a *loss* twice, because deleting a value snapping could not vouch for was quietly acting as a quality filter that let a cleaner copy supply the field. Its intended upside also does not exist: all 1,000 train cases yield exactly 13 home worlds, 12 species and 10 purposes, and the vocabulary lists are those enumerations. In a sample that size a fourteenth world would be expected ~77 times, so the value universe is closed and there are no unseen private-set values to rescue. U7 is closed as a non-issue and the xfail became an ordinary test asserting the deletion is deliberate.
 
-**Step-0 decision-layer bake-off (2026-07-22, commit adff813, substrate = skew cache replay at 115.20 dev):** 5-fold OOF within dev, identical 66-dim features. Rules 61.27/80eq Brier .1210 CFA 0 → **calibrated logistic + inner-CV correctness confidence 62.43/80eq Brier .1293 CFA 12** (+1.16 class pts, −0.33 calib pts, net ≈ +0.8). MLP(32) overfits (59.44, Brier .21, 31 CFA) — Phase 1 ships logistic. CFA veto sweep: t=0.15 → 61.73/6 CFA; t=0.10 → 60.76/2. Full table in JOURNAL.
+**Step-0 decision-layer bake-off (2026-07-22, commit adff813, substrate = skew cache replay at 115.20 dev):** 5-fold OOF within dev, identical 66-dim features. Rules 61.27/80eq Brier .1210 CFA 0 → **calibrated logistic + inner-CV correctness confidence 62.43/80eq Brier .1293 CFA 12** (+1.16 class pts, −0.33 calib pts, net ≈ +0.8). MLP(32) overfits (59.44, Brier .21, 31 CFA) — Phase 1 ships logistic. CFA veto sweep: t=0.15 → 61.73/6 CFA; t=0.10 → 60.76/2. (The full table lived in `docs/JOURNAL.md`, deleted in `054e7c2`; not preserved.)
 
 ---
 
@@ -430,3 +431,38 @@ measured before the dev gate and is recorded here as context, not evidence. What
 reach: sponsor-id misreads (8 of 9 have a single candidate — no in-packet anchor; that is variant-merge
 territory) and month/day date errors (no anchor exists). See BACKGROUND §3 for the revoked-neighbor
 trap found during this probe: never fuzzy-match an id *toward* the revoked list.
+
+---
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 27 | 2026-07-24 | (dirty) | **Review sweep, score-neutral by construction**: deleted the closed learned decider (`mib/{decision,features}.py`, `decision_model.npz`, `scripts/{train,export}_decision.py`, the runner S5 swap, `MIB_DECIDER`/`MIB_CFA_VETO` + their stamp keys); retired never-set knobs (`MIB_WORKERS`, `MIB_CASE_BUDGET_S` → constants); deleted dead code (`cache.read_meta`, `scripts/{fee,crossdoc}_probe.py`); corrected ~20 stale doc claims | — | — | — | — | — | — | keep — suite 42 passed / 1 xfailed |
+
+Row 27 changed no shipped behavior: the deleted decider ran only into the sidecar (default `rules`),
+both retired knobs were never set anywhere, and the container path reads no env beyond what the
+Dockerfile pins. Verified two ways: suite green, and a replay of `train_skew.jsonl` from the cleaned
+working tree is **byte-identical** on all 1,000 predictions to a replay from a clean `fbb3d97`
+worktree. Found during the same review, two **unlogged behavior changes**: `c905f00` fixed the full
+restoration ladder ON (previously shipped `skew`) and `4767919` changed the ink mask — no scored row
+existed for either, and all scores since 119.10 replayed the *skew* cache. Row 28 closes that gap.
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 28 | 2026-07-24 | (dirty) | **The full-ladder substrate, priced** (the missing `c905f00`/`4767919` rows, and STATUS Q3): fresh `bands` cache from HEAD (`output/cache/train_bands.jsonl`, 1,000 cases), replayed against the skew substrate through identical code | **121.36** | 63.37 | 42.45 | 15.54 | 0 | see note | keep — this is the committed config |
+
+**+2.09 dev over the skew substrate (119.27, which the same code reproduces exactly — a validated
+baseline).** The `turn`/`bands` prize did not shrink on the stronger substrate the way the learned
+decider's edge did; it *grew* (+1.68 → +2.09). CFA stays 0 (confusion adds one APPROVED→DENIED,
+which costs 0), classification +10 correct / −9 conservative-review, Brier 0.1160 → 0.1116, and the
+gains are broad, not one field: sponsor_id +21 cases, home_world +22, arrival_date +19, visa_class
++14, declared_purpose +20, species_code +18, risk_flags +11. Three caveats that travel with the row:
+
+- **Cost is laptop-only so far**: the bands dump ran 1,231 s / 1,000 PDFs (p50 4,861 ms, p99 14.4 s,
+  max 18.3 s per case) vs the skew cache's ~1,100 s — but laptop timings are not evidence (standing
+  hazard), and row 19 measured `skew` at 0.54 s/PDF with ~11× headroom under the real contract. The
+  ladder **already ships** (it is fixed in code), so `run_docker_submission.py` must be re-run to
+  confirm the budget for what is already shipping — it decides a revert, not an adoption.
+- **`confidence_table.json` is still fitted on the skew substrate.** Branch membership moved (188 vs
+  197 conservative reviews), so per the standing refit hazard (row 22) the table should be refit on
+  this substrate and measured as its own row; the 15.54 calibration above is with the stale table.
+- Dev only; holdout untouched (last read 113.46 at `v1`).

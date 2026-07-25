@@ -14,18 +14,32 @@ now**.
 
 ## Where things are
 
-**Committed: dev 119.10, CFA 0, 0 missing rows** (HEAD `17f82ae`, verified 2026-07-23 by a fresh
-full-pipeline eval on the current tree — `output/eval_head`, 515s for 1,000 PDFs). Shipped config is the
+**Committed: dev 121.36, CFA 0, 0 missing rows** (HEAD `fbb3d97`, row 28 — the first score measured
+on the full-ladder substrate the code actually ships; the 119.10–119.27 numbers quoted before
+2026-07-24 were skew-substrate replays. The 119.10 base was verified 2026-07-23 by a full-pipeline
+eval, `output/eval_head`, 515s for 1,000 PDFs). Shipped config is the
 full restoration ladder (fixed in code) with the **rules** decider. The stage-seam decoupling, exhaustive-OCR default
 (row 16), P3 parse fixes, and OCR-robust flag extraction (row 18) that earlier drafts of this file
-logged as "in flight / uncommitted" are all committed now (`ba59fcd`, `b926403`); `bands` remains
-over budget. The sections below still narrate that work as a dirty tree — read them as history, not
-current state.
+logged as "in flight / uncommitted" are all committed now (`ba59fcd`, `b926403`); `bands` has never
+been timed under the contract gate, and the Docker parity result (row 19, ~11× headroom at `skew`)
+weakens the old over-budget presumption — see question 3. The sections below still narrate that work
+as a dirty tree — read them as history, not current state.
 
-**The learned decider is shelved.** Re-measured on this 119.10 substrate, its edge over rules
-**inverted** (was +1.16 class pts at 115.20, now −0.50 with 14 CFAs vs rules' 0 — see rejected list
-and `experiments.md`). `MIB_DECIDER` stays `rules` (the default); `mib/decision_model.npz` is frozen
-and superseded, not a live promotion candidate.
+**The learned decider is deleted (2026-07-24 review sweep, row 27).** Re-measured on the 119.10
+substrate, its edge over rules **inverted** (was +1.16 class pts at 115.20, then −0.50 with 14 CFAs
+vs rules' 0 — see rejected list and `experiments.md`); after decision-layer ML was closed the code
+was removed outright: `mib/{decision,features}.py`, `decision_model.npz`,
+`scripts/{train,export}_decision.py`, and the `MIB_DECIDER`/`MIB_CFA_VETO` knobs all live only in
+git history now.
+
+**HEAD's real score is dev 121.36, CFA 0 (row 28)** — measured 2026-07-24 on a fresh full-ladder
+cache, closing the gap the review found: `c905f00` fixed the restoration ladder ON and `4767919`
+changed the ink mask with no scored row, so every number from 119.10 to 119.27 described the old
+*skew* substrate, not the shipping config. The re-price (question 3) came back **+2.09** — the
+prize grew on the stronger substrate rather than shrinking. Two follow-ups before trusting it
+fully: re-run the Docker gate for the ladder's cost (it already ships, so the gate decides a
+revert, not an adoption), and refit `confidence_table.json` on the bands substrate (branch
+membership moved; the 121.36 carries the skew-fitted table).
 
 **Decision-layer ML is now closed, not merely shelved (2026-07-24).** The last apparent prize — a
 +2.0-point split of `b13_census` — traced to a data-generation artifact, and `fee_unknown` has no
@@ -244,7 +258,7 @@ joined `skew`-derived text against `bands`-derived predictions and produced conf
 | --- | --- | --- |
 | 1 | ~~Is ~117.98 real?~~ **ANSWERED** | dev **119.10** confirmed by full-pipeline eval (HEAD `17f82ae`, `output/eval_head`, 1,000 PDFs, 515s); ~117.98 and its partial cache rebuild superseded |
 | 2 | ~~Does the pipeline fit the runtime budget?~~ **ANSWERED** | full contract-limits run: 0.54 s/PDF, 0.75 h/5,000, ~11× headroom (`scripts/run_docker_submission.py`) |
-| 3 | Can `turn`/`bands` (+1.68) be made affordable? | premise weakened: skew fits at 11× headroom, so the tail may already be affordable — **time `turn`/`bands` through the gate** before assuming detect-first is required |
+| 3 | ~~Can `turn`/`bands` (+1.68) be made affordable?~~ **ANSWERED on score** (row 28): the ladder is worth **+2.09** on the current substrate (dev 121.36, CFA 0) and already ships (`c905f00`). Remaining half: laptop cost is ~2.4×/case vs skew — **re-run the Docker gate** to confirm the budget (skew had ~11× headroom, so a 2.4× tail should fit; the gate decides a revert, not an adoption) |
 | 4 | ~~Is CFA 0 a hard gate or a priced cost?~~ **MOOT** | learned decider shelved; rules run at CFA 0 with no veto. Revives only with the learned decider (then the honest count is 12 OOF CFAs) |
 | 5 | ~~Where do the remaining 16.66 classification points go?~~ **ANSWERED — and they are not reachable** | `fee_unknown` (7.11) has no signal: four model families all lose to the rules baseline and all add CFAs. `b13_census` (6.25) has signal, but it is the `n_scan_pages` render artifact — worth +0.86 with 10 CFAs once stripped, and the 8 DENIED inside its clean subset are inseparable. See the rejected list |
 | 8 | Does the fitted-constant audit generalize to the cascade's *structure*? | **open, and it is the real question.** `audit_constants.py` says the four fitted values cost only −0.23 (row 21), which does **not** explain the v1 dev→holdout gap of −1.97. Branch order, which branches exist, and ~10 hand-tuned thresholds were also picked on dev and are unaudited |
@@ -276,7 +290,7 @@ from *evidence*: no field value can source from them (`textmatch.sourceable_text
 only) and no policy branch reads them — `test_hidden_text_cannot_change_the_output` guards this.
 But their *presence* is already a signal: `features.hidden_present` (`hidden_lines > 0`) feeds the
 learned decider. What is **not** used is the hidden *content*. `textmatch.hidden_text()` reconstructs
-the hidden string but has no runtime caller — only tests reference it. The lever: mine that content
+the hidden string but has no callers at all (tests included; verified by grep) — kept only for this lever. The lever: mine that content
 as a **flag only** — e.g. a hidden `SPN-####`/date/flag that conflicts with the visible value could
 raise `sponsor_mismatch`/`identity_conflict` or an injection tell. Hard constraint: it may only ever
 *flag*, never source a value or flip a branch toward the hidden value, or we reward the injection the
@@ -302,9 +316,10 @@ features in `mib/features.py` describe how the PDF was *produced* rather than wh
 `hidden_present`, and the six `has_*` doc-presence flags. The generator damages DENIED packets more
 often (48.6% vs 25.1% APPROVED, clean vs scanned), so every one of these is a partial label proxy
 whose relationship to the truth is a property of the data generator and has no reason to survive to a
-private test set. This is what made the `b13_census` prize look real. They are inert today because the
-learned decider is shelved — deleting them is churn, but **nothing new may condition on them**, and
-any future model that scores well should be re-checked with them removed before it is believed.
+private test set. This is what made the `b13_census` prize look real. The features are deleted along
+with the learned decider (row 27), but the lesson stands: **nothing new may condition on
+render-derived properties**, and any future model that scores well should be re-checked with them
+removed before it is believed.
 
 **A miner that reads extracted values measures its own extraction noise.** The first pass of
 `audit_constants.py` mined `home_world` from pipeline output (87.9% accurate) and reported a −1.23
@@ -369,11 +384,9 @@ and `mib/corpus.py` added. What's left, highest leverage first:
    ~10 hand-tuned thresholds are the remaining candidates and nothing has measured them. Do this
    before spending a holdout read, since a holdout read cannot tell you *which* choice is overfit.
 
-1. **Re-price the `turn`/`bands` prize on the 119.10 substrate** before building any detect-first
-   machinery. The +1.68 (Q3) predates exhaustive OCR (row 16) + flag extraction (row 18), and the
-   Docker result removed the affordability argument — so the only open question is whether turn/bands
-   still *buys score*. Replay A/B (turn/bands vs skew, dev, CFA 0); cheap, do it first. The learned
-   decider's +1.16 → −0.50 inversion is the cautionary precedent for a prize measured on old substrate.
+1. ~~Re-price the `turn`/`bands` prize~~ **DONE (row 28): +2.09, dev 121.36, CFA 0** — the prize
+   grew on the stronger substrate (the inversion precedent did not repeat). Follow-ups now owned by
+   the Q3 row: Docker-gate the ladder's cost, refit the confidence table on the bands substrate.
 2. Decide the runtime-budget split between **dual-PSM** (`MIB_OCR_PASSES=dual`, in flight) and
    `turn`/`bands` — both now spend the same ~11× headroom, so they compete.
 3. If step 1 says turn/bands still pays: wire orientation into `mib/imaging.py` + `render.py`, measure

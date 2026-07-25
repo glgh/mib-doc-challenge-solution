@@ -34,9 +34,10 @@ every candidate per field, every rule predicate per case) so no improvement is f
 value being thrown away early. Orchestration is `mib/runner.py` (`read_case` = S1+S2,
 `predict_from_evidence` = S3→emit); the CLI is `solution.py`.
 
-**Shipped configuration today:** rules decider (`MIB_DECIDER=rules`), the full restoration ladder
-(fixed in code), exhaustive OCR — every geometric variant is read and the best kept, with no
-early stop to switch off. The learned decider is built and measured but off by default.
+**Shipped configuration today:** the rules cascade (the only decider — the learned one was deleted
+after decision-layer ML was closed, see S5), the full restoration ladder (fixed in code),
+exhaustive OCR — every geometric variant is read and the best kept, with no early stop to switch
+off.
 
 ---
 
@@ -79,7 +80,7 @@ Every variant is OCR'd and `best()` keeps the highest `evidence_score` (earliest
 An earlier design stopped once `evidence_score >= GOOD_ENOUGH (6)`; it measured **−0.21 dev** — it
 settled for the first good-enough variant and spent the most OCR on the hardest pages
 (docs/experiments.md row 16) — and has been removed, so there is no longer a switch for it. Cost is
-bounded by `MIB_CASE_BUDGET_S`, not by skipping variants. `reads_for` keeps **every** reading.
+bounded by `runner.CASE_OCR_BUDGET_S`, not by skipping variants. `reads_for` keeps **every** reading.
 `skew_sweep` is exposed so `scripts/visualize_restore.py` plots the exact curve.
 
 > **Hazard:** S2 page-quality scoring calls `parse.key_for`, so a `KEY_MAP` edit can change which
@@ -101,8 +102,8 @@ bounded by `MIB_CASE_BUDGET_S`, not by skipping variants. `reads_for` keeps **ev
   matched on *joined* text so a wrapped sentence survives. Fills only fields the labelled lines
   didn't (273 of 312 dev parse failures were unparsed prose).
 - **`valid_value`**: per-field shape gates; rejects `unknown`/`n/a` and in-place damage markers
-  (`[NAME CUT OUT]`, `[REGISTRY LOST]`, …). **`arrival_date` is shape-only** (`\d{4}-\d{2}-\d{2}`),
-  never calendar-checked — see Known gaps.
+  (`[NAME CUT OUT]`, `[REGISTRY LOST]`, …). `arrival_date` is shape- **and** calendar-checked
+  (`date.fromisoformat` rejects well-shaped impossibles like `2026-03-41`; hardened in `b926403`).
 
 ## S4 — assemble + merge (`mib/packet.py`, `mib/signals.py`)
 
@@ -124,18 +125,19 @@ at rank 0.
 
 | signal | source |
 | --- | --- |
-| `flags` | `observed_flags` (B-13 + registry status line), plus derived `sponsor_mismatch`, `identity_conflict`, and `planetary_embargo` inferred for full-embargo worlds |
+| `flags` | `observed_flags` (B-13 + registry status line), plus derived `sponsor_mismatch` and `identity_conflict` (the `planetary_embargo` inference was deleted in `068e99e` — it shadowed policy's `embargo_world` branch, and emitted flags are observed-only) |
 | `finding` | `Finding: APPROVED\|DENIED\|NEEDS_REVIEW` on a Manual Adjudicator Note (highest trust) |
 | `waiver_code` | first non-empty waiver code on any doc |
 | `has_biometric` | a B-13 was detected |
 | `has_flag_evidence` | the B-13's flag line was actually *read* (`observed_flags` present), not merely that a slip exists |
 
-## S5 — the two deciders (`mib/runner.py` seam)
+## S5 — adjudication (`mib/runner.py` seam)
 
-Both always run; the learned one is logged to the debug sidecar on every eval (a permanent A/B).
-Only the one named by `MIB_DECIDER` is emitted.
+One decider: the rules cascade. (A learned decider used to run beside it as a permanent sidecar
+A/B; it was deleted after decision-layer ML was closed — see the historical note at the end of
+this section.)
 
-### Rules cascade (`mib/policy.py`) — default
+### Rules cascade (`mib/policy.py`)
 
 16 ordered branches, first match wins. Named so confidence is calibrated per-branch and eval
 residuals attribute to the rule that fired.
@@ -167,34 +169,21 @@ unreadable" is the guard that removed the MIB-000672 false approval.
 Key constants (train-validated, see [BACKGROUND.md](BACKGROUND.md) §2):
 - `STALE_CUTOFF = 2026-01-02` — midpoint of the empty 48-day band between the latest stale-denied
   and earliest fresh arrival (max-margin; no visible receipt date exists in the corpus).
-- Full-embargo `{TRAPPIST-1e, Eris Relay}` (also *implies* the `planetary_embargo` flag);
-  partial-embargo `{Wolf-1061c}` (non-DIP only).
+- Full-embargo `{TRAPPIST-1e, Eris Relay}` (denial via the `embargo_world` branch — no flag is
+  inferred); partial-embargo `{Wolf-1061c}` (non-DIP only).
 - Revoked sponsors `{SPN-0007, SPN-0139, SPN-4040}` (manual) + `{SPN-2718, SPN-7331, SPN-9090}`
   (inferred: 11–14 non-DIP occurrences each, zero approvals).
 
-### Learned decider (`mib/decision.py` + `mib/features.py`) — `MIB_DECIDER=mlp`
+### Historical: the learned decider (deleted)
 
-A **66-dim** feature vector (47 without the branch/rules one-hots) over the emitted (record, debug)
-pair — the trainer and runtime run literally the same `featurize`. Model is a calibrated logistic
-(`StandardScaler + LogisticRegression`, `CalibratedClassifierCV cv=3 sigmoid`) trained offline;
-runtime is a **numpy-only forward pass** from `mib/decision_model.npz`, averaged over the 3 CV
-members. No sklearn ships. `load()` refuses a model whose feature order disagrees with
-`features.names()`, so a feature edit without a retrain fails loudly.
-
-Decision is **argmax expected points** using the real scoring matrix:
-
-```
-EV[APPROVED]     = 8·pA + 1·pN − 4·pD
-EV[DENIED]       = 8·pD + 1·pN
-EV[NEEDS_REVIEW] = 8·pN + 2·pA + 2·pD
-```
-
-with an optional `MIB_CFA_VETO` (default `1.0` = pure EV) demoting a learned APPROVED to
-NEEDS_REVIEW once `P(DENIED)` exceeds the threshold. Honest OOF gain vs. rules: **+1.16
-classification pts** (dev 5-fold). Honest OOF CFA count is **12** (dev 5-fold, `experiments.md`);
-the in-sample train-fit dev read shows only 5, so quoting 5 beside the OOF gain understates the
-risk ~2.4×. Whether CFA 0 is a hard gate or a priced cost is an unreconciled decision (see
-STATUS.md hazards).
+A calibrated-logistic decider (66 features, EV-argmax over the real scoring matrix, numpy-only
+forward pass) ran beside the rules cascade as a permanent sidecar A/B. Its +1.16 OOF edge was
+measured on the 115.20 substrate; re-measured at 119.10 it **inverted to −0.50 with 14 CFAs vs
+rules' 0** — strictly dominated, shelved, then decision-layer ML was closed outright (STATUS.md;
+`fee_unknown`/`b13_census` are information-limited, not model-limited). The code
+(`mib/decision.py`, `mib/features.py`, `mib/decision_model.npz`, `scripts/{train,export}_decision.py`)
+and the `MIB_DECIDER`/`MIB_CFA_VETO` knobs were deleted and live in git history. The CFA-gate
+question (hard gate vs priced cost) is moot until some future decider earns candidacy.
 
 ## Confidence + emit (`mib/confidence.py`, `mib/emit.py`)
 
@@ -245,19 +234,15 @@ is caught and logged, keeping the provisional rows.
 
 | var | default | effect |
 | --- | --- | --- |
-| `MIB_DECIDER` | `rules` | which decider ships (`rules` \| `mlp`) |
-| `MIB_CFA_VETO` | `1.0` | P(DENIED) that demotes a learned APPROVED to NEEDS_REVIEW (1.0 = pure EV) |
-| `MIB_CASE_BUDGET_S` | `120` | per-case OCR wall-clock bound; overrun drops remaining pages to text layer |
-| `MIB_WORKERS` | `4` | pool size (the contract gives 4 vCPU) |
+| `MIB_OCR_PASSES` | `psm11` | `dual` adds a PSM 3 pass per image (experiments.md row 20 — +0.87 dev, unshipped for cost) |
+| `MIB_OCR_OPTICAL` | off | in-flight faint-scan variants (local threshold + autocontrast), gated on weak geometric reads |
 | `MIB_DEBUG_JSONL` | unset | path for the per-case diagnostic sidecar |
+
+The per-case OCR wall-clock bound (120 s) and the pool size (4, the contract's vCPU count) are
+constants (`runner.CASE_OCR_BUDGET_S`, `solution.WORKERS`), not knobs — nothing ever overrode them,
+and experiments override the budget per-call via `read_case(pdf, budget_s=...)`.
 
 ## Known gaps
 
-- **`arrival_date` is never calendar-validated.** `parse.valid_value`, `vocab.snap`, and
-  `emit.validate` all regex the *shape* `\d{4}-\d{2}-\d{2}`; none call `date.fromisoformat`. An
-  impossible-but-well-shaped date (`2026-03-41`, seen on MIB-000805 via loose-key matching) flows
-  to output. The official `evaluate.py` only counts it as a field miss, but `validate_submission.py`
-  rejects the row — it counts against the "90%+ valid rows" bar. A one-line calendar check in
-  `valid_value` closes it.
 - **S2 is not pure w.r.t. the parser** — a `KEY_MAP` edit can move which OCR variant wins (see the
   S2 hazard note).

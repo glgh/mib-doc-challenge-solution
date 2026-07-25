@@ -19,7 +19,7 @@ docker run --rm --network none \
 - `solution.py` — thin CLI; parallelism and output streaming only
 - `mib/` — the pipeline, as staged transforms: `stages/extract` (PDF → page text, hidden spans
   quarantined) → `stages/render` (OCR of scan-only pages) → `parse` → `packet` (assemble + merge)
-  → `policy` / `decision` (adjudicate) → `emit` (schema safety net). `runner.py` sequences them,
+  → `policy` (adjudicate) → `emit` (schema safety net). `runner.py` sequences them,
   `records.py` defines what crosses each seam.
 - `run.sh` — container entrypoint
 - `Dockerfile` — offline runtime image (no network access at runtime)
