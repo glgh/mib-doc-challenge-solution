@@ -196,3 +196,49 @@ routine that (a) decides whether to fire and (b) computes each band's shift from
 content — replacing both the border-based detector and the border-based
 `realign_bands`. Tune its tolerance against this set, watching 037 and the flat
 negatives. Then re-confirm end-to-end that 037's applicant no longer garbles.
+
+## 2026-07-25 — deferred variant selection priced offline; illegible_biometrics is a structural gap
+
+Ensemble cache: `dump_reads.py` now dumps EVERY OCR reading per scan page (not
+just `best()`'s winner) — 92 hard-set cases in `output/cache/reads_hard.jsonl`,
+so merge strategies replay in seconds with zero tesseract.
+
+**Scalar per-field vote** (`merge_probe.py`, text-layer precedence kept; vote
+fills only non-text fields, plurality over valid normalized values across all
+readings):
+
+| strategy | fields | adj_ok | CFA |
+| --- | ---: | ---: | ---: |
+| best (shipped) | 581 | 78 | 0 |
+| plurality | 600 | 80 | 0 |
+| plurality_valid | 600 | 80 | 0 |
+
++19 field instances (applicant_name +7, fee_status +5, home_world/sponsor_id/
+arrival_date +2, visa_class +1), +2 adjudications (fee_status feeding policy),
+CFA 0. The year-plausibility filter adds nothing over `parse.valid_value`'s
+calendar hardening (b926403).
+
+**Flag union across variants** (`flag_probe.py`, per-read decoy filter + flag-
+doc-type gate mirroring assemble; risk_flags scored as evaluate.py does, exact
+set): union = +3 flags, all TRUE, **zero hallucinated**, rf_match 73→75, CFA 0;
+quorum2 strictly less. The feared fuzzy-matcher hallucination on garbled losing
+variants did not materialize.
+
+**The remaining 17 rf misses are one structural gap, not a merge problem.**
+14/17 miss `illegible_biometrics`. Train-wide: 223 truth cases carry it, only
+83 print it (`Observed flags:` line in a text layer); current recall 54%
+(120/223). The 103 FN are condition-derived labels — the B-13 is present but
+unreadable, dominant shape (76 cases) so damaged the page isn't even detected
+as a biometric doc. Predicate sweep through real policy (`train_bands.jsonl`
+substrate): P1 (bio & !flag_ev) fixes 13 / breaks 11; dead-page census variants
+fix 32–45 / break 91–102 — dead pages are geometrically identical to non-B-13
+dead pages (all 612×792, image aspect 1.3, flat position distribution) and
+their OCR debris carries no type tokens. **No cheap discriminator exists; ~+0.8
+dev ceiling stays open.** Possible future angles: ensemble-wide fuzzy B-13
+tokens, doc-census elimination (which expected doc is unaccounted for), or an
+emission story compatible with the organizer ruling (an unreadable slip *is*
+visible evidence of illegibility — argue it, don't guess it).
+
+These numbers informed the keystone build (ensemble across the seam, vote +
+flag-union at the merge) — they did not authorize it. See the house rule
+rewrite (BACKGROUND.md, same day): measure to learn, not to authorize.
