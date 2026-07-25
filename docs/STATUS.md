@@ -14,7 +14,8 @@ now**.
 
 ## Where things are
 
-**Committed: dev 122.10, CFA 0, 0 missing rows** (row 30, `4afeb58` — the keystone: the OCR
+**Committed: dev 122.24, CFA 0, 0 missing rows** (rows 30–32; row 32 adds eroded-label registry
+recovery — see experiments.md. Row 30, `4afeb58`, is the keystone: the OCR
 ensemble crosses the seam intact, non-text fields are settled by a plurality vote across all
 readings, and risk flags union across losing variants. Attribution is clean: the same fresh
 ensemble dump replayed with frozen pre-keystone behavior scores exactly the row-28 baseline

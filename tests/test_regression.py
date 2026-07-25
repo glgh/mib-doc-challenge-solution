@@ -251,3 +251,34 @@ def test_flag_extraction_does_not_fabricate_from_legend_or_negation():
     assert flags("Finding: APPROVED. Reason: cleared of biohazard_red") == set()
     assert flags("Possible flags: biohazard_red | active_warrant | "
                  "memory_tampering | planetary_embargo") == set()
+
+
+def test_registry_eroded_labels_recover_values():
+    """MIB-000293 p0 (row 32): a faint registry scan erodes the two-line labels,
+    leaving label tails fused to values and a bare name. The fallback must
+    recover all four values; snapping ('Ens Relay' -> 'Eris Relay') and
+    validation happen downstream exactly as for labelled reads."""
+    from mib import parse
+
+    kv = parse.registry_fallback_kv([
+        "Registry Extract", "Nexquell Veemora", "World Ens Relay",
+        "Code ANDROMEDAN", "Date: 2026-04-14", "Pacl",
+        "Synthetic hiring challenge document",
+    ])
+    assert kv["registry_name"] == "Nexquell Veemora"
+    assert kv["home_world"] == "Ens Relay"
+    assert kv["species_code"] == "ANDROMEDAN"
+    assert kv["arrival_date"] == "2026-04-14"
+
+
+def test_registry_fallback_ignores_boilerplate_and_debris():
+    """The bare-name capture must not read headers, footers, or OCR debris as a
+    registry name, and short garbage must not snap into a home world."""
+    from mib import parse
+
+    kv = parse.registry_fallback_kv([
+        "Registry Extract", "Planetary Registry", "Sample Denial",
+        "Synthetic hiring challenge document", "Gab EP Se", "bee I", "e",
+    ])
+    assert "registry_name" not in kv
+    assert "home_world" not in kv

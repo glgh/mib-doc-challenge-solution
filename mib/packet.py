@@ -69,6 +69,12 @@ def _parse_lines(lines, ocr):
     kv = parse.parse_kv(lines)
     for fname, value in parse.parse_prose(lines).items():
         kv.setdefault(fname, value)
+    # OCR registry pages get the eroded-label recovery: label tails and bare
+    # values that faint scans leave behind (text layers never erode, so the
+    # fallback stays off them). Same snap/validation path as labelled reads.
+    if ocr and parse.detect_doc_type(lines) == parse.DOC_REGISTRY:
+        for fname, value in parse.registry_fallback_kv(lines).items():
+            kv.setdefault(fname, value)
     return _repair_ocr_kv(kv) if ocr else kv
 
 

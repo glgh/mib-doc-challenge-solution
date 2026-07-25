@@ -185,6 +185,56 @@ def parse_prose(lines):
     return out
 
 
+# --- damaged-registry recovery ----------------------------------------------
+# The registry extract prints two-line label/value pairs (`Registry Name` /
+# `Ixodane Luzarn` / `Home World` / ...). On faint scans the label's leading
+# word erodes, fusing its tail onto the value line ('Home World' + 'Eris Relay'
+# reads as 'World Ens Relay'), or the label vanishes entirely and only the bare
+# value survives. Recovery anchors on the surviving canonical label word first,
+# then on closed-vocabulary membership (snap cutoff 0.7 keeps debris out), and
+# a bare TitleCase pair matching neither is the registry name — the only
+# free-text field on the form. MIB-000293 p0 is the motivating read.
+_REGISTRY_TAILS = [
+    (re.compile(r"^(?:Registry\s+)?Name\b[:.;]?\s+(\S.*)$", re.I), "registry_name"),
+    (re.compile(r"^(?:Home\s+)?World\b[:.;]?\s+(\S.*)$", re.I), "home_world"),
+    (re.compile(r"^(?:Species\s+)?Code\b[:.;]?\s+(\S.*)$", re.I), "species_code"),
+    (re.compile(r"^(?:Arrival\s+)?Date\b[:.;]?\s+(\S.*)$", re.I), "arrival_date"),
+    (re.compile(r"^(?:Registry\s+)?Status\b[:.;]?\s+(\S.*)$", re.I), "registry_status"),
+]
+_BARE_NAME_RE = re.compile(r"^[A-Z][a-z]{2,}\s+[A-Z][a-z]{2,}$")
+_BARE_NAME_STOP = {"registry", "extract", "packet", "synthetic", "hiring",
+                   "challenge", "document", "image", "eyes", "only", "sample",
+                   "denial", "manual", "note", "form", "receipt", "sponsor",
+                   "attestation", "letter", "planetary"}
+
+
+def registry_fallback_kv(lines):
+    """Values a damaged Planetary Registry Extract still shows after its labels
+    eroded. Fills only what parse_kv could not (the caller setdefaults), and
+    every value passes through the same snap/validation as a labelled read."""
+    from . import vocab
+    kv = {}
+    for raw in lines:
+        line = raw.strip().rstrip(".")
+        if not line:
+            continue
+        for rx, fname in _REGISTRY_TAILS:
+            m = rx.match(line)
+            if m:
+                kv.setdefault(fname, m.group(1).strip())
+                break
+        else:
+            if len(line.split()) <= 3:
+                world = vocab.snap("home_world", line)
+                if world:
+                    kv.setdefault("home_world", world)
+                    continue
+            if _BARE_NAME_RE.match(line) and \
+                    not set(line.lower().split()) & _BARE_NAME_STOP:
+                kv.setdefault("registry_name", line)
+    return kv
+
+
 def page_case_ids(lines):
     ids = []
     for line in lines:
