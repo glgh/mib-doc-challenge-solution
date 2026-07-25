@@ -4,6 +4,8 @@ known term pass through unchanged, so unseen private-set values survive."""
 import difflib
 import re
 
+from .textmatch import plausible_misread
+
 HOME_WORLDS = [
     "Barnard-c", "Eris Relay", "Europa Station", "Gliese-581g", "Kepler-186f",
     "Luyten-b", "Mars Dome-7", "Proxima-b", "Sirius Outpost", "TRAPPIST-1e",
@@ -94,7 +96,17 @@ def snap(field, value):
         return f"MIB-{m.group(1).translate(_DIGIT_FIXES)}" if m else None
     if field == "arrival_date":
         m = re.search(r"(\d{4})[-–—/.](\d{2})[-–—/.](\d{2})", v)
-        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m else None
+        if not m:
+            return None
+        year = m.group(1)
+        # Visas run <=180 days from a 2026-era receipt, so a year >= 2028 is
+        # future-impossible: one glyph off 2026 means the scanner misread the
+        # year (the 6->8 confusion is systematic in the corpus). Past years get
+        # no such repair — 2020 or 2024 is always a *plausible* stale date, and
+        # rewriting a genuine one would un-stale a legitimate denial.
+        if int(year) >= 2028 and plausible_misread(year, "2026"):
+            year = "2026"
+        return f"{year}-{m.group(2)}-{m.group(3)}"
     if field == "observed_flags":
         tokens = [t for t in re.split(r"[|,;\s]+", v.lower()) if t]
         fixed = [f for t in tokens for f in [_closest(t, FLAGS, 0.8)] if f]

@@ -414,3 +414,19 @@ concrete confirmation that the artifact was a generator property and not a case 
 34.8 → 34.3%, APPROVED 9.5 → 11.5%; branch order is unchanged with `adjudicator_finding` 25.8 → 27.5%
 and `fee_unknown` 21.9 → 24.5%. The two cells that hold the unreachable loss are, if anything,
 slightly *larger* on validation.
+
+---
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 25 | 2026-07-24 | (dirty) | **Digit-tolerant decoy filter, OCR pages only** (`textmatch.plausible_misread` + `packet.assemble`): a scan page whose only case ID is one glyph off the active case is the applicant's own page misread, not a decoy. Text-layer pages keep exact match (text layers don't misread; guards adjacent-case decoys) | 119.26 | 62.50 | 41.40 | 15.36 | 0 | — | keep |
+| 26 | 2026-07-24 | (dirty) | **Future-impossible arrival-year snap** (`vocab.snap`): OCR year ≥2028 one glyph off `2026` → `2026`; past years untouched (a genuine 2024 is a plausible stale date — rewriting it risks a false approval). Repairs all 23 `2028` reads, 0 adjudication changes | **119.27** | 62.50 | 41.42 | 15.36 | 0 | — | keep |
+
+Both rows are mechanism-first: train effect sizes (17 dropped pages, 23 bad years in 1,000 cases) are
+too small to select on, so the acceptance evidence is the invariants — the 3 known true decoy pages
+still drop, the misread pages (incl. MIB-000363's adjudicator note) are kept, no new `stale_arrival`
+denials, 0 extra/missing cases, suite green. The exploratory full-train counterfactual (+0.098) was
+measured before the dev gate and is recorded here as context, not evidence. What the tolerance cannot
+reach: sponsor-id misreads (8 of 9 have a single candidate — no in-packet anchor; that is variant-merge
+territory) and month/day date errors (no anchor exists). See BACKGROUND §3 for the revoked-neighbor
+trap found during this probe: never fuzzy-match an id *toward* the revoked list.

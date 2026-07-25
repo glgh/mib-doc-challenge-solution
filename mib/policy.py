@@ -20,6 +20,10 @@ PARTIAL_EMBARGO_WORLDS = {"Wolf-1061c"}
 # needs a boundary constant. Train has a 48-day empty band between the latest
 # stale-denied arrival (2025-12-09) and the earliest fresh one (2026-01-26);
 # any cutoff inside fits "perfectly". Max-margin choice: the band midpoint.
+# vocab.snap repairs future-impossible OCR years (>=2028, one glyph off 2026)
+# but never past ones: a past year entering this comparison may be a misread,
+# yet "fixing" a genuine 2024 would un-stale a real denial — and a wrong DENIED
+# costs 0 while a false APPROVED costs -4. The stale rule sees past years as-is.
 STALE_CUTOFF = date(2026, 1, 2)
 
 

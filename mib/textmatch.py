@@ -14,6 +14,12 @@ def normalize(value):
     return " ".join(str(value or "").strip().split()).casefold()
 
 
+def plausible_misread(a, b):
+    """Same-length ids differing in at most one character: b could be an OCR
+    misread of a (single-glyph substitution, the scanner's dominant error)."""
+    return len(a) == len(b) and sum(x != y for x, y in zip(a, b)) <= 1
+
+
 def present(value, text):
     """Is `value` in `text`, on token boundaries? None if there is nothing to find.
 

@@ -3,7 +3,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 
-from . import parse, vocab
+from . import parse, textmatch, vocab
 from .parse import DOC_ADJUDICATOR, DOC_BIOMETRIC, DOC_INTAKE, DOC_REGISTRY, DOC_SPONSOR
 from .records import Candidate
 
@@ -85,7 +85,13 @@ def assemble(pages, ocr_lines, fallback_case_id):
                 lines, source = (ocr_lines[pt.page_no], SRC_OCR)
         ids = set(parse.page_case_ids(lines))
         if ids and case_id not in ids:
-            continue  # decoy page for a different applicant
+            # An OCR page whose ID is one glyph off the active case is the
+            # applicant's own page misread, not a decoy. Text-layer pages get no
+            # such tolerance: text layers don't misread, so a near-miss ID there
+            # is a genuine decoy (sequential case ids make those cheap to plant).
+            if source != SRC_OCR or \
+                    not any(textmatch.plausible_misread(case_id, i) for i in ids):
+                continue  # decoy page for a different applicant
         kv = parse.parse_kv(lines)
         # Prose fills only what the labelled lines did not: an explicit
         # `Purpose: research` on the same document outranks a sentence.

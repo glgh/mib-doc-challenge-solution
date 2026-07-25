@@ -126,12 +126,20 @@ pattern* says which signal to build and which document carries it. Status: ✅ v
   evidence). Barcode/QR payloads, decoy "answer key" fields, "sample denial" watermarks — detect
   and exclude.
 - **Identity fraud**: registry name ≠ intake → `identity_conflict` 🔶 (canonicalize before
-  comparing); multi-applicant decoy pages ✅ (filter by active-case-id majority); B-13 species/
-  biometric-confidence as identity signals ⬜.
+  comparing); multi-applicant decoy pages ✅ (filter by active-case-id majority; an *OCR* page whose
+  only ID is one glyph off the active case is the applicant's own page misread, not a decoy — 14 of
+  the filter's 17 train drops were own pages, incl. an adjudicator note. Text-layer pages get no
+  tolerance: text layers don't misread, and sequential case ids make adjacent-case decoys cheap to
+  plant); B-13 species/biometric-confidence as identity signals ⬜.
 - **Sponsor fraud**: revoked sponsor ✅ (§2); attestation SPN/name ≠ intake → `sponsor_mismatch`
   🔶 (require text-layer evidence one side + edit distance ≥2, never OCR-vs-OCR — OCR debris
   fabricates it); missing sponsor non-DIP ✅ → treat as *our* extraction-quality signal (review,
-  not deny).
+  not deny). **Revoked-neighbor trap** ✅: the corpus plants ≥12 innocent sponsor ids one digit from
+  a revoked id (`SPN-4044/4007/3040/6040` ring `SPN-4040`; `SPN-2716/2708` ring `SPN-2718`; …),
+  including a true APPROVED (MIB-000854, `SPN-3090`). Repair must never move an id *toward* the
+  revoked list (the `vocab.snap` fabrication guard); the one real misread it costs (MIB-000130,
+  `SPN-4040` read `SPN-4080`, −6 raw) is the premium on ~−96 raw of wrong denials. Single-read
+  sponsor misreads have no in-packet anchor — recoverable only by better OCR (variant merge).
 - **Payment fraud**: `unpaid` w/o waiver ✅ deny; `unknown` ✅ review; waiver abuse ✅ (tighten — no
   approve on waiver code alone).
 - **Risk concealment** (the deepest pattern — the packet looks clean because the incriminating doc
@@ -144,6 +152,13 @@ pattern* says which signal to build and which document carries it. Status: ✅ v
 Meta-signals (about our own evidence quality, not the applicant): extraction completeness per
 packet, evidence tier of each value (approvals should require intake-grade evidence or better),
 cross-document conflict count. All partially used; formalizing them is open work.
+
+**OCR digit confusions are systematic, not uniform**: the scanner's dominant year error is 6→8
+(23 of 25 out-of-range arrival years read `2028` for a true `2026`; the same confusion appears in
+months, `06`→`08`). Repair is safe only where a prior makes one reading impossible — years ≥2028
+are future-impossible under ≤180-day visas, so they snap to 2026; past years (2020, 2024) are
+always plausible stale dates and must be taken as read, because un-staling a genuine old date
+trades a 0-cost wrong denial for a −4 false approval.
 
 ## 4. Scan damage is geometric, not optical
 
