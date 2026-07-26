@@ -162,6 +162,23 @@ Meta-signals (about our own evidence quality, not the applicant): extraction com
 packet, evidence tier of each value (approvals should require intake-grade evidence or better),
 cross-document conflict count. All partially used; formalizing them is open work.
 
+**`illegible_biometrics` has two truth modes** (label mining 2026-07-25, dev split, 162 truth
+cases). Mode A — *printed* (94/162): the B-13 itself states `Observed flags: illegible_biometrics`
+as a field value (the in-universe scanner failed, the slip is fine). Whenever that token is legible
+in **any** read — any variant, any page, regardless of detected doc type — truth carries the flag
+94/94: **P=1.00, zero false positives even with the doc-type gate removed**. Current emission
+catches 91 (0 FPs); the 3 misses (MIB-000656/771/979) print the token on pages whose OCR-mangled
+header defeats `detect_doc_type`, so the FLAG_DOC_TYPES gate skips them. Mode B — *condition-
+derived* (68/162): nothing prints the token; the truth flag marks that the packet's B-13 was
+generated illegible or omitted. Looking the other way kills condition-based emission: P(truth
+flags | B-13 seen but risk line unreadable) = 0.38 (n=29); P(| no B-13 found + ≥1 dead scan page)
+= 0.30 (n=113); P(| no B-13, scans exist, none dead) = 0.25 (n=118); P(| all-text packet, no
+B-13) = 0.05 (n=111). The generator knows whether the spec included a B-13 it then destroyed vs
+never included one while destroying some other page — from the PDF those are the same picture, so
+the flag is emittable only from printed evidence (which is also what organizer ruling §1 demands).
+`biometric_confidence` does not discriminate (65–77%, flagged and unflagged interleaved). Open
+sliver: mode-B slips that are human-legible in pixels would convert to mode A under better OCR.
+
 **OCR digit confusions are systematic, not uniform**: the scanner's dominant year error is 6→8
 (23 of 25 out-of-range arrival years read `2028` for a true `2026`; the same confusion appears in
 months, `06`→`08`). Repair is safe only where a prior makes one reading impossible — years ≥2028
