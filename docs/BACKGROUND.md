@@ -176,8 +176,17 @@ flags | B-13 seen but risk line unreadable) = 0.38 (n=29); P(| no B-13 found + �
 B-13) = 0.05 (n=111). The generator knows whether the spec included a B-13 it then destroyed vs
 never included one while destroying some other page — from the PDF those are the same picture, so
 the flag is emittable only from printed evidence (which is also what organizer ruling §1 demands).
-`biometric_confidence` does not discriminate (65–77%, flagged and unflagged interleaved). Open
-sliver: mode-B slips that are human-legible in pixels would convert to mode A under better OCR.
+`biometric_confidence` does not discriminate (65–77%, flagged and unflagged interleaved).
+**Mode B subdivides (page renders, user-verified 2026-07-25).** Of the 11 mode-B cases where a
+B-13 *was* detected but its risk line read as debris: ≥5 (252, 565, 577, 595, 990) visibly print
+`Observed flags: illegible_biometrics` — human-legible on the page, OCR-mangled past
+`match_flag_token`'s reach (`Bagitie bematics`, `Mogible_ biometrics`, `Bagte——I*`) — these are
+mode A with worse OCR, not condition-derived at all; 2 (506, 747) print a damage marker instead
+(`[RISK PANEL MISSING]`, `[RISK PANEL = NG]`) — OCR read them perfectly, there is simply no flag
+token on the paper; the rest are truncated/debris. So the fix family is "flag line present,
+matcher/gate too strict": the 3 doc-type-gate misses plus label-anchored value recovery (the
+`Observed flags:` *label* survives; the value needs a looser, guarded snap). The 57 mode-B cases
+with no detected B-13 (dead pages) remain unassessed page-by-page.
 
 **OCR digit confusions are systematic, not uniform**: the scanner's dominant year error is 6→8
 (23 of 25 out-of-range arrival years read `2028` for a true `2026`; the same confusion appears in
