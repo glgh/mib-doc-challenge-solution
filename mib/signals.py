@@ -197,6 +197,19 @@ def identity_conflict(packet, values):
     if source == SRC_OCR and difflib.SequenceMatcher(
             None, norm_name(reg_name), norm_name(name)).ratio() >= 0.75:
         return False
+    # A losing variant that read the registry name within tolerance is evidence
+    # of AGREEMENT — the same principle as has_flag_evidence's losing-variant
+    # clause. MIB-000523: the conf-selected primary read `Inout Solkx` (a worse
+    # mangle of `Ixoul Solix`) and the conflict re-fired against the very case
+    # row 33 fixed; the sibling variants still read the name within tolerance.
+    # Variant readings are OCR by construction, so this never loosens
+    # text-layer exact-match semantics.
+    for dtype, kv in packet.variant_docs:
+        if dtype == parse.DOC_REGISTRY:
+            alt = kv.get("registry_name")
+            if alt and difflib.SequenceMatcher(
+                    None, norm_name(alt), norm_name(name)).ratio() >= 0.75:
+                return False
     return True
 
 

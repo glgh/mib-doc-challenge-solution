@@ -71,19 +71,19 @@ def ocr_passes():
 
 
 SELECT_METRICS = ("ev", "conf")
-DEFAULT_SELECT = "ev"
+DEFAULT_SELECT = "conf"
 
 
 def select_metric():
     """Which metric `records.best_read` ranks readings by.
 
-    `ev` (default): evidence_score, the hand-built shape score.
-    `conf`: guarded excess confidence mass from the engine's own per-word conf
-    (records.conf_excess_mass) — the Track 1 successor, opt-in via
-    MIB_SELECT=conf until the A/B graduates it. Reads without conf (pre-conf
-    caches) always fall back to `quality`, so old caches replay unchanged
-    under either setting. Stamped: selection changes which reading is primary,
-    so it is part of an artifact's identity.
+    `conf` (default since row 42's A/B, user-approved): guarded excess
+    confidence mass from the engine's own per-word conf
+    (records.conf_excess_mass). `ev` (evidence_score, the hand-built shape
+    score) remains selectable via MIB_SELECT=ev for A/Bs until Phase E deletes
+    it. Reads without conf (pre-conf caches) always fall back to `quality`, so
+    old caches replay unchanged under either setting. Stamped: selection
+    changes which reading is primary, so it is part of an artifact's identity.
     """
     mode = os.environ.get("MIB_SELECT", DEFAULT_SELECT).strip().lower()
     return mode if mode in SELECT_METRICS else DEFAULT_SELECT

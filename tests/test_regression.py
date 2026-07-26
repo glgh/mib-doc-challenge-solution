@@ -27,6 +27,29 @@ def test_policy_constants_have_a_single_source():
         "signals imports policy again — the embargo rule has a second home"
 
 
+def test_stale_arrival_outranks_an_unknown_fee():
+    """The cascade's one positive-evidence-vs-ignorance inversion (row 39):
+    fee_unknown used to fire before stale_arrival, so a packet with a real
+    stale arrival whose fee read as unknown went to NEEDS_REVIEW. The cell
+    "fee genuinely unknown AND stale AND non-DIP" is empty across all 1,000
+    train labels — every case that lands there carries a polluted fee read,
+    not a real unknown — and 7 of the 8 such train cases are truth DENIED
+    (MIB-000031 among them). Denial requires positive evidence; a stale date
+    IS positive evidence, and unreadable fees must not launder it away."""
+    from mib import policy
+
+    values = {"arrival_date": "2025-11-01", "visa_class": "XW-2",
+              "fee_status": "unknown"}
+    sig = {"flags": set(), "finding": None, "has_biometric": True,
+           "has_flag_evidence": True, "waiver_code": "", "emit_flags": set()}
+    decision, branch = policy.adjudicate(values, sig)
+    assert (decision, branch) == ("DENIED", "stale_arrival")
+    # An unknown visa must still disarm the denial (positive-evidence guard).
+    values["visa_class"] = None
+    decision, branch = policy.adjudicate(values, sig)
+    assert decision == "NEEDS_REVIEW"
+
+
 def test_bands_rung_deskews_before_deshredding(monkeypatch):
     """The `bands` restoration rung must deshred the *deskewed* page, not the raw
     one: `imaging.realign_bands` keys off the printed border's left edge per row,
@@ -347,6 +370,28 @@ def test_whole_value_flag_rescue_needs_quorum_below_single_bar():
     pkt.docs = [(parse.DOC_OTHER, SRC_OCR, one)]
     pkt.variant_docs = [(parse.DOC_OTHER, two)]
     assert signals.observed_flags(pkt) == {"illegible_biometrics"}
+
+
+def test_identity_conflict_cleared_by_agreeing_variant_read():
+    """MIB-000523 (again): under conf selection the primary registry read
+    degraded to `Inout Solkx` and identity_conflict re-fired against the very
+    case row 33 fixed. A losing variant that read the name within OCR tolerance
+    is evidence of agreement — same principle as has_flag_evidence's
+    losing-variant clause. A genuinely different name in every read must still
+    conflict."""
+    from mib import signals
+    from mib.packet import SRC_OCR, Packet
+
+    pkt = Packet(case_id="MIB-000523")
+    pkt.docs = [(parse.DOC_REGISTRY, SRC_OCR,
+                 {"registry_name": "Inout Solkx", "_raw": []})]
+    pkt.variant_docs = [(parse.DOC_REGISTRY,
+                         {"registry_name": "Ixoul Solx", "_raw": []})]
+    assert not signals.identity_conflict(pkt, {"applicant_name": "Ixoul Solix"})
+
+    pkt.variant_docs = [(parse.DOC_REGISTRY,
+                         {"registry_name": "Barnaby Wilkes", "_raw": []})]
+    assert signals.identity_conflict(pkt, {"applicant_name": "Ixoul Solix"})
 
 
 def test_registry_eroded_labels_recover_values():

@@ -259,7 +259,17 @@ def _variant_vote(field_name, kvs):
     """Plurality over valid, normalized values for one field across OCR readings.
 
     Ties break first-seen, which is generation order: cheapest variant first
-    within a page, pages in document order — the same bias `best_read` has.
+    within a page, pages in document order — the same bias `best_read` had.
+    A page-level conf weight was tried and rejected (row 43): whole-read conf
+    mass is uncorrelated with the correctness of one field's line, and the
+    weighted ties went 5 better / 8 worse — field ties need per-LINE conf,
+    which waits on the tsv-line-text capture (schema 4). A steer-ties-away-
+    from-revoked-sponsors guard was tried in the same batch and also reverted:
+    MIB-000130's `SPN-4040` is genuinely revoked (truth DENIED) and the guard
+    handed the case to its misread neighbor `SPN-4080` — on a tie, the revoked
+    reading is the deny-safe direction, not the hazard (the hazard is *repair*
+    translating digits toward the list, guarded in vocab.snap).
+
     Returns (representative raw value, agreement count) or (None, 0).
     """
     counts, rep = Counter(), {}
