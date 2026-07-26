@@ -148,11 +148,11 @@ doc_type `VOTE_DOC` (99).
 
 | signal | source |
 | --- | --- |
-| `flags` | `observed_flags` (B-13 + registry status line, scanned across the primary reading **and every losing variant** as a union — row 30 measured zero hallucinations), plus derived `sponsor_mismatch` and `identity_conflict` (the `planetary_embargo` inference was deleted in `068e99e` — it shadowed policy's `embargo_world` branch, and emitted flags are observed-only) |
+| `flags` | `observed_flags`: **every** doc and every losing OCR variant is scanned for flag lines as a union (the doc-type gate was deleted in row 35 — the per-line legend/negation/≤3-flags guards are the safety mechanism, and every flag the widened scan added was true). Token tier: `vocab.match_flag_token` per token. Value tier (row 36, OCR readings only): a loosely-labelled `Observed flags:` value the token matcher can't resolve is scored whole by `vocab.match_flag_value` (confusion-weighted), accepted single-read at score ≥0.55/margin ≥0.15, or in the 0.44–0.55 band only when ≥2 independent readings of the page argmax the same flag (bars mined from the 563-value safety table, BACKGROUND §3). Plus derived `sponsor_mismatch` and `identity_conflict` (the `planetary_embargo` inference was deleted in `068e99e` — it shadowed policy's `embargo_world` branch, and emitted flags are observed-only) |
 | `finding` | `Finding: APPROVED\|DENIED\|NEEDS_REVIEW` on a Manual Adjudicator Note (highest trust) |
 | `waiver_code` | first non-empty waiver code on any doc |
 | `has_biometric` | a B-13 was detected |
-| `has_flag_evidence` | the B-13's flag line was actually *read* (`observed_flags` present) in any reading of the slip — losing variants count — not merely that a slip exists |
+| `has_flag_evidence` | the risk line was actually *read* — a flag (positive clause shares `observed_flags`'s widened scan, so the census can never contradict an emitted flag) or an explicit `flags: none/clear` (negative clause stays restricted to biometric-typed readings — widening it toward `clean_approve` is the CFA-risk direction and unmeasured) — not merely that a slip exists |
 
 ## S5 — adjudication (`mib/runner.py` seam)
 
@@ -262,8 +262,3 @@ is caught and logged, keeping the provisional rows.
 
 The per-case OCR wall-clock bound (120 s) is a constant (`runner.CASE_OCR_BUDGET_S`), not a knob;
 experiments override it per-call via `read_case(pdf, budget_s=...)`.
-
-## Known gaps
-
-- **S2 is not pure w.r.t. the parser** — a `KEY_MAP` edit can move which OCR variant wins (see the
-  S2 hazard note).
