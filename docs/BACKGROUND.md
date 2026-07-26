@@ -75,6 +75,10 @@ In the *labels*, full-embargo worlds usually co-occur with the `planetary_embarg
 
 **Rule-cascade ceiling on *perfect* fields is ~84.6%.** The residual (incl. 9 would-be false approvals) depends on document-visible evidence absent from the labels CSV: stamps, signed notes, waiver/diplomatic-note visibility, legibility, evidence conflicts. ~85% is the hard ceiling for any system that only extracts the 12 schema fields; going higher needs document-level signals.
 
+### The name universe is a closed 12×12 grid (`vocab.NAME_PARTS`, row 52)
+
+The generator composes every applicant/registry name as prefix+suffix: the pool mined from all 1,000 truth names is EXACTLY the cross-product of 12 prefixes × 12 suffixes (144 parts, `grid == pool` verified 2026-07-26) — closed by construction, the same enumeration class as the 13 worlds / 12 species / 10 purposes. Downstream evidence: an emitted name token outside the pool has **P(correct) = 0/61** on dev while in-pool tokens run 0.959, which makes the out-of-pool rate a label-free error oracle for any corpus (validation, the private set) and makes snapping out-of-pool tokens a free roll. Snap bars: 0.72 similarity / 0.08 runner-up margin (dev sweep plateau 0.70–0.72; the margin is load-bearing — 104 pool pairs sit within 0.75 of each other, and an in-pool token is never substituted: a real `Luix` must not become `Lurix`). One known cost: pre-vote snapping consolidates a decoy page's fragmented reads into a voting bloc (the row-47 cross-page asymmetry, one seam earlier — 1 case vs 19 recoveries).
+
 ## 3. Fraud-signal taxonomy
 
 The corpus simulates an intake desk under attack; framing each denial/review cause as a *fraud pattern* says which signal to build and which document carries it. Status: ✅ validated · 🔶 partial · ⬜ hypothesis.

@@ -13,7 +13,7 @@ A field-indexed reference: for each schema field, *where it lives, its shape, it
 | --- | --: | --- | --- | --- |
 | `risk_flags` | 8 | pipe-list or `none` | B-13 slip, registry, adjudicator | unreadable ≠ `none`; legend/negation; emit observed-only |
 | `species_code` | 6 | closed enum (12) | intake, B-13, registry | closed universe — drop unrepairable, don't pass through |
-| `applicant_name` | 5 | free (Title Case) | intake, registry, attestation prose | struck (100% paired w/ correction); `[NAME CUT OUT]`; misreads |
+| `applicant_name` | 5 | 12×12 part grid (144, closed) | intake, registry, attestation prose | struck (100% paired w/ correction); `[NAME CUT OUT]`; confident stroke-merges (`rn`→`m`) |
 | `home_world` | 5 | closed enum (13) | intake, registry | embargo worlds; OCR (`Woll-1081c`→`Wolf-1061c`) |
 | `visa_class` | 5 | enum (5) | intake, attestation prose, correction | struck (100% paired); unknown must not arm non-DIP denials |
 | `sponsor_id` | 5 | `^SPN-[0-9]{4}$` | intake, attestation prose, correction, registry | struck (100% paired); revoked-neighbor ring; never snap toward revoked |
@@ -47,11 +47,12 @@ A field-indexed reference: for each schema field, *where it lives, its shape, it
 
 ## `applicant_name` — 5 pts
 
-- **Shape:** free string, Title-Case, usually two tokens. Not a closed vocab.
+- **Shape:** NOT free after all — the generator composes every name as prefix+suffix from a **12×12 grid** (144 parts, `vocab.NAME_PARTS`; grid == the pool mined from all 1,000 truth names, verified 2026-07-26). Always 2–3 alphabetic tokens, every token Capitalized (979/979 census — the shape gate for separator-less label claims, row 50).
 - **Sources ↓precedence:** intake, registry (`registry_name`), B-13, sponsor attestation prose (`attests that <Name> is expected on Earth`).
-- **Decoys & traps:** **struck names are 100% paired** (27/27) with a `Manual correction` that gives the truth (row 34); damage markers `[NAME CUT OUT]`/`[MAME CUT OUT]` are not values; registry≠intake → `identity_conflict`; single-glyph misreads (`Miravoss`/`Mirayoss`).
-- **Handling:** per-field preference (clean text-layer beats OCR — row 15b); `norm_name` for all comparisons; `identity_conflict` tolerates an OCR-sourced registry name at similarity ≥0.75 (row 33).
-- **See:** BACKGROUND §3 (identity) · experiments rows 15b, 33, 34 · `mib/packet.py`, `mib/signals.py`
+- **Decoys & traps:** **struck names are 100% paired** (27/27) with a `Manual correction` that gives the truth (row 34); damage markers `[NAME CUT OUT]`/`[MAME CUT OUT]` are not values; registry≠intake → `identity_conflict`; stroke-merge misreads read MORE confidently than truth (`rn`→`m`, token-final `ri`→`n` — engine conf must not arbitrate alone, rows 45/49 ablation 7/0); when intake and sponsor disagree on the name, the **sponsor letter is right 28:5 (text) / 12:4 (OCR)** — leaked decoy intake pages carry other applicants' names (row 47 census; no preference rule ships because 14/16 conflicts already resolve).
+- **Handling:** per-field preference (clean text-layer beats OCR — row 15b); vote keys merge debris + stroke collapses instead of tying, per-line conf breaks true ties (rows 45/49); **pool snap** (row 52): out-of-pool tokens are misreads with P(correct)=0/61 on dev, so they snap to their unique best pool part at 0.72/margin 0.08 (in-pool tokens NEVER substituted — `Luix`≠`Lurix`; 104 pool pairs sit within 0.75); capitalization normalized; `identity_conflict` tolerates an OCR-sourced registry name at similarity ≥0.75 (row 33) and a losing variant's registry agreement (row 43).
+- **Label-free error oracle:** out-of-pool rate doubles as a corpus self-diagnostic — applied to old-rev validation output it estimated 82% name accuracy with no labels (row 52).
+- **See:** BACKGROUND §3 (identity) · experiments rows 15b, 33, 34, 45, 47, 49, 50, 52 · `mib/packet.py`, `mib/signals.py`, `mib/vocab.py`
 
 ## `home_world` — 5 pts
 
@@ -93,14 +94,14 @@ A field-indexed reference: for each schema field, *where it lives, its shape, it
 - **Shape:** enum {`paid`, `waived`, `unpaid`, `unknown`}.
 - **Sources ↓precedence:** `Manual correction` (rank 0), adjudicator note, then the **fee receipt** (low trust — and the most-decoyed source in the corpus).
 - **Decoys & traps:** **red-strikethrough receipts** — a struck value ⟺ printed ≠ truth (0 counterexamples/452), and fee is the field where the strike is **only 18%-paired** with a correction (5/28), so a struck value is genuinely unrecoverable → void to `unknown` → NEEDS_REVIEW (row 34, fixed MIB-000514/000614 false denials). **Waiver-code presence alone is not approval** (v0's `DIP-WAIVER` shortcut caused 18 CFAs). `unpaid` is one edit from `paid` — read verbatim, never snap. Visible in ~0% of cases (3.6% with OCR) — mostly unrecoverable.
-- **Handling:** `parse_kv` → `_void_struck` → policy `fee_unpaid` (deny) / `fee_unknown` (review) / `waived_non_dip` (review unless visible hardship/DIP waiver).
-- **Mining:** `fee_unknown` holds 7.11 class pts with **no signal** — all model families lose to the rules baseline and add CFAs; the fee is genuinely not in the document.
-- **Open:** scanned-receipt **red-pixel** strikes (OCR is grayscale) are unmapped; `waived_non_dip` may be too coarse where a visible `DIP-WAIVER`+`$0.00`+correction justifies approval (MIB-000328).
+- **Handling:** `parse_kv` (incl. separator-less `Fee Status waved` lines, row 50 — the `[:.;]` glyph dies first; 7 fee statuses recovered) → `_void_struck` → policy `fee_unpaid` (deny) / `fee_unknown` (review) / `waived_non_dip` (review unless visible hardship/DIP waiver). `snap` repairs toward the enum at 0.7 but `unpaid` must be read verbatim (one edit from `paid`, deny direction).
+- **Mining:** `fee_unknown` holds the largest conservative-review mass and **no inference survives its census** (TODO 5.2a, 2026-07-26): receipt-presence⇒paid is 59% pure with truth-`unpaid` inside (CFA direction); waiver-code-seen is dominated by truth-unknown; printed `[FEE STATUS OBSCURED]` markers are honest unknowns. The residue is dead evidence pages — and the 2026-07-26 gallery showed many "dead" receipt pages are actually faint-but-legible with the status already extracted (the GOOD_ENOUGH label-count artifact); the truly silent cases have no fee anywhere in the ensemble. All model families lose to the rules baseline and add CFAs.
+- **Open:** scanned-receipt **red-pixel** strikes (OCR is grayscale) are unmapped; `waived_non_dip` may be too coarse where a visible `DIP-WAIVER`+`$0.00`+correction justifies approval (MIB-000328) — census recorded in TODO 5.2a for the policy seam. **5.6 drift flag (row 52 mining): the fee-unknown∧stale∧non-DIP cell is 6.6× denser on old-rev validation output (7.52% vs dev 1.14%) — re-check on a current-rev val run before submission.**
 - **See:** BACKGROUND §2.3, §3 (payment, strikethrough) · experiments row 34 · `mib/packet.py`, `mib/policy.py`
 
 ## `declared_purpose` — 3 pts (lowest extraction weight)
 
-- **Shape:** free string, ~**10** purposes (semi-closed but treated as free text). E.g. `medical consult`, `field repair`, `diplomatic`, `reactor maintenance`.
+- **Shape:** exactly **10** purposes across all 1,000 train labels (`vocab.PURPOSES` is the enumeration — saturated like worlds/species); snap still passes unmatched text through, but separator-less claims and corroboration use the strict closed-set form (`vocab.repairable_purpose`, row 50). A colon inside a candidate value means the parse mis-keyed the line — 0/12,000 truth values contain one (row 47/49 census).
 - **Sources ↓precedence:** intake, `Purpose:` alias, sponsor attestation prose (`expected on Earth for <purpose>`).
 - **Decoys & traps:** the attestation states it in a **sentence that wraps mid-phrase** (`… for reactor` / `maintenance.`) — matching must join lines first; an explicit `Purpose:` outranks prose.
 - **Handling:** `parse_prose` (anchored on attestation wording so a decoy can't match); **vocab passthrough is KEPT** here (free text, unlike the closed world/species enums).
