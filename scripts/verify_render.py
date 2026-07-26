@@ -50,33 +50,23 @@ def main(cache_path, n_scans=4, n_random=2):
     mid = len(by_ocr) // 2
     sample = by_ocr[:n_scans] + by_ocr[mid:mid + n_random]
 
-    # Pre-ensemble caches lack the per-page `reads` list; pre-strike caches lack
-    # `struck`; pre-conf caches lack `conf` inside each read. Against those the
-    # comparison drops the missing key rather than false-positiving on
-    # None-vs-value (still a real S1/S2 check on the rest).
-    with_reads = all("reads" in p for rec in sample for p in rec["pages"])
-    with_struck = all("struck" in p for rec in sample for p in rec["pages"])
-    with_conf = with_reads and all(
-        "conf" in r for rec in sample for p in rec["pages"] for r in (p["reads"] or []))
-    # Conf entries widened over time (schema 3: 3-tuples; schema 4: +line text).
-    # Compare at the cache's arity so a schema-3 cache still verifies the numeric
-    # part instead of false-positiving on the added text field.
-    conf_arity = min((len(t) for rec in sample for p in rec["pages"]
-                      for r in (p["reads"] or []) for t in (r.get("conf") or [])),
-                     default=None) if with_conf else None
+    # Current cache format only (reads + struck + schema-4 conf). The
+    # progressive tolerate-missing-keys scaffolding for pre-ensemble /
+    # pre-strike / pre-conf caches is gone (user call, 2026-07-26: old caches
+    # are not worth carrying — regenerate instead of accommodating).
+    if any("reads" not in p or "struck" not in p
+           for rec in sample for p in rec["pages"]):
+        raise SystemExit("cache predates the ensemble/struck format; "
+                         "regenerate it with scripts/dump_text.py.")
 
     def norm_reads(reads):
-        if reads is None:
-            return reads
-        if not with_conf:
-            return [{k: v for k, v in r.items() if k != "conf"} for r in reads]
+        # JSON round-trips conf tuples as lists; live reads carry tuples.
         return [{**r, "conf": None if r.get("conf") is None else
-                 [tuple(t[:conf_arity]) for t in r["conf"]]} for r in reads]
+                 [tuple(t) for t in r["conf"]]} for r in reads]
 
     def page_key(p):
-        base = (p["visible_lines"], p["hidden_lines"], p["ocr_lines"], p["image_count"])
-        base += ((norm_reads(p.get("reads")),) if with_reads else ())
-        return base + ((p.get("struck"),) if with_struck else ())
+        return (p["visible_lines"], p["hidden_lines"], p["ocr_lines"],
+                p["image_count"], norm_reads(p["reads"]), p["struck"])
 
     bad = 0
     for rec in sample:

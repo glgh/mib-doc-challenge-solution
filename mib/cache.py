@@ -50,10 +50,12 @@ def to_case(page_dicts):
 
     The cache stores the whole OCR ensemble per page (`reads`, each with the
     evidence score S2 computed), so replay-time selection is a pure function of
-    the stored readings and matches the live run exactly. Old-format caches
-    carry only the winner (`ocr_lines`); those rehydrate as a one-read ensemble,
-    over which every selection strategy is the identity — old caches and
-    fixtures replay unchanged.
+    the stored readings and matches the live run exactly. The `ocr_lines`-only
+    branch below is the **fixture format**, not legacy-cache support
+    (tests/fixtures/characterization.json stores one read per page to stay
+    small and stable; it rehydrates as a one-read ensemble, over which every
+    selection strategy is the identity). Old on-disk caches are regenerated,
+    not accommodated (user call, 2026-07-26).
 
     `is_scan_only` is not restored even though it is written for readability: it
     is derived, so recomputing keeps a cache from pinning a stale definition of
