@@ -70,10 +70,11 @@ class Read:
     strategy is attributable.
 
     `conf` is the engine's own per-line self-assessment from the same
-    recognition pass: [(mean word conf, n_words, y_frac)] per tsv line, or None
-    for reads rehydrated from a pre-conf cache. It is a parallel measurement of
-    the page, NOT aligned 1:1 with `lines` (the two tesseract renderers group
-    lines differently) — page-level metrics need no alignment.
+    recognition pass: [(mean word conf, n_words, y_frac, text)] per tsv line
+    (schema 4; schema-3 caches rehydrate 3-tuples without text, pre-conf caches
+    None). It is a parallel measurement of the page, NOT aligned 1:1 with
+    `lines` (the two tesseract renderers group lines differently) — page-level
+    metrics need no alignment, per-line consumers match on `text`.
     """
     page_no: int = 0
     lines: list = field(default_factory=list)
@@ -105,7 +106,8 @@ def conf_excess_mass(read):
     if read.conf is None:
         return None
     total = 0.0
-    for line_conf, n_words, y_frac in read.conf:
+    for entry in read.conf:                 # 3-tuple (schema 3) or 4-tuple (schema 4)
+        line_conf, n_words, y_frac = entry[0], entry[1], entry[2]
         if y_frac >= FOOTER_Y:
             continue
         total += max(0.0, line_conf - CONF_BASELINE) * n_words

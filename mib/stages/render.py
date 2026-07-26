@@ -101,12 +101,16 @@ def _recognize(image_path, psm=PRIMARY_PSM, dpi=None):
 
 
 def _parse_tsv(tsv_path):
-    """Tesseract tsv -> [(mean word conf, n_words, y_frac)] per line, or None.
+    """Tesseract tsv -> [(mean word conf, n_words, y_frac, text)] per line, or None.
 
     Lines whose cleaned joined text is empty are dropped (pure-punctuation
     debris), matching how the text pass drops blank lines. y_frac is the line's
     top edge as a fraction of image height — the positional page-furniture
     guard keys off it (the printed footer band), so it must survive the seam.
+    `text` (schema 4) is the line's cleaned words: the tsv renderer's own
+    grouping, which is what makes per-line confidence queryable — "how
+    confident was the engine about *this* line" needs the line written next to
+    its number.
     """
     try:
         rows = tsv_path.read_text(errors="replace").splitlines()
@@ -116,9 +120,10 @@ def _parse_tsv(tsv_path):
     out = []
     cur_key, words, confs, y_top = None, [], [], 0
     def flush():
-        if words and clean_ocr_line(" ".join(words)):
+        text = clean_ocr_line(" ".join(words)) if words else ""
+        if text:
             out.append((round(sum(confs) / len(confs), 1), len(confs),
-                        round(y_top / height, 4) if height else 0.0))
+                        round(y_top / height, 4) if height else 0.0, text))
     for row in rows[1:]:
         f = row.split("\t")
         if len(f) < 12:

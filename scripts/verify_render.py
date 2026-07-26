@@ -32,6 +32,12 @@ def main(cache_path, n_scans=4, n_random=2):
         raise SystemExit(
             f"cache was built at restore={stamped!r} but this code only produces "
             f"{config.RESTORE!r}; rebuild it with scripts/dump_text.py before comparing.")
+    # The stored `ocr_lines` is the primary the cache's OWN selection metric
+    # picked, so compare under that metric — otherwise a select-default flip
+    # reads as an S2 diff (it did: 1/6 vs 6/6 on identical reads). Caches
+    # stamped before `select` existed were all written under ev.
+    import os
+    os.environ["MIB_SELECT"] = (meta or {}).get("select") or "ev"
     from mib import runner
 
     print(f"cache:   {config.describe(meta)}")
@@ -52,11 +58,20 @@ def main(cache_path, n_scans=4, n_random=2):
     with_struck = all("struck" in p for rec in sample for p in rec["pages"])
     with_conf = with_reads and all(
         "conf" in r for rec in sample for p in rec["pages"] for r in (p["reads"] or []))
+    # Conf entries widened over time (schema 3: 3-tuples; schema 4: +line text).
+    # Compare at the cache's arity so a schema-3 cache still verifies the numeric
+    # part instead of false-positiving on the added text field.
+    conf_arity = min((len(t) for rec in sample for p in rec["pages"]
+                      for r in (p["reads"] or []) for t in (r.get("conf") or [])),
+                     default=None) if with_conf else None
 
     def norm_reads(reads):
-        if reads is None or with_conf:
+        if reads is None:
             return reads
-        return [{k: v for k, v in r.items() if k != "conf"} for r in reads]
+        if not with_conf:
+            return [{k: v for k, v in r.items() if k != "conf"} for r in reads]
+        return [{**r, "conf": None if r.get("conf") is None else
+                 [tuple(t[:conf_arity]) for t in r["conf"]]} for r in reads]
 
     def page_key(p):
         base = (p["visible_lines"], p["hidden_lines"], p["ocr_lines"], p["image_count"])

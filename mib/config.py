@@ -39,7 +39,11 @@ RESTORE = "bands"
 # does not check SCHEMA).
 # 3: reads carry `conf` — per-line (mean word conf, n_words, y_frac) from the
 # tsv renderer of the same recognition pass. Older caches rehydrate conf=None.
-SCHEMA = 3
+# 4: conf entries gain the line's cleaned TEXT as a 4th element, making
+# per-line confidence queryable (vote ties, per-field preference, consensus).
+# Schema-3 caches rehydrate 3-tuples; consumers index [:3] and must not unpack
+# by arity.
+SCHEMA = 4
 
 # A mismatch here means the two artifacts describe different pipelines and any
 # join across them is meaningless.
