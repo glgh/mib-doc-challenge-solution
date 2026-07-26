@@ -24,6 +24,18 @@ PURPOSES = [
 VISAS = ["XW-1", "XW-2", "DIP-1", "MED-3", "TRANSIT-7"]
 FEES = ["paid", "waived", "unpaid", "unknown"]
 
+# The generator COMPOSES applicant/registry names as prefix+suffix: the 1,000
+# train truth names use exactly the full 12x12 cross-product below (144 name
+# parts, verified grid == mined pool, 2026-07-26) — a closed universe by
+# construction, the same class of mined enumeration as HOME_WORLDS/SPECIES.
+# Out-of-pool tokens in an emitted name are misreads with measured
+# P(correct) = 0/61 on dev; in-pool tokens run 0.959.
+_NAME_PREFIXES = ("ari", "ixo", "lu", "mira", "nex", "ori",
+                  "qor", "sol", "tek", "vee", "xan", "za")
+_NAME_SUFFIXES = ("dane", "ix", "kesh", "mora", "nax", "quell",
+                  "rix", "tari", "ul", "vara", "voss", "zarn")
+NAME_PARTS = frozenset(p + s for p in _NAME_PREFIXES for s in _NAME_SUFFIXES)
+
 # Manual-published + train-inferred (each 11-14 non-DIP occurrences, zero
 # approvals; independently corroborated). Policy inference, not case memorization.
 # Lives here rather than in mib/policy.py because repair needs it — snapping must
@@ -46,6 +58,43 @@ def _closest(value, options, cutoff):
     return match[0] if match else None
 
 
+_NAME_SNAP_BAR = 0.72     # dev sweep plateau 0.70-0.72 (10 recoveries); 0.75 drops to 7
+_NAME_SNAP_MARGIN = 0.08  # unique-best guard: 104 pool pairs sit within 0.75 of
+                          # each other (arimora/orimora...), so runner-up margin is
+                          # what prevents cross-name conflation
+
+
+def _snap_name(value):
+    """Per-token repair of an OCR-read name toward the closed part pool.
+
+    Tokens already in the pool are NEVER touched (they are 95.9% correct on
+    dev; a real `Luix` must not become `Lurix`). An out-of-pool token — 0/61
+    correct on dev, so any change is a free roll — snaps to its unique best
+    pool part at the mined bar/margin, else stays as read.
+    """
+    toks = value.split()
+    if not toks:
+        return value
+    out = []
+    for tok in toks:
+        tl = tok.lower()
+        if tl in NAME_PARTS:
+            out.append(tl.capitalize())
+            continue
+        best_sim, second, best = 0.0, 0.0, None
+        for part in NAME_PARTS:
+            s = _weighted_sim(tl, part)
+            if s > best_sim:
+                best_sim, second, best = s, best_sim, part
+            elif s > second:
+                second = s
+        if best and best_sim >= _NAME_SNAP_BAR and best_sim - second >= _NAME_SNAP_MARGIN:
+            out.append(best.capitalize())
+        else:
+            out.append(tok)
+    return " ".join(out)
+
+
 def repairable_purpose(value):
     """Does the value land in the closed purpose vocabulary at the snap bar?
 
@@ -60,6 +109,10 @@ def snap(field, value):
     v = (value or "").strip()
     if not v:
         return None
+    if field in ("applicant_name", "registry_name"):
+        # Per-token pool snap + capitalization normalization (truth names are
+        # always Capitalized — census; lowercase reads were exact-match misses).
+        return _snap_name(v)
     if field == "visa_class":
         return _closest(v.upper().replace("=", "-"), VISAS, 0.6)
     if field == "fee_status":
