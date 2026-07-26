@@ -560,3 +560,7 @@ token path — several table rows, already emitted via sibling variants, now hav
 independent route. Confidence refit score-neutral (122.86; confidence-only nudges). Regression
 tests: single-read bars incl. text-layer restriction and innocent/none controls; quorum-required
 below the single bar (one 990 mangle alone must not emit).
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 37 | 2026-07-25 | (dirty) | **Native-DPI render floor** (`render._sources`): render zoom raised to the page's largest embedded image's native resolution (cap ~300 DPI) instead of a fixed 202 DPI. Provable no-op on train — corpus-wide measurement: every embedded scan is 1224px (~144 DPI) or a 512px photo box, zero pages above 202 — but a private-set 300-DPI scan would have been silently downsampled. `verify_render` 9/9 identical | 122.86 | — | — | — | 0 | — | keep — robustness guard, zero behavior change on train |

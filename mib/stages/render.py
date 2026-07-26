@@ -49,7 +49,13 @@ from ..records import Read, best_read
 from ..vocab import HOME_WORLDS, SPECIES, clean_ocr_line
 
 MIN_EMBEDDED_WIDTH = 1000
-RENDER_ZOOM = 2.8       # ~200 DPI
+RENDER_ZOOM = 2.8       # ~200 DPI floor
+# Never render BELOW the page's native scan resolution. On train this is a
+# provable no-op (every embedded scan is <=144 DPI: 1224px full pages and 512px
+# photo boxes, measured corpus-wide 2026-07-25), but a private-set packet
+# scanned at 300 DPI would silently lose resolution to a fixed zoom. Capped at
+# ~300 DPI: past that, tesseract gains nothing and render cost grows quadratically.
+MAX_RENDER_ZOOM = 4.2   # ~300 DPI cap
 
 # The evidence score at which a page reads like an intact form. No longer a
 # pipeline gate — S2 reads every variant regardless — but it remains the corpus's
@@ -141,14 +147,21 @@ def _optical_restorations(gray):
 
 def _sources(doc, page, tmp):
     """Page pixels to read, as (name, encoded_bytes, grayscale array): embedded
-    raster first, then a 200-DPI render. The encoded bytes are kept so the
-    unrestored pass reads exactly the original image, not a re-encode of it."""
+    raster first, then a full-page render at >=200 DPI — raised to the native
+    resolution of the page's largest embedded image (MAX_RENDER_ZOOM cap) so a
+    high-DPI scan is never downsampled by the fixed floor. The encoded bytes are
+    kept so the unrestored pass reads exactly the original image, not a
+    re-encode of it."""
     images = page.get_images()
     if images:
         img = doc.extract_image(images[0][0])
         if img["width"] >= MIN_EMBEDDED_WIDTH:
             yield "embedded", img["image"], imaging.to_gray(img["image"])
-    pix = page.get_pixmap(matrix=fitz.Matrix(RENDER_ZOOM, RENDER_ZOOM))
+    # get_images tuples carry (xref, smask, width, ...) — no decode needed.
+    native_px = max((im[2] for im in images), default=0)
+    native_zoom = native_px / max(1.0, page.rect.width)
+    zoom = max(RENDER_ZOOM, min(native_zoom, MAX_RENDER_ZOOM))
+    pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
     path = Path(tmp) / "render.png"
     pix.save(path)
     raw = path.read_bytes()
