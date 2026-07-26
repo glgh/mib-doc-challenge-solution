@@ -109,7 +109,17 @@ def snap(field, value):
         return f"{year}-{m.group(2)}-{m.group(3)}"
     if field == "observed_flags":
         tokens = [t for t in re.split(r"[|,;\s]+", v.lower()) if t]
-        fixed = [f for t in tokens for f in [_closest(t, FLAGS, 0.8)] if f]
+        # One flag matcher everywhere: the confusion-weighted, margin-guarded
+        # token resolver signals._flags_in_line uses — not a parallel difflib
+        # path with its own cutoff. "none" is not a flag (match_flag_token
+        # excludes it), so it keeps a plain closeness test of its own.
+        fixed = []
+        for t in tokens:
+            f = match_flag_token(t)
+            if f:
+                fixed.append(f)
+            elif _closest(t, ["none"], 0.8):
+                fixed.append("none")
         # Unreadable is not the same as clear. This used to fall through to
         # "none", turning scan debris into a positive assertion that no risk flag
         # was observed — MIB-000672's B-13 read `Observed fans: =-*` / `rant`
@@ -177,6 +187,29 @@ def _weighted_sim(a, b):
 
 # Only the risk flags — never "none", which is the absence of one.
 _REAL_FLAGS = [f for f in FLAGS if f != "none"]
+
+
+_VALUE_NORM_RE = re.compile(r"[^a-z0-9 ]+")
+
+
+def match_flag_value(value):
+    """Whole-value flag resolution: (best_flag, score, margin_over_runner_up).
+
+    The value-level counterpart of `match_flag_token`, for `Observed flags:`
+    values OCR shattered past any single token's reach (`Bagitie bematics`,
+    `Beghie_ ju. ics`). Same confusion-weighted metric; normalization strips to
+    lowercase alphanumerics+spaces (the geometry table in BACKGROUND §3 is
+    computed exactly this way — keep them in sync). Returns scores, not a
+    verdict: the emission bars live with the caller (mib.signals), because
+    single-read and cross-variant-consensus acceptance use different ones.
+    """
+    v = _VALUE_NORM_RE.sub("", (value or "").lower()).strip()
+    if len(v) < 4:
+        return None, 0.0, 0.0
+    scored = sorted(((_weighted_sim(v, f.replace("_", " ")), f) for f in _REAL_FLAGS),
+                    reverse=True)
+    (best_s, best_f), (second_s, _) = scored[0], scored[1]
+    return best_f, best_s, best_s - second_s
 
 
 def match_flag_token(token, cutoff=0.7, margin=0.15):

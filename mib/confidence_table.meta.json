@@ -4,21 +4,22 @@
     0.05,
     0.95
   ],
-  "created": "2026-07-25T14:58:05-07:00",
+  "created": "2026-07-25T19:57:39-07:00",
   "early_stop": false,
-  "fitted_on": "output/replay_keystone",
+  "fitted_on": "output/replay_flagvalue",
   "fitted_on_meta": {
     "artifact": "eval",
-    "created": "2026-07-25T14:57:14-07:00",
+    "created": "2026-07-25T19:21:20-07:00",
     "early_stop": false,
-    "git_dirty": false,
-    "git_rev": "4afeb58",
+    "git_dirty": true,
+    "git_rev": "58ca90b",
     "n_records": 1000,
     "ocr_optical": false,
     "ocr_passes": "psm11",
-    "replayed_from": "output/cache/train_bands_reads.jsonl",
+    "replayed_from": "output/cache/train_bands.jsonl",
     "replayed_from_meta": {
       "artifact": "page_text",
+      "backfilled": "struck",
       "created": "2026-07-25T14:36:21-07:00",
       "early_stop": false,
       "git_dirty": false,
@@ -28,18 +29,18 @@
       "ocr_optical": false,
       "ocr_passes": "psm11",
       "restore": "bands",
-      "schema": 1
+      "schema": 2
     },
     "restore": "bands",
-    "schema": 1
+    "schema": 2
   },
   "git_dirty": true,
-  "git_rev": "4afeb58",
+  "git_rev": "c9090d0",
   "n_branches": 16,
   "ocr_optical": false,
   "ocr_passes": "psm11",
   "restore": "bands",
-  "schema": 1,
+  "schema": 2,
   "shrink_k": 10,
   "split": "dev"
 }

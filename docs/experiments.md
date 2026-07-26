@@ -541,3 +541,22 @@ b13_census 0.285→0.279, …), dev total unchanged at reported precision. Two n
 from the mined lines (656/771/979 verbatim reads on DOC_OTHER pages; 747/506 damage-marker
 controls on both page types).
 
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 36 | 2026-07-25 | (dirty) | **Whole-value flag rescue, one weighted matcher** (`vocab.match_flag_value` + `signals.observed_flags` value tier; `snap("observed_flags")` refactored onto `match_flag_token`, killing the parallel per-token difflib@0.8 path): a labelled `Observed flags:` value the token matcher can't resolve is scored whole (confusion-weighted, alnum-normalized) and accepted single-read at ≥0.55/margin ≥0.15 or by ≥2-reading cross-variant quorum at ≥0.44/≥0.10. OCR readings only — text layers keep exact semantics | **122.86** | 63.93 | 43.14 | 15.78 | 0 | — | keep — anchors exact; suite 52 passed / 1 xfailed |
+
+**Bars mined, not guessed** (`experiments/flag_probe.py --values` over `train_bands.jsonl`): 563
+labelled observed-flags values the token path missed; every argmax-FALSE row at score ≤0.40 /
+margin ≤0.08 (the `[RISK PANEL …]` damage markers cluster at 0.36/0.04), every TRUE at ≥0.44 /
+≥0.10 — the band between is empty. The metric is `_weighted_sim`, not plain sequence ratio, which
+mis-orders the anchors (BACKGROUND §3 geometry table: innocent `biometrics ok` outscores the true
+252 mangle under difflib). Replay diff vs row 35: **exactly 4 cases** — the three TODO anchors
+252/595/990 (all emit `illegible_biometrics`, truth-confirmed; 252/595 single-read, 990 by
+quorum) plus holdout 438 (`planetary_embargo` by quorum-6, NEEDS_REVIEW→DENIED, truth DENIED —
+label read only to verify, logged per rows 33–35). Controls silent: 747/506 damage markers,
+`biometrics ok`, explicit `none`, healthy pages (no other case moved). A bonus class surfaced by
+the mining: space-split values (`illegible biometrics`) score 1.00 whole but are invisible to the
+token path — several table rows, already emitted via sibling variants, now have a second
+independent route. Confidence refit score-neutral (122.86; confidence-only nudges). Regression
+tests: single-read bars incl. text-layer restriction and innocent/none controls; quorum-required
+below the single bar (one 990 mangle alone must not emit).

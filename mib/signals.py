@@ -5,6 +5,7 @@ policy. Signals must be validated on train before policy may act on them.
 """
 import difflib
 import re
+from collections import Counter
 
 from . import parse, vocab
 from .packet import SRC_OCR
@@ -15,6 +16,35 @@ _LEGEND_RE = re.compile(
     r"\b(option|one of|any of|possible|valid value|choose|list of|e\.g\.)\b", re.I)
 _NEGATION = {"no", "not", "without", "none", "negative", "clear", "cleared", "absent"}
 _STRIP = " .,;:|/()[]'\"-"
+
+# Whole-value rescue bars, from the mined safety table over the full train
+# ensemble (experiments/flag_probe.py --values): 563 labelled observed-flags
+# values the token matcher missed; every argmax-FALSE row sits at score<=0.40 /
+# margin<=0.08 (damage markers cluster at 0.36/0.04), every TRUE at >=0.44 /
+# >=0.10 — the band between is empty. Single-read acceptance stays well above
+# the boundary; the thin 0.44-0.55 band additionally requires two independent
+# readings of the page to argmax the same flag.
+VALUE_SINGLE_SCORE, VALUE_SINGLE_MARGIN = 0.55, 0.15
+VALUE_QUORUM_SCORE, VALUE_QUORUM_MARGIN, VALUE_QUORUM_N = 0.44, 0.10, 2
+
+_KV_LINE_RE = re.compile(r"^([A-Za-z0-9][A-Za-z _0-9]{1,28}?)\s*[:.;]\s*(.+)$")
+
+
+def _labelled_flag_value(line):
+    """The value part of an `Observed flags:`-labelled line, or None.
+
+    Label matching is loose (parse._loose_key_for): the label survives OCR
+    better than the value ('Obearved fags', 'Geserved flags'), and the value
+    must then corroborate through the scored bars — the same loose-key +
+    well-formed-value pattern parse.parse_kv uses (LOOSE_KEY_CUTOFF)."""
+    m = _KV_LINE_RE.match(line.strip())
+    if not m or _LEGEND_RE.search(line):
+        return None
+    label = m.group(1)
+    if parse.key_for(label) == "observed_flags" or \
+            parse._loose_key_for(label) == "observed_flags":
+        return m.group(2).strip()
+    return None
 
 
 def _flags_in_line(line):
@@ -61,14 +91,37 @@ def observed_flags(packet):
     truth carries the flag — P=1.00, zero false positives, with the gate removed
     entirely. The per-line guards, not the gate, are the safety mechanism.
 
+    OCR readings additionally get the whole-value rescue: a labelled
+    `Observed flags:` value the token matcher couldn't resolve (shattered past
+    any single token — `Bagitie bematics`, space-split `illegible biometrics`)
+    is scored whole against the flag vocabulary (vocab.match_flag_value) and
+    accepted at the mined bars above, alone or by cross-variant quorum. Only
+    OCR text: a text layer doesn't misread, so an unmatchable value there is
+    genuinely not a flag (same principle as the case-id decoy tolerance and
+    identity_conflict's OCR clause).
     """
     flags = set()
-    for _dtype, _src, kv in packet.docs:
+    quorum = Counter()   # (page_no, flag) -> independent readings agreeing
+    readings = ([(src, kv) for _d, src, kv in packet.docs] +
+                [(SRC_OCR, kv) for _d, kv in packet.variant_docs])
+    for src, kv in readings:
+        rescued = set()
         for line in kv.get("_raw", []):
-            flags |= _flags_in_line(line)
-    for _dtype, kv in packet.variant_docs:
-        for line in kv.get("_raw", []):
-            flags |= _flags_in_line(line)
+            hits = _flags_in_line(line)
+            flags |= hits
+            if hits or src != SRC_OCR:
+                continue
+            value = _labelled_flag_value(line)
+            if value is None:
+                continue
+            flag, score, margin = vocab.match_flag_value(value)
+            if flag and score >= VALUE_SINGLE_SCORE and margin >= VALUE_SINGLE_MARGIN:
+                flags.add(flag)
+            elif flag and score >= VALUE_QUORUM_SCORE and margin >= VALUE_QUORUM_MARGIN:
+                rescued.add(flag)
+        for flag in rescued:
+            quorum[(kv.get("_page_no"), flag)] += 1
+    flags |= {f for (_pg, f), n in quorum.items() if n >= VALUE_QUORUM_N}
     return flags
 
 

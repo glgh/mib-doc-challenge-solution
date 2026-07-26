@@ -20,6 +20,13 @@ equality, all-or-nothing.
 
   experiments/flag_probe.py [cache.jsonl]   (default output/cache/reads_hard.jsonl)
 
+`--values` mode is the safety table for the whole-value resolver (TODO 2.2):
+every `Observed flags:`-labelled value across the ensemble that the token
+matcher did NOT already resolve, scored by `vocab.match_flag_value` (argmax
+flag, weighted score, margin) with cross-variant agreement per page, joined to
+truth. Thresholds are chosen off this table, never guessed.
+
+  experiments/flag_probe.py --values [cache.jsonl]   (default train_bands.jsonl)
 """
 import csv
 import sys
@@ -70,6 +77,69 @@ def strat_observed(name, base_observed, fr):
     counts = Counter(f for _, flags in fr for f in flags)
     need = 1 if name == "union" else 2
     return set(base_observed) | {f for f, n in counts.items() if n >= need}
+
+
+_KV_RE = __import__("re").compile(r"^([A-Za-z0-9][A-Za-z _0-9]{1,28}?)\s*[:.;]\s*(.+)$")
+
+
+def value_table(cpath):
+    """--values mode: mine every labelled observed-flags value the token matcher
+    missed, with truth verdicts and per-page cross-variant agreement."""
+    import json
+
+    from mib import vocab
+
+    dev = set(json.loads((ROOT / "data_splits.json").read_text())["dev"])
+    _meta, recs = cache.read(cpath)
+    rows = []
+    for rec in recs:
+        cid = rec.get("stem")
+        if cid not in TRUTH or rec.get("error"):
+            continue
+        tflags = flag_set(TRUTH[cid]["risk_flags"])
+        for p in rec["pages"]:
+            for r in (p.get("reads") or []):
+                lines = r["lines"]
+                ids = set(parse.page_case_ids(lines))
+                if ids and cid not in ids and \
+                        not any(textmatch.plausible_misread(cid, i) for i in ids):
+                    continue                      # decoy page, as in assemble
+                for line in lines:
+                    m = _KV_RE.match(line.strip())
+                    if not m:
+                        continue
+                    strict = parse.key_for(m.group(1)) == "observed_flags"
+                    loose = parse._loose_key_for(m.group(1)) == "observed_flags"
+                    if not (strict or loose):
+                        continue
+                    if signals._flags_in_line(line):
+                        continue                  # token path already resolves it
+                    value = m.group(2).strip()
+                    flag, score, margin = vocab.match_flag_value(value)
+                    rows.append(dict(
+                        case=cid, split="dev" if cid in dev else "hold",
+                        page=p["page_no"], variant=r["variant"], strict=strict,
+                        value=value, flag=flag, score=score, margin=margin,
+                        true=(flag in tflags)))
+    # Cross-variant agreement: independent readings of one page whose values
+    # argmax to the same flag (margin-guarded at 0.1 to keep debris out).
+    agree = Counter()
+    for row in rows:
+        if row["flag"] and row["margin"] >= 0.1:
+            agree[(row["case"], row["page"], row["flag"])] += 1
+    for row in rows:
+        row["agree"] = agree.get((row["case"], row["page"], row["flag"]), 0)
+    rows.sort(key=lambda r: (-r["score"], r["case"]))
+    print(f"{len(rows)} unresolved labelled values "
+          f"({sum(r['true'] for r in rows)} argmax-true) from {cpath.name}")
+    print(f"{'case':10s} {'sp':4s} pg {'strict':6s} {'flag':22s} "
+          f"{'score':>5s} {'marg':>5s} {'agr':>3s} {'true':>5s}  value")
+    for r in rows:
+        print(f"{r['case']:10s} {r['split']:4s} {r['page']:2d} "
+              f"{str(r['strict']):6s} {str(r['flag']):22s} {r['score']:5.2f} "
+              f"{r['margin']:5.2f} {r['agree']:3d} {str(r['true']):>5s}  "
+              f"{r['value'][:48]}")
+    return rows
 
 
 def main():
@@ -134,4 +204,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if "--values" in sys.argv:
+        sys.argv.remove("--values")
+        value_table(Path(sys.argv[1]) if len(sys.argv) > 1
+                    else ROOT / "output/cache/train_bands.jsonl")
+    else:
+        main()

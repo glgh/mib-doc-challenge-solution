@@ -13,10 +13,11 @@ we right now**.
 
 ## Where things are
 
-**Working tree: dev 122.44, CFA 0, 0 missing rows** (row 34, uncommitted: red-strikethrough value
-cells are voided — a document crossing out its own printed value, e.g. a fee receipt's struck
-`unpaid`, is not sourceable evidence; +0.20, fixing two struck-fee false denials). HEAD (`54c38ec`)
-is at **122.24** (rows 32–33).
+**Working tree: dev 122.86, CFA 0, 0 missing rows** (rows 34–36, uncommitted: red-strikethrough
+value cells voided (+0.20, row 34); flag-scan doc-type gate deleted — 18 true flags recovered on
+header-mangled pages, 3 correct NR→DENIED flips (+0.35, row 35); whole-value flag rescue with the
+one confusion-weighted matcher, bars mined from the 563-value safety table — anchors 252/595/990
+all recovered (+0.07, row 36)). HEAD (`58ca90b`) code is at **122.24** (rows 32–33).
 
 The load-bearing facts of the current state:
 
@@ -38,7 +39,8 @@ The load-bearing facts of the current state:
 Score lineage, all dev-700, CFA 0 at every step (one row per change in experiments.md): 115.20
 (ship `skew`, row 15) → 115.43 (per-field preference, row 15b) → 118.63 (exhaustive OCR, row 16) →
 119.10 (P3 parse + flag extraction, row 18) → 121.36 (full ladder priced, row 28) → 122.10
-(keystone, row 30) → 122.24 (registry recovery, row 32) → 122.44 (strike void, row 34). Holdout
+(keystone, row 30) → 122.24 (registry recovery, row 32) → 122.44 (strike void, row 34) → 122.79
+(flag doc-gate deleted, row 35) → 122.86 (whole-value flag rescue, row 36). Holdout
 113.46 at tag `v1`, one read, taken when dev was 115.43.
 
 **Overfitting picture.** `scripts/audit_constants.py` refits every label-fitted constant 5-fold
@@ -229,8 +231,8 @@ ultimately ships still comes from container output.
 | 3 | ~~Can `turn`/`bands` (+1.68) be made affordable?~~ **ANSWERED on score** (row 28: +2.09, and it already ships). Remaining half: **re-run the Docker gate at the ladder's cost** — laptop cost is ~2.4×/case vs skew, against ~11× measured headroom, so the expectation is "fits"; the gate decides a revert, not an adoption. (The other row-28 follow-up, the confidence-table refit, is done — rows 31/34) |
 | 4 | ~~Is CFA 0 a hard gate or a priced cost?~~ **MOOT** | learned decider deleted; rules run at CFA 0 with no veto. Revives only with a future decider (then the honest count is the OOF CFAs — 12 on the 115.20 substrate, 14 on 119.10 — not the in-sample 5) |
 | 5 | ~~Where do the remaining classification points go?~~ **ANSWERED — and they are not reachable** | `fee_unknown` (7.11) has no signal: all model families lose to rules and add CFAs; the fee is genuinely absent from the document (visible 0.0%, 3.6% with OCR, hidden-only in 41 cases). `b13_census` (6.25) has signal, but it is the `n_scan_pages` render artifact. See the rejected list |
-| 6 | Can the `illegible_biometrics` structural gap be read or argued? (~+0.8 dev ceiling) | **Mostly settled by two-mode label mining — full evidence in [BACKGROUND.md §3](BACKGROUND.md).** Mode A (printed token): P=1.00, we emit 91/94, and the misses are matcher/gate strictness, not absence — 3 doc-type-gate misses plus ≥5 user-verified pages that print the token OCR-mangled past `match_flag_token`. That is the fix family: printed-but-untyped-page doc gate + label-anchored value recovery on `Observed flags:` lines. Mode B (condition-derived, no token printed): every observable proxy tops out at P≤0.38 — emission is expected-negative on a weight-8 exact-set field; dead |
-| 7 | Does Tesseract word-level confidence (TSV `conf`) resolve the valid-vs-valid vote ties? | Capture TSV in `_tesseract` (same recognition pass), store per-line conf in `Read`, A/B a conf-weighted vote offline on the ensemble cache. Evidence so far: the variant-merge probe found ties where generation order picks wrong in one direction each (025 date / 037 name) and only word conf wins both; and the MIB-000990/252 ladder autopsy showed every conf metric ranking the repaired variants above the tilted raw render that `evidence_score` chose — the tilted winner's margin came from a well-formed-but-**wrong** value (`MIB-000000`, misread of 000990, +1 via CASE_ID_RE). Shape-validity credits confident garbage; the engine's own conf does not. Per-line conf is the right unit for the flag scan; page-level conf mass just rewards word count |
+| 6 | ~~Can the `illegible_biometrics` structural gap be read or argued?~~ **ANSWERED — mode A recovered (rows 35–36), mode B dead** | Two-mode label mining ([BACKGROUND.md §3](BACKGROUND.md), incl. the mangled-value geometry table). Mode A (printed token): the fix family shipped — the flag-scan doc-type gate is deleted (row 35: 18 true flags recovered, not just the 3 mined `illegible_biometrics` misses — the gate was also blocking other flag classes on header-mangled pages) and the whole-value weighted resolver reads values shattered past any token (row 36: 252/595/990, bars mined from the 563-value safety table, zero false positives). Mode B (condition-derived, no token printed): every observable proxy tops out at P≤0.38 — emission is expected-negative on a weight-8 exact-set field; dead |
+| 7 | Does Tesseract word-level confidence (TSV `conf`) resolve the valid-vs-valid vote ties? | Capture TSV in `_tesseract` (same recognition pass), store per-line conf in `Read`, A/B a conf-weighted vote offline on the ensemble cache. Evidence so far: the variant-merge probe found ties where generation order picks wrong in one direction each (025 date / 037 name) and only word conf wins both; and the MIB-000990/252 ladder autopsy showed every conf metric ranking the repaired variants above the tilted raw render that `evidence_score` chose — the tilted winner's margin came from a well-formed-but-**wrong** value (`MIB-000000`, misread of 000990, +1 via CASE_ID_RE). Shape-validity credits confident garbage; the engine's own conf does not. Per-line conf is the right unit for the flag scan; page-level conf mass just rewards word count. Autopsy numbers (2026-07-25 session, TSV runs not yet cached): 990 p1 mean word conf 59.6 deskewed vs 42.1 tilted winner; 252 p2 57.1 vs 47.8. Related: the dev evidence-score distribution valley sits at ev=5, not the hand-picked `GOOD_ENOUGH=6` (`8d56832`) — if conf replaces `evidence_score`, re-derive that gate from the conf distribution |
 | 8 | Does the fitted-constant audit generalize to the cascade's *structure*? | **Open, and it is the real question.** Row 21 cleared the four fitted values at −0.23, which does **not** explain the v1 dev→holdout gap of −1.97. Branch order, which branches exist, and ~10 hand-tuned thresholds were also picked on dev and are unaudited |
 | 9 | ~~Do the fitted constants survive contact with unseen data?~~ **ANSWERED, label-free** | row 24 (`output/val_shift`, 5,000 validation packets): sponsor recurrence transfers **exactly** (same six ids, gap 14.6×); `STALE_CUTOFF` is correct but its margin fell 37 d → 2 d (logged risk, not a change); render damage **halved**, independently confirming the `b13_census` artifact would not have transferred |
 | 10 | Does the dev→holdout gap still hold? | holdout untouched since 113.46 at `v1`; read only at a milestone |

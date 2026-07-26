@@ -193,6 +193,35 @@ matcher/gate too strict": the 3 doc-type-gate misses plus label-anchored value r
 `Observed flags:` *label* survives; the value needs a looser, guarded snap). The 57 mode-B cases
 with no detected B-13 (dead pages) remain unassessed page-by-page.
 
+**Mangled-value geometry (2026-07-25; values verbatim from the ensemble caches, similarity on
+lowercase-alnum-normalized text).** The recovery metric matters more than the cutoff. Plain
+`difflib` sequence ratio against `illegible_biometrics` *mis-orders* the anchors — the innocent
+phrase `biometrics ok` (0.65) outranks the true 252 mangle (0.53) — so any difflib-based
+whole-value snap needs a cutoff ≥0.75 and permanently abandons 252/990. The confusion-weighted
+metric already in `vocab._weighted_sim` inverts that ordering:
+
+| value (case) | difflib vs `illegible_biometrics` | weighted argmax (score, margin over runner-up) |
+| --- | --- | --- |
+| `Mogible_ biometrics` (595 p3) | 0.83 | illegible_biometrics (0.83, 0.48) |
+| `Begible_biometrics` (771) | 0.89 | illegible_biometrics (0.80, 0.48) |
+| `Bagitie bematics` (252 p2) | 0.53 | illegible_biometrics (**0.64, 0.18**) |
+| `Beghie_ ju. ics` (990 p1) | 0.47 | illegible_biometrics (0.46, 0.14) |
+| `Begibie_\|.._ics` (990 p1) | 0.62 | illegible_biometrics (0.45, 0.17) |
+| `Bagte——I*` (990 p1) | 0.24 | memory_tampering (0.23, 0.00) |
+| `biometrics ok` (innocent probe) | 0.65 | planetary_embargo (0.38, 0.03) |
+| `[RISK PANEL MISSING]` (747 p5) | 0.17 | sponsor_mismatch (0.36, 0.04) |
+| `[RISK PANEL = NG]` (506) | 0.20 | planetary_embargo (0.30, 0.01) |
+
+Under the weighted metric with a margin guard, 595/771 clear at any sane single-read bar, 252
+clears with real margin, and 990's two best mangles independently argmax to the right flag with
+margin ≥0.14 — an N≥2 cross-variant consensus — while every control (damage markers, innocent
+phrase, the debris mangle) sits ≤0.38 with margin ≤0.07. One resolver therefore covers both the
+"looser guarded snap" and the "cross-variant consensus" fix families. Thresholds still must be
+mined corpus-wide (every `observed_flags` value in the train ensemble × score/margin/agreement)
+before any emission ships. 990 p1 carries 14 reads in the hard ensemble (optical rungs included;
+a 4th mangle `Hagia;` argmaxes wrong at 0.21) — consensus counts must tolerate wrong-argmax
+minority reads.
+
 **OCR digit confusions are systematic, not uniform**: the scanner's dominant year error is 6→8
 (23 of 25 out-of-range arrival years read `2028` for a true `2026`; the same confusion appears in
 months, `06`→`08`). Repair is safe only where a prior makes one reading impossible — years ≥2028

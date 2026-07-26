@@ -297,6 +297,58 @@ def test_damage_markers_on_untyped_pages_do_not_become_flags():
             assert signals.observed_flags(pkt) == set(), (dtype, line)
 
 
+def test_whole_value_flag_rescue_single_read_bars():
+    """A labelled `Observed flags:` value shattered past any single token still
+    resolves whole (MIB-000595/252, the mode-A-with-worse-OCR class — BACKGROUND
+    §3 geometry table). Bars are mined, not guessed: every argmax-false value in
+    the train ensemble sits at score<=0.40/margin<=0.08, so single-read
+    acceptance at 0.55/0.15 has real clearance."""
+    from mib import signals
+    from mib.packet import SRC_OCR, SRC_TEXT, Packet
+
+    for value in ("Mogible_ biometrics",     # 595 p3: 0.83, margin 0.48
+                  "Bagitie bematics",        # 252 p2: 0.64, margin 0.18
+                  "illegible biometrics"):   # space-split: token path is blind to it
+        pkt = Packet()
+        pkt.docs = [(parse.DOC_OTHER, SRC_OCR,
+                     {"_raw": [f"Observed flags: {value}"], "_page_no": 1})]
+        assert signals.observed_flags(pkt) == {"illegible_biometrics"}, value
+
+    # A text layer doesn't misread: the same unmatchable value there is
+    # genuinely not a flag, so the rescue is OCR-only.
+    pkt = Packet()
+    pkt.docs = [(parse.DOC_BIOMETRIC, SRC_TEXT,
+                 {"_raw": ["Observed flags: Bagitie bematics"], "_page_no": 1})]
+    assert signals.observed_flags(pkt) == set()
+
+    # Innocent phrases and explicit none stay silent at any tier.
+    for value in ("biometrics ok", "none"):
+        pkt = Packet()
+        pkt.docs = [(parse.DOC_BIOMETRIC, SRC_OCR,
+                     {"_raw": [f"Observed flags: {value}"], "_page_no": 1})]
+        assert signals.observed_flags(pkt) == set(), value
+
+
+def test_whole_value_flag_rescue_needs_quorum_below_single_bar():
+    """MIB-000990 p1: no single mangle clears the single-read bar (0.46/0.45),
+    but two independent readings argmax to the same flag with margin >=0.10 —
+    that agreement is the evidence. One such reading alone must NOT emit."""
+    from mib import signals
+    from mib.packet import SRC_OCR, Packet
+
+    one = {"_raw": ["Observed flags: Beghie_ ju. ics"], "_page_no": 0}
+    two = {"_raw": ["Observed flags: Begibie_|.._ics"], "_page_no": 0}
+
+    pkt = Packet()
+    pkt.docs = [(parse.DOC_OTHER, SRC_OCR, one)]
+    assert signals.observed_flags(pkt) == set()
+
+    pkt = Packet()
+    pkt.docs = [(parse.DOC_OTHER, SRC_OCR, one)]
+    pkt.variant_docs = [(parse.DOC_OTHER, two)]
+    assert signals.observed_flags(pkt) == {"illegible_biometrics"}
+
+
 def test_registry_eroded_labels_recover_values():
     """MIB-000293 p0 (row 32): a faint registry scan erodes the two-line labels,
     leaving label tails fused to values and a bare name. The fallback must

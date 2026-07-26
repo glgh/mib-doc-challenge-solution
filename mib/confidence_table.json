@@ -1,18 +1,18 @@
 {
   "adjudicator_finding": 0.95,
-  "b13_census": 0.285,
+  "b13_census": 0.272,
   "clean_approve": 0.95,
   "disqualifying_flag": 0.95,
   "embargo_world": 0.95,
   "embargo_world_partial": 0.95,
-  "fee_unknown": 0.481,
-  "fee_unpaid": 0.893,
-  "missing_arrival": 0.413,
-  "missing_sponsor": 0.405,
-  "missing_visa": 0.462,
-  "review_flag": 0.708,
+  "fee_unknown": 0.488,
+  "fee_unpaid": 0.95,
+  "missing_arrival": 0.434,
+  "missing_sponsor": 0.408,
+  "missing_visa": 0.465,
+  "review_flag": 0.726,
   "revoked_sponsor": 0.95,
   "stale_arrival": 0.95,
-  "transit_visa": 0.933,
-  "waived_non_dip": 0.424
+  "transit_visa": 0.936,
+  "waived_non_dip": 0.425
 }
