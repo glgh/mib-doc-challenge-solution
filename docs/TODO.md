@@ -19,7 +19,7 @@ _The single todo tracker for this work. Update statuses in place; log scored res
 | MIB-000065 p3 | text rotated 90° and cropped mid-field at page edge | info genuinely absent — **control only** |
 | 025 date / 037 name | valid-vs-valid variant-vote ties where generation order picks wrong (STATUS Q7 / merge-probe `681bbee`) | **HOLDOUT — do not tune on these.** 1.4 must re-mine dev-split ties first |
 
-Instruments already built: `output/cache/reads_hard.jsonl` (92-case hard ensemble, optical rungs on), `output/cache/train_bands.jsonl` (full-train ensemble, schema 2 with `struck` backfilled — supersedes `train_bands_reads.jsonl` as the current substrate), `experiments/mine_hard.py`, `scripts/replay.py` (frozen-behavior reference gate), `experiments/ladder_gallery.py` (promoted from scratchpad 2026-07-25).
+Instruments already built: `output/cache/reads_hard.jsonl` (92-case hard ensemble, optical rungs on), `output/cache/train_bands.jsonl` (full-train ensemble, schema 2 with `struck` backfilled — supersedes `train_bands_reads.jsonl` as the current substrate), `experiments/mine_hard.py`, `scripts/replay.py` (frozen-behavior reference gate), `experiments/ladder_gallery.py` (promoted from scratchpad 2026-07-25), `experiments/crop.py` (high-zoom page-region crops — REQUIRED before reading/judging any page image, model and human alike; contact sheets compress a print line to a few pixels, user directive 2026-07-26).
 
 ---
 
