@@ -50,9 +50,12 @@ from scratchpad 2026-07-25).
 - Incidental: the `Packet MIB-XXXXXX / page N` footer premise of 3.3 is real on probe pages.
 
 ### 1.2 ☐ Capture conf in the pipeline (`records.Read.conf`, `mib/stages/render.py`, `mib/cache.py`)
-**Additive TSV pass** (per 1.1: TSV text diverges from stdout on 84% of reads, so text keeps the
-stdout pass; ~2× OCR cost is inside the ~3× runtime headroom). Store per-line conf + word counts;
-old caches rehydrate `conf=None` (keystone rehydration pattern, same as row 34's `struck=[]`).
+**Single invocation, two renderers**: `tesseract img base txt tsv` emits BOTH the text file
+(verified byte-identical to today's stdout output) and the TSV in one recognition pass at ~1×
+cost — the 1.1 divergence was an artifact of reconstructing text *from* TSV rows; asking for both
+renderers avoids it entirely. Text stays canonical from the txt renderer; conf (+ word count and
+y-position per line, for the positional furniture guard) parses from the TSV. Old caches
+rehydrate `conf=None` (keystone rehydration pattern, same as row 34's `struck=[]`).
 Correctness-gated (house rule): replay diff empty with conf unused, suite green. Dump regen:
 hard set first (subset-first directive), full regen with user approval, only after this lands.
 
