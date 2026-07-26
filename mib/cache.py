@@ -73,7 +73,8 @@ def to_case(page_dicts):
         if p.get("reads") is not None:
             reads = [Read(page_no=page_no, lines=list(r["lines"]),
                           variant=r.get("variant", ""),
-                          quality=r.get("quality", 0.0))
+                          quality=r.get("quality", 0.0),
+                          conf=r.get("conf"))   # pre-conf caches rehydrate None
                      for r in p["reads"]]
         elif p.get("ocr_lines"):
             reads = [Read(page_no=page_no, lines=list(p["ocr_lines"]),
@@ -105,7 +106,7 @@ def from_case(pages, reads_by_page):
             "struck": p.struck,
             "ocr_lines": primary.lines if primary else [],
             "reads": [{"variant": r.variant, "quality": r.quality,
-                       "lines": r.lines} for r in reads],
+                       "conf": r.conf, "lines": r.lines} for r in reads],
             "image_count": p.image_count,
             "is_scan_only": p.is_scan_only,
         })

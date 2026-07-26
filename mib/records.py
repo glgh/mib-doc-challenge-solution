@@ -68,26 +68,74 @@ class Read:
     `variant` names what produced it (engine x preprocessing x geometry) so a
     later ensemble can weight readings by provenance, and so the cost of each
     strategy is attributable.
+
+    `conf` is the engine's own per-line self-assessment from the same
+    recognition pass: [(mean word conf, n_words, y_frac)] per tsv line, or None
+    for reads rehydrated from a pre-conf cache. It is a parallel measurement of
+    the page, NOT aligned 1:1 with `lines` (the two tesseract renderers group
+    lines differently) — page-level metrics need no alignment.
     """
     page_no: int = 0
     lines: list = field(default_factory=list)
     variant: str = ""
     quality: float = 0.0
+    conf: list = None
     cost_ms: int = 0
 
 
+# Guarded excess-mass constants (probe 1.1, user-graduated; re-derived corpus-
+# wide in the 1.3 A/B). CONF_BASELINE: a word contributes only its confidence
+# above the junk floor, so debris volume adds ~nothing (raw mass's trap) while
+# a few confident garbage words can't outrank a dense honest read (mean's
+# trap). FOOTER_Y/watermark: page furniture OCRs at conf 90+ on the render
+# source only, which would bias any mass metric toward `render` regardless of
+# how the field block read.
+CONF_BASELINE = 40.0
+FOOTER_Y = 0.90
+
+
+def conf_excess_mass(read):
+    """Engine-confidence selection metric for one Read, or None without conf.
+
+    Sum over non-furniture tsv lines of max(0, mean_conf - CONF_BASELINE) *
+    n_words. Furniture = the printed footer band (y_frac >= FOOTER_Y) — the
+    positional guard, preferred over wording regexes because it needs no
+    vocabulary of furniture strings.
+    """
+    if read.conf is None:
+        return None
+    total = 0.0
+    for line_conf, n_words, y_frac in read.conf:
+        if y_frac >= FOOTER_Y:
+            continue
+        total += max(0.0, line_conf - CONF_BASELINE) * n_words
+    return total
+
+
 def best_read(reads):
-    """The highest-evidence reading, or None. Earliest wins ties, because S2
+    """The highest-ranked reading, or None. Earliest wins ties, because S2
     generates readings cheapest-first, so the earlier read cost less to obtain.
+
+    Ranking metric: `evidence_score` (stored as `quality`) by default;
+    `config.select_metric()=conf` ranks by `conf_excess_mass` instead — reads
+    without conf (pre-conf caches) keep ranking by `quality`, so old caches
+    replay unchanged under either setting.
 
     Lives here (not in stages.render) because it is a pure function of stored
     Reads that both S2 tooling and the S4 merge consult — the selection itself
     crosses the seam now that the whole ensemble does.
     """
-    chosen = None
+    from . import config
+    use_conf = config.select_metric() == "conf"
+    chosen, chosen_key = None, None
     for r in reads:
-        if chosen is None or r.quality > chosen.quality:
-            chosen = r
+        key = r.quality
+        if use_conf:
+            m = conf_excess_mass(r)
+            if m is not None:
+                key = m
+        if chosen is None or key > chosen_key:
+            chosen, chosen_key = r, key
     return chosen
 
 

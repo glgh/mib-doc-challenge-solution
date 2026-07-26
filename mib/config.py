@@ -37,7 +37,9 @@ RESTORE = "bands"
 # caches lack the key and rehydrate with struck=[] (no voiding) — backward
 # compatible, so this is a documentation signal, not a join gate (require_agreement
 # does not check SCHEMA).
-SCHEMA = 2
+# 3: reads carry `conf` — per-line (mean word conf, n_words, y_frac) from the
+# tsv renderer of the same recognition pass. Older caches rehydrate conf=None.
+SCHEMA = 3
 
 # A mismatch here means the two artifacts describe different pipelines and any
 # join across them is meaningless.
@@ -66,6 +68,25 @@ def ocr_passes():
     """
     mode = os.environ.get("MIB_OCR_PASSES", DEFAULT_OCR_PASSES).lower()
     return mode if mode in OCR_PASS_MODES else DEFAULT_OCR_PASSES
+
+
+SELECT_METRICS = ("ev", "conf")
+DEFAULT_SELECT = "ev"
+
+
+def select_metric():
+    """Which metric `records.best_read` ranks readings by.
+
+    `ev` (default): evidence_score, the hand-built shape score.
+    `conf`: guarded excess confidence mass from the engine's own per-word conf
+    (records.conf_excess_mass) — the Track 1 successor, opt-in via
+    MIB_SELECT=conf until the A/B graduates it. Reads without conf (pre-conf
+    caches) always fall back to `quality`, so old caches replay unchanged
+    under either setting. Stamped: selection changes which reading is primary,
+    so it is part of an artifact's identity.
+    """
+    mode = os.environ.get("MIB_SELECT", DEFAULT_SELECT).strip().lower()
+    return mode if mode in SELECT_METRICS else DEFAULT_SELECT
 
 
 def ocr_optical():
@@ -125,6 +146,7 @@ def stamp(**extra):
         "early_stop": EARLY_STOP,
         "ocr_passes": ocr_passes(),
         "ocr_optical": ocr_optical(),
+        "select": select_metric(),
         "git_rev": rev,
         "git_dirty": dirty,
         "created": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -144,7 +166,10 @@ def describe(meta):
     # Legacy stamps may carry a `decider` key (the learned decider, deleted);
     # shown so an old mlp eval artifact is still identifiable as one.
     dec = f" decider={meta['decider']}" if meta.get("decider") not in (None, "rules") else ""
-    return f"restore={meta.get('restore', '?')}{es}{ocr}{opt}{dec} rev={meta.get('git_rev') or '?'}{dirty}{back}"
+    # Uppercase on purpose: a subset cache's scores are not split numbers, and
+    # this tag is the only thing standing between a probe and a quoted "dev" score.
+    sub = f" SUBSET={meta['subset']}({meta.get('n_subset', '?')})" if meta.get("subset") else ""
+    return f"restore={meta.get('restore', '?')}{es}{ocr}{opt}{dec}{sub} rev={meta.get('git_rev') or '?'}{dirty}{back}"
 
 
 def require_agreement(labelled):

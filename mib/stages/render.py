@@ -72,19 +72,74 @@ PRIMARY_PSM = 11
 SECONDARY_PSM = 3
 
 
-def _tesseract(image_path, psm=PRIMARY_PSM, dpi=None):
-    args = ["tesseract", str(image_path), "stdout", "--psm", str(psm)]
+def _recognize(image_path, psm=PRIMARY_PSM, dpi=None):
+    """One tesseract invocation, two renderers -> (lines, conf).
+
+    The `txt` renderer is byte-identical to the old stdout pass (verified live),
+    so text behavior cannot drift; the `tsv` renderer rides along in the same
+    recognition pass at ~1x cost and yields `conf`: one (mean word conf,
+    n_words, y_fraction) triple per tsv text line. The two renderers group
+    lines differently (93/111 diverge), so `conf` is a parallel measurement of
+    the page, NOT aligned 1:1 with `lines` — page-level metrics need no
+    alignment, per-line uses fuzzy-match on demand.
+    """
+    base = Path(str(image_path) + "_o")
+    args = ["tesseract", str(image_path), str(base), "--psm", str(psm)]
     if dpi:
         args += ["--dpi", str(dpi)]
+    args += ["txt", "tsv"]
     try:
-        result = subprocess.run(
-            args,
-            capture_output=True, text=True, timeout=20,
-            env={**os.environ, "OMP_THREAD_LIMIT": "1"},
-        )
-        return [clean_ocr_line(l) for l in result.stdout.splitlines() if l.strip()]
+        subprocess.run(args, capture_output=True, text=True, timeout=20,
+                       env={**os.environ, "OMP_THREAD_LIMIT": "1"})
+        txt = Path(str(base) + ".txt")
+        tsv = Path(str(base) + ".tsv")
+        lines = [clean_ocr_line(l)
+                 for l in txt.read_text(errors="replace").splitlines() if l.strip()]
+        return lines, _parse_tsv(tsv)
     except (subprocess.TimeoutExpired, OSError):
-        return []
+        return [], None
+
+
+def _parse_tsv(tsv_path):
+    """Tesseract tsv -> [(mean word conf, n_words, y_frac)] per line, or None.
+
+    Lines whose cleaned joined text is empty are dropped (pure-punctuation
+    debris), matching how the text pass drops blank lines. y_frac is the line's
+    top edge as a fraction of image height — the positional page-furniture
+    guard keys off it (the printed footer band), so it must survive the seam.
+    """
+    try:
+        rows = tsv_path.read_text(errors="replace").splitlines()
+    except OSError:
+        return None
+    height = 0
+    out = []
+    cur_key, words, confs, y_top = None, [], [], 0
+    def flush():
+        if words and clean_ocr_line(" ".join(words)):
+            out.append((round(sum(confs) / len(confs), 1), len(confs),
+                        round(y_top / height, 4) if height else 0.0))
+    for row in rows[1:]:
+        f = row.split("\t")
+        if len(f) < 12:
+            continue
+        if f[0] == "1":
+            height = int(f[9])
+        if f[0] != "5" or not f[11].strip() or float(f[10]) < 0:
+            continue
+        key = (f[1], f[2], f[3], f[4])
+        if key != cur_key:
+            flush()
+            cur_key, words, confs, y_top = key, [], [], int(f[7])
+        words.append(f[11])
+        confs.append(float(f[10]))
+    flush()
+    return out
+
+
+def _tesseract(image_path, psm=PRIMARY_PSM, dpi=None):
+    """Text-only compatibility wrapper (tools call this); pipeline uses _recognize."""
+    return _recognize(image_path, psm, dpi)[0]
 
 
 def recognized_keys(lines):
@@ -198,9 +253,9 @@ def reads_for(doc, page, page_no):
             for psm in psms:
                 suffix = "" if psm == PRIMARY_PSM else f"+psm{psm}"
                 t0 = time.time()
-                lines = _tesseract(path, psm, dpi)
+                lines, conf = _recognize(path, psm, dpi)
                 reads.append(Read(page_no=page_no, lines=lines, variant=variant + suffix,
-                                  quality=evidence_score(lines),
+                                  quality=evidence_score(lines), conf=conf,
                                   cost_ms=round((time.time() - t0) * 1000)))
 
         sources = list(_sources(doc, page, tmp))
