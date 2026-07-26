@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # Kept as a stamp constant so caches written before the removal stay joinable,
 # and so a legacy `skew` cache is still correctly *refused* rather than silently
 # mixed into a bands run.
-RESTORE = "bands"
+RESTORE = "bands+local"
 
 # 2: page dicts carry `struck` (red-strikethrough value cells). Older schema-1
 # caches lack the key and rehydrate with struck=[] (no voiding) — backward

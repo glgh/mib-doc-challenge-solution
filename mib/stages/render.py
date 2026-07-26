@@ -17,7 +17,10 @@ skewed border is a moving reference (see `_restorations`).
 
 The ladder is not selectable: every weak page gets deskew, both quarter-turns,
 and shred-band realignment, because that full set is what recovers the pages a
-cheaper subset leaves unreadable. The `off`/`skew`/`turn` rungs that used to be
+cheaper subset leaves unreadable. The `local` rung on top is the text-consent
+corrector (imaging.realign_local, graduated 2026-07-26): same walk, but at
+seams that cut through text the cut glyph halves override the border's implied
+shift; it is emitted only when its pixels differ from the plain deshred. The `off`/`skew`/`turn` rungs that used to be
 switchable existed to A/B the ladder (experiments.md rows 11-14) and are gone;
 the record stays in the docs and in git.
 
@@ -195,6 +198,15 @@ def _restorations(gray):
     deshredded = imaging.realign_bands(base)
     if deshredded is not None:
         yield "deshred", deshredded
+    # The text-consent corrector (imaging.realign_local): border offsets from
+    # the merged reader, overridden at text-cutting seams by what the cut glyph
+    # halves themselves want. Emitted only when it produces a genuinely new
+    # image — equal to the plain deshred (or a no-op) it would just double the
+    # OCR bill for the same pixels.
+    corrected = imaging.realign_local(base)
+    if corrected is not None and (deshredded is None
+                                  or not np.array_equal(corrected, deshredded)):
+        yield "local", corrected
 
 
 def _optical_restorations(gray):

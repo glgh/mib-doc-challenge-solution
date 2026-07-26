@@ -69,10 +69,17 @@ def adjudicate(values, sig):
         return "DENIED", "transit_visa"
     if fee == "unpaid":
         return "DENIED", "fee_unpaid"
-    if fee == "unknown":
-        return "NEEDS_REVIEW", "fee_unknown"
+    # Stale outranks fee-unknown (the cascade's one positive-evidence-vs-
+    # ignorance inversion, fixed in row 39): a positively-evidenced stale
+    # arrival is deny-grade regardless of fee state. The truth-side cell
+    # "fee genuinely unknown AND stale AND non-DIP" is empty across all 1,000
+    # train labels (thin — ~1.6 expected under independence), and all 8 train
+    # cases the pipeline lands there carry a polluted fee_unknown, 7 truth
+    # DENIED. NR->DENIED is also the CFA-safe direction to be wrong in.
     if _is_stale(values.get("arrival_date")) and known_non_dip:
         return "DENIED", "stale_arrival"
+    if fee == "unknown":
+        return "NEEDS_REVIEW", "fee_unknown"
     # Waiver-code presence is NOT approval evidence: the only code in the corpus
     # is DIP-WAIVER, and on non-DIP packets those cases are 46% denied.
     if fee == "waived" and non_dip_or_unknown:

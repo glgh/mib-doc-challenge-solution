@@ -4,15 +4,15 @@
     0.05,
     0.95
   ],
-  "created": "2026-07-25T19:57:39-07:00",
+  "created": "2026-07-25T20:54:33-07:00",
   "early_stop": false,
-  "fitted_on": "output/replay_flagvalue",
+  "fitted_on": "output/replay_staleorder",
   "fitted_on_meta": {
     "artifact": "eval",
-    "created": "2026-07-25T19:21:20-07:00",
+    "created": "2026-07-25T20:54:33-07:00",
     "early_stop": false,
     "git_dirty": true,
-    "git_rev": "58ca90b",
+    "git_rev": "153aab9",
     "n_records": 1000,
     "ocr_optical": false,
     "ocr_passes": "psm11",
@@ -35,7 +35,7 @@
     "schema": 2
   },
   "git_dirty": true,
-  "git_rev": "c9090d0",
+  "git_rev": "153aab9",
   "n_branches": 16,
   "ocr_optical": false,
   "ocr_passes": "psm11",

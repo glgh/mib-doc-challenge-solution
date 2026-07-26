@@ -86,6 +86,11 @@ def predict_from_evidence(pages, reads_by_page, stem):
     sig = signals.derive(pkt, values)
     decision, branch = policy.adjudicate(values, sig)
     conf = confidence.for_branch(branch)
+    # Display-only fee inference (packet.fee_fallback): adjudication and branch
+    # confidence were decided above on the merged evidence value, so an imputed
+    # fee can improve extraction but never flip a decision.
+    if (values.get("fee_status") or "unknown") == "unknown":
+        values["fee_status"] = packet.fee_fallback(pkt)
     record = emit.build_record(pkt.case_id, values, sig["emit_flags"], decision, conf)
     debug = {
         "case_id": pkt.case_id,

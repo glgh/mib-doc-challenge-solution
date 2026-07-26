@@ -27,6 +27,12 @@ def main(eval_dir, split="dev"):
     if ids is not None:
         truth_rows = [r for r in truth_rows if r["case_id"] in ids]
         preds = [p for p in preds if p["case_id"] in ids]
+        if len(preds) < len(ids):
+            print(f"WARNING: partial eval — {len(preds)}/{len(ids)} {split} cases "
+                  f"present (subset cache?). Scoring only the present cases; "
+                  f"this is a probe number, NOT a {split} number.")
+            truth_rows = [r for r in truth_rows
+                          if r["case_id"] in {p["case_id"] for p in preds}]
 
     truth_path = eval_dir / f"truth_{split}.csv"
     with open(truth_path, "w", newline="") as f:

@@ -173,6 +173,206 @@ def realign_bands(gray):
     return out if moved else None
 
 
+# --- local text-seam corrector (experiments/probe_seam_text.py, graduated) ---
+# The border-driven realign above trusts the border everywhere; the corrector
+# trusts it only where the TEXT agrees. Three findings behind the design
+# (experiments/findings.md 2026-07-26): only seams that cut through text matter
+# for OCR; the border's implied shift at such a seam is sometimes a phantom the
+# text refutes (165: border says move, the cut glyph halves align at zero); and
+# every signal must derive from ONE offset profile — mixing profiles corrupts
+# the corrections. User-ratified on the win strips before promotion.
+
+SUPPORT_H = 9        # +- rows in the line tracker's vertical-support window
+MIN_SUPPORT = 6      # rows of that window that must agree for a run to count
+MIN_GLOBAL = 12      # rows page-wide a line column must carry (kills text stems)
+EDGE_FRAC = 0.35     # each border line must live in its own outer page-third
+SNAP_TOL = 10        # tracker fill within this of the local pair level is jitter,
+                     # not structure (real seams are >15px jumps)
+SEAM_JUMP = 15       # offset jump that separates two bands
+SEAM_WIN = 3         # rows each side of a seam that count as "at" the cut
+RULE_ROW_FRAC = 0.4  # a row with glyph ink over this fraction of the width is a
+                     # horizontal rule, not text (037's phantom source)
+TEXT_MASS_MIN = 40   # px of glyph ink on a side to call the seam text-cutting
+RULE_RUN = 25        # vertical dark runs at least this long are structure, not glyphs
+LOCAL_MIN_CORR = 0.4  # glyph-half correlation below this cannot override the border
+LOCAL_MAX_SHIFT = 150  # a "best" shift at the search edge is degenerate, not a reading
+
+
+def _supported(mask):
+    """Per-cell vertical support: rows within +-SUPPORT_H showing a candidate
+    within +-2 columns. Boxcar via cumsum, no per-row Python loops."""
+    H, W = mask.shape
+    acc = np.zeros((H, W), np.float32)
+    for dx in (-2, -1, 0, 1, 2):
+        acc += np.roll(mask, dx, axis=1).astype(np.float32)
+    acc = np.minimum(acc, 1.0)
+    ii = np.vstack([np.zeros((1, W), np.float32), np.cumsum(acc, axis=0)])
+    y0 = np.clip(np.arange(H) - SUPPORT_H, 0, H)
+    y1 = np.clip(np.arange(H) + SUPPORT_H + 1, 0, H)
+    return ii[y1] - ii[y0], acc
+
+
+def line_offsets(gray):
+    """Per-row offsets from independently tracked border lines, or None.
+
+    The pair reader (`_band_offsets`) demands the full border pair per row and
+    starves on degraded borders (faded right line, crop specks). Here each line
+    is its own vertically-supported dark-run track — either line alone gives the
+    row's offset (right implies left via the border width), and the pair test
+    survives only as a cross-check when both are present."""
+    dark = ink_mask(gray, thresh=150)
+    H, W = dark.shape
+    starts = dark & ~np.roll(dark, 1, axis=1)
+    starts[:, 0] = dark[:, 0]
+    ends = dark & ~np.roll(dark, -1, axis=1)
+    ends[:, -1] = dark[:, -1]
+    sup_l, acc_l = _supported(starts)
+    sup_r, acc_r = _supported(ends)
+    ok_l = starts & (sup_l >= MIN_SUPPORT) & (acc_l.sum(axis=0) >= MIN_GLOBAL)[None, :]
+    ok_r = ends & (sup_r >= MIN_SUPPORT) & (acc_r.sum(axis=0) >= MIN_GLOBAL)[None, :]
+    ok_l[:, int(W * EDGE_FRAC):] = False
+    ok_r[:, :int(W * (1 - EDGE_FRAC))] = False
+    left = np.where(ok_l.any(axis=1), ok_l.argmax(axis=1), np.nan)
+    right_rev = ok_r[:, ::-1]
+    right = np.where(right_rev.any(axis=1), W - 1 - right_rev.argmax(axis=1), np.nan)
+    both = ~np.isnan(left) & ~np.isnan(right)
+    if both.sum() < 20:
+        return None
+    bw = float(np.median((right - left)[both]))
+    if bw < W / 2:
+        return None
+    offsets = np.full(H, np.nan)
+    pair_ok = both & (np.abs((right - left) - bw) <= 6)
+    offsets[pair_ok] = left[pair_ok]
+    only_l = ~np.isnan(left) & np.isnan(right)
+    offsets[only_l] = left[only_l]
+    only_r = np.isnan(left) & ~np.isnan(right)
+    offsets[only_r] = right[only_r] - bw
+    return offsets if np.count_nonzero(~np.isnan(offsets)) >= 20 else None
+
+
+def merged_offsets(gray):
+    """Pair-reader offsets where the width test passes (precision), line-tracker
+    offsets filling the rows it cannot measure (recall).
+
+    A fill only contributes NEW STRUCTURE: a tracker value within SNAP_TOL of
+    the nearest pair-measured level is that level — the one-line reading carries
+    a few px of bias, and unsnapped fills corrupt band medians (045). Only a
+    plateau genuinely apart from the local pair level keeps its own value."""
+    pair = _band_offsets(gray)
+    lines = line_offsets(gray)
+    if pair is None or lines is None:
+        return pair if lines is None else lines
+    merged = pair.copy()
+    meas = np.flatnonzero(~np.isnan(pair))
+    prev_i = -1
+    for y in np.flatnonzero(np.isnan(pair) & ~np.isnan(lines)):
+        while prev_i + 1 < len(meas) and meas[prev_i + 1] < y:
+            prev_i += 1
+        cands = [meas[i] for i in (prev_i, prev_i + 1)
+                 if 0 <= i < len(meas)]
+        nearest = pair[min(cands, key=lambda i: abs(i - y))]
+        merged[y] = nearest if abs(lines[y] - nearest) <= SNAP_TOL else lines[y]
+    return merged
+
+
+def _text_ink(gray):
+    """Ink minus long vertical runs (form rules, border lines): glyphs only.
+    Adaptive mask, not the fixed INK cut — faint pages have no sub-128 glyphs."""
+    dark = ink_mask(gray)
+    H, W = dark.shape
+    fwd = np.zeros((H, W), np.int32)
+    run = np.zeros(W, np.int32)
+    for y in range(H):
+        run = (run + 1) * dark[y]
+        fwd[y] = run
+    total = fwd.copy()
+    for y in range(H - 2, -1, -1):
+        cont = dark[y] & dark[y + 1]
+        total[y] = np.where(cont, np.maximum(total[y], total[y + 1]), total[y])
+    return dark & (total < RULE_RUN)
+
+
+def _best_shift_corr(profile, ref, span=160):
+    """Shift maximizing normalized correlation of profile onto ref, plus the
+    peak value so callers can tell a confident measurement from noise."""
+    best_s, best_c = 0, -1.0
+    ref = ref - ref.mean()
+    for s in range(-span, span + 1, 2):
+        p = np.roll(profile, s).astype(float)
+        p -= p.mean()
+        denom = (np.linalg.norm(p) * np.linalg.norm(ref)) or 1.0
+        c = float(p @ ref) / denom
+        if c > best_c:
+            best_c, best_s = c, s
+    return best_s, best_c
+
+
+def realign_local(gray):
+    """Border walk with the text's own corrections at text-cutting seams.
+
+    Seams (jumps > SEAM_JUMP in the forward-filled merged profile) that cut
+    through text get their shift re-measured from the cut glyph halves: the
+    column ink-profiles of half a line-pitch above and below the seam are
+    cross-correlated, and a confident local estimate overrides the border's
+    implied shift for the band below — including local zero, "this text never
+    moved, leave it". Whitespace seams keep border behaviour (cosmetic).
+    Returns None when there is nothing to move."""
+    offsets = merged_offsets(gray)
+    if offsets is None:
+        return None
+    profile = offsets.copy()
+    last = np.nanmedian(offsets)
+    for y in range(len(profile)):
+        if not np.isnan(profile[y]):
+            last = profile[y]
+        profile[y] = last
+    seams = [int(s) for s in np.flatnonzero(np.abs(np.diff(profile)) > SEAM_JUMP)]
+    if not seams:
+        return None
+    ink = _text_ink(gray).astype(float)
+    rule = ink.sum(axis=1) > RULE_ROW_FRAC * gray.shape[1]
+    ink[rule] = 0.0                    # a horizontal rule is structure in both the
+    prof = ink.sum(axis=1)             # seam classes and the correlation windows
+    # median row distance between text-line block centers = the line pitch
+    centers, start = [], None
+    for y, on in enumerate(prof > 0):
+        if on and start is None:
+            start = y
+        elif not on and start is not None:
+            centers.append((start + y) / 2)
+            start = None
+    pitch = float(np.median(np.diff(centers))) if len(centers) >= 3 else 20.0
+    w = max(int(round(pitch / 2)), 4)
+    p2 = profile.copy()
+    for i, s in enumerate(seams):
+        above_mass = float(prof[max(0, s - SEAM_WIN + 1):s + 1].sum())
+        below_mass = float(prof[s + 1:s + 1 + SEAM_WIN].sum())
+        if above_mass < TEXT_MASS_MIN or below_mass < TEXT_MASS_MIN:
+            continue                   # not a text-cutting seam
+        above = ink[max(0, s - w + 1):s + 1].sum(axis=0)
+        below = ink[s + 1:s + 1 + w].sum(axis=0)
+        if above.sum() < TEXT_MASS_MIN or below.sum() < TEXT_MASS_MIN:
+            continue
+        local, corr = _best_shift_corr(below, above)
+        if corr < LOCAL_MIN_CORR or abs(local) >= LOCAL_MAX_SHIFT:
+            continue
+        delta = float(profile[s] - profile[s + 1]) - local
+        if not delta:
+            continue
+        nxt = seams[i + 1] if i + 1 < len(seams) else len(profile) - 1
+        p2[s + 1:nxt + 1] += delta
+    reference = np.nanmedian(p2)
+    out = gray.copy()
+    moved = False
+    for y in range(gray.shape[0]):
+        shift = int(round(reference - p2[y]))
+        if shift:
+            out[y] = np.roll(gray[y], shift)
+            moved = True
+    return out if moved else None
+
+
 # --- optical restoration (behind config.ocr_optical) ------------------------
 # Faint / unevenly-lit scans read as blank to OCR and are erased by a *global*
 # binarization (the global-threshold sweep measured +0 over the ensemble,
