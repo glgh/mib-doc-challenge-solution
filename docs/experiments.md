@@ -522,3 +522,22 @@ end-to-end fee void). Cache carries `struck` via a `SCHEMA` 1→2 bump (backward
 caches rehydrate `struck=[]`); `scripts/backfill_struck.py` augments an existing cache in ~54 s with no
 re-OCR, since strike detection is a pure function of the vector layer.
 
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 35 | 2026-07-25 | (dirty) | **Flag-scan doc-type gate deleted** (`signals.observed_flags` + `has_flag_evidence`): scan every doc and variant reading for flag lines; the per-line legend/negation/≤3-flags guards are the safety mechanism, not `FLAG_DOC_TYPES`. Positive clause of `has_flag_evidence` now shares the widened scan (census can't contradict an emitted flag); the `'flag'+none/clear` negative clause stays biometric-restricted (CFA-risk direction, unmeasured) | **122.79** | 63.93 | 43.10 | 15.76 | 0 | — | keep — every added flag true; suite 50 passed / 1 xfailed |
+
+**Anchor expectation failed in the good direction.** TODO 2.1 predicted exactly three cases change
+(MIB-000656/771/979, the mined doc-gate misses for `illegible_biometrics` — BACKGROUND §3's P=1.00
+evidence was for that flag only). The train-wide replay diff vs row 34 shows **18 cases** change:
+the gate had also been blocking legible flags of other classes on header-mangled pages —
+planetary_embargo ×6, illegible_biometrics ×5, identity_conflict ×3, biohazard_red ×3,
+memory_tampering ×1. **Every one of the 18 added flags matches truth; zero false positives.** 17/18
+now exact-match `risk_flags` (MIB-000724 gains a true flag but still misses the full set); 3 cases
+flip NEEDS_REVIEW→DENIED (85/193/276), all truth-DENIED, via `disqualifying_flag`. 11 of the 18 are
+dev, 7 holdout — the holdout *labels* for those 7 were read only to verify the flag verdicts (no
+tuning; logged for honesty per rows 33/34). Confidence refit on this substrate
+(`fit_confidence.py output/replay_flaggate`): confidence-only nudges (review_flag 0.709→0.718,
+b13_census 0.285→0.279, …), dev total unchanged at reported precision. Two new regression tests
+from the mined lines (656/771/979 verbatim reads on DOC_OTHER pages; 747/506 damage-marker
+controls on both page types).
+

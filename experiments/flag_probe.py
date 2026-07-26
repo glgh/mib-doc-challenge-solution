@@ -11,12 +11,15 @@ strategies through the REAL signals+policy stack:
   quorum2  baseline ∪ flags asserted by >=2 variant readings
 
 Per-variant scanning mirrors `packet.assemble`: the decoy-page filter (case-id
-mismatch, with the OCR plausible-misread tolerance) and the flag-doc-type gate
-(mib.signals.FLAG_DOC_TYPES) both apply per reading, and `_flags_in_line`'s
-legend/negation guards run per line as in production. risk_flags is scored the
-way scripts/evaluate.py does: exact set equality, all-or-nothing.
+mismatch, with the OCR plausible-misread tolerance) applies per reading, and
+`_flags_in_line`'s legend/negation guards run per line as in production. (The
+flag-doc-type gate this probe used to mirror was deleted from production —
+BACKGROUND §3: P=1.00 with the gate removed; the guards are the safety
+mechanism.) risk_flags is scored the way scripts/evaluate.py does: exact set
+equality, all-or-nothing.
 
   experiments/flag_probe.py [cache.jsonl]   (default output/cache/reads_hard.jsonl)
+
 """
 import csv
 import sys
@@ -43,7 +46,7 @@ def flag_set(v):
 
 def variant_flag_reads(case_rec, case_id):
     """(doc_type, flags) per variant reading that would bear flags in assemble:
-    same decoy filter, same flag-doc-type gate."""
+    same decoy filter; no doc-type gate (deleted from production)."""
     out = []
     for p in case_rec["pages"]:
         for r in (p["reads"] or []):
@@ -53,8 +56,6 @@ def variant_flag_reads(case_rec, case_id):
                     not any(textmatch.plausible_misread(case_id, i) for i in ids):
                 continue                                  # decoy page for another applicant
             dtype = parse.detect_doc_type(lines)
-            if dtype not in signals.FLAG_DOC_TYPES:
-                continue
             flags = set()
             for line in lines:
                 flags |= signals._flags_in_line(line)

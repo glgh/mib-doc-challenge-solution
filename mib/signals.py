@@ -10,9 +10,6 @@ from . import parse, vocab
 from .packet import SRC_OCR
 from .parse import SPONSOR_RE, norm_name
 
-# Flags are asserted on these documents; scanning others invites false positives
-# from decoys and form legends. (B-13 slip, registry extract, adjudicator note.)
-FLAG_DOC_TYPES = (parse.DOC_ADJUDICATOR, parse.DOC_BIOMETRIC, parse.DOC_REGISTRY)
 _TOKEN_SPLIT = re.compile(r"[\s|,;:/()\[\]]+")
 _LEGEND_RE = re.compile(
     r"\b(option|one of|any of|possible|valid value|choose|list of|e\.g\.)\b", re.I)
@@ -56,35 +53,49 @@ def observed_flags(packet):
     evidence. Measured on the hard-set ensemble (experiments/flag_probe.py):
     every flag recovered this way was true, none hallucinated — the per-line
     legend/negation guards hold on garbled variants as well.
+
+    No doc-type gate. Flags used to be scanned only on adjudicator/biometric/
+    registry docs, which skipped any B-13 whose OCR-mangled header defeated
+    `detect_doc_type` (MIB-000656/771/979 print the token on pages typed OTHER).
+    Label mining (BACKGROUND §3): whenever the token is legible in any read,
+    truth carries the flag — P=1.00, zero false positives, with the gate removed
+    entirely. The per-line guards, not the gate, are the safety mechanism.
+
     """
     flags = set()
-    for dtype, _src, kv in packet.docs:
-        if dtype in FLAG_DOC_TYPES:
-            for line in kv.get("_raw", []):
-                flags |= _flags_in_line(line)
-    for dtype, kv in packet.variant_docs:
-        if dtype in FLAG_DOC_TYPES:
-            for line in kv.get("_raw", []):
-                flags |= _flags_in_line(line)
+    for _dtype, _src, kv in packet.docs:
+        for line in kv.get("_raw", []):
+            flags |= _flags_in_line(line)
+    for _dtype, kv in packet.variant_docs:
+        for line in kv.get("_raw", []):
+            flags |= _flags_in_line(line)
     return flags
 
 
-def has_flag_evidence(packet):
-    """Whether the B-13 slip's risk line was actually read — a flag or an explicit
+def has_flag_evidence(packet, observed=None):
+    """Whether the risk line was actually read — a flag or an explicit
     'none'/'clear' — versus unreadable debris. Lets the risk-concealment census in
     policy tell 'flags: none' from 'flags: <unreadable>'; unreadable is not clear.
 
     A losing variant that read the risk line counts: the evidence was legible in
     some reading of the slip, even if `best_read` preferred another.
+
+    The positive clause shares `observed_flags`'s widened scan (any doc, any
+    variant), so the census can never contradict an emitted flag. The negative
+    clause — an explicit 'flags: none/clear' — stays restricted to biometric-typed
+    readings: widening it could flip `b13_census` into `clean_approve`, the
+    CFA-risk direction, and is unmeasured.
     """
+    if observed is None:
+        observed = observed_flags(packet)
+    if observed:
+        return True
     bios = [packet.biometric] + [kv for d, kv in packet.variant_docs
                                  if d == parse.DOC_BIOMETRIC]
     for bio in bios:
         if bio.get("observed_flags") is not None:   # parsed key present (incl. 'none')
             return True
         for line in bio.get("_raw", []):
-            if _flags_in_line(line):
-                return True
             low = line.lower()
             if "flag" in low and re.search(r"\b(none|clear)\b", low):
                 return True
@@ -195,6 +206,6 @@ def derive(packet, values):
         # `has_biometric` only says a slip was detected; the risk-concealment
         # census is about whether its risk line was actually read, so policy
         # needs to tell "flags: none" from "flags: <unreadable>".
-        "has_flag_evidence": has_flag_evidence(packet),
+        "has_flag_evidence": has_flag_evidence(packet, observed),
         "scan_only_pages": packet.scan_only_pages,
     }

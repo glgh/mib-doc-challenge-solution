@@ -257,6 +257,46 @@ def test_flag_extraction_does_not_fabricate_from_legend_or_negation():
                  "memory_tampering | planetary_embargo") == set()
 
 
+def test_flag_scan_reads_pages_whose_header_defeated_doc_typing():
+    """The flag scan has no doc-type gate: MIB-000656/771/979 print
+    `Observed flags: illegible_biometrics` on B-13 pages whose OCR-mangled
+    headers type as DOC_OTHER, and the old FLAG_DOC_TYPES gate skipped them
+    (BACKGROUND §3: with the gate removed, P=1.00, 94/94, zero false positives).
+    Lines below are the mined reads verbatim (771's token is one glyph off and
+    resolves through the confusion-weighted matcher)."""
+    from mib import signals
+    from mib.packet import SRC_OCR, Packet
+
+    mined = [
+        ["bee bbe Af ot", "Ae? aes", "Observed flags: illegible_biometrics"],   # 656 p3
+        ["Case ID: MIB-O00771", "ce", "Observed flags: Begible_biometrics"],    # 771 p3
+        ["Case ID: MIB-000979", "SCAN IMAGE",
+         "Observed flags: illegible_biometrics"],                               # 979 p5
+    ]
+    for lines in mined:
+        pkt = Packet()
+        pkt.docs = [(parse.DOC_OTHER, SRC_OCR, {"_raw": lines})]
+        assert signals.observed_flags(pkt) == {"illegible_biometrics"}, lines
+        # The census must agree with the emitted flag, whatever the doc type.
+        assert signals.has_flag_evidence(pkt)
+
+
+def test_damage_markers_on_untyped_pages_do_not_become_flags():
+    """The controls for the gate deletion: MIB-000747/506 print a damage marker
+    in the flags cell — OCR reads it perfectly, but there is no flag token on
+    the paper, so nothing may be emitted from any page type."""
+    from mib import signals
+    from mib.packet import SRC_OCR, Packet
+
+    for line in ("Pbserved flags: [RISK PANEL MISSING]",     # 747 p5
+                 "Observed fags: [RISK PANEL = NG]",         # 506
+                 "Observed flags: [RISK PANEL NG)"):
+        for dtype in (parse.DOC_BIOMETRIC, parse.DOC_OTHER):
+            pkt = Packet()
+            pkt.docs = [(dtype, SRC_OCR, {"_raw": [line]})]
+            assert signals.observed_flags(pkt) == set(), (dtype, line)
+
+
 def test_registry_eroded_labels_recover_values():
     """MIB-000293 p0 (row 32): a faint registry scan erodes the two-line labels,
     leaving label tails fused to values and a bare name. The fallback must
