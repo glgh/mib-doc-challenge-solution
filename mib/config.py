@@ -46,8 +46,10 @@ RESTORE = "bands"
 SCHEMA = 4
 
 # A mismatch here means the two artifacts describe different pipelines and any
-# join across them is meaningless.
-CRITICAL_KEYS = ("restore", "early_stop", "ocr_passes")
+# join across them is meaningless. A key MISSING from a stamp (artifact written
+# before the key existed) is tolerated — only two present-but-different values
+# refuse the join.
+CRITICAL_KEYS = ("restore", "early_stop", "ocr_passes", "ocr_optical")
 # A mismatch here is usually just as invalidating, but the working tree is
 # routinely dirty mid-phase and rebuilding every artifact per commit is not
 # affordable, so it warns instead of failing.
@@ -95,17 +97,20 @@ def select_metric():
 
 def ocr_optical():
     """Whether S2 adds optical variants — local-adaptive threshold + autocontrast
-    (`mib.imaging`) — to the OCR ensemble. Recovers faint/unevenly-lit scans a
-    global binarization erases; the scan-page miner shows label-proven headroom.
+    (`mib.imaging`) — to weak pages of the OCR ensemble (render.reads_for gates
+    on the page reading below GOOD_ENOUGH). Recovers faint/unevenly-lit scans a
+    global binarization erases.
 
-    Off by default so it lands score-neutral until measured; opt in with
-    MIB_OCR_OPTICAL=on. Stamped for visibility but deliberately NOT yet in
-    CRITICAL_KEYS: it changes which reading wins, so promote it to critical once
-    `require_agreement` tolerates keys absent from stamps written before it
-    existed — otherwise every join with an older cache false-positives on
-    None-vs-False.
+    ON by default since the conf-selection era (row 48): its killer under ev
+    was well-formed binarized garbage outscoring correct readings (11 recovered
+    / 10 corrupted, unguarded); under conf + the weak-page gate the hard-set
+    A/B measured 1 better / 0 worse. ~55% of OCR pages are gate-eligible
+    (~+36% S2 time on the hard tail, well inside the 6 s/PDF budget). Opt out
+    with MIB_OCR_OPTICAL=off for A/Bs. Critical: it changes which reading wins,
+    so caches built either side of the flip must not be joined
+    (`require_agreement` tolerates stamps from before the key existed).
     """
-    return os.environ.get("MIB_OCR_OPTICAL", "").strip().lower() in ("on", "1", "true", "yes")
+    return os.environ.get("MIB_OCR_OPTICAL", "on").strip().lower() in ("on", "1", "true", "yes")
 
 
 # The Docker contract gives 4 vCPU, so the submission must default to 4 workers.
@@ -195,7 +200,8 @@ def require_agreement(labelled):
 
     problems = []
     for key in CRITICAL_KEYS + ADVISORY_KEYS:
-        seen = {m.get(key) for _n, m in stamped}
+        # None = stamp predates the key; only present-but-different values conflict.
+        seen = {m.get(key) for _n, m in stamped} - {None}
         if len(seen) > 1:
             detail = ", ".join(f"{n}={m.get(key)!r}" for n, m in stamped)
             problems.append((key, f"{key} differs across inputs: {detail}"))
