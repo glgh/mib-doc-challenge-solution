@@ -216,3 +216,15 @@ def to_png_bytes(gray):
     buf = io.BytesIO()
     Image.fromarray(gray).save(buf, format="PNG")
     return buf.getvalue()
+
+
+def to_pnm_bytes(arr):
+    """Raw PNM encode (P5 gray / P6 RGB) — same pixels as a lossless PNG at a
+    fraction of the encode cost; tesseract's input, never an archival format.
+    Only paths that already round-trip through lossless PNG may use this: the
+    embedded-original-bytes path must keep its exact source encoding."""
+    if arr.ndim == 2:
+        header = b"P5 %d %d 255\n" % (arr.shape[1], arr.shape[0])
+    else:
+        header = b"P6 %d %d 255\n" % (arr.shape[1], arr.shape[0])
+    return header + arr.tobytes()

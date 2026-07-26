@@ -77,8 +77,7 @@ What the instruments bought, all on dev at `skew` and all newly measurable:
 | 15b | 2026-07-22 | (P1b) | Per-field candidate preference: prefer the clean text-layer read, settle ties by field-manual trust order | **115.43** | 61.27 | **39.00** | 15.16 | 0 | — | keep |
 | — | 2026-07-22 | (P1b) | *Also tried:* vocab passthrough for unseen `home_world` / `species_code` | 115.39 | 61.27 | 38.95 | 15.16 | 0 | — | **reject** |
 
-(Renumbered from a duplicate "16" — the exhaustive-OCR row above is the one every "row 16" citation
-means.) Row 15b is the first change measured entirely through `scripts/replay.py` — seconds per variant against a cached page-text dump, rather than a 40-minute pipeline run. The full 2×2 matrix was scored in about a minute:
+(Renumbered from a duplicate "16" — the exhaustive-OCR row above is the one every "row 16" citation means.) Row 15b is the first change measured entirely through `scripts/replay.py` — seconds per variant against a cached page-text dump, rather than a 40-minute pipeline run. The full 2×2 matrix was scored in about a minute:
 
 | passthrough | preference | total | extr |
 | --- | --- | ---: | ---: |
@@ -119,14 +118,9 @@ The defect: `signals.observed_flags` exact-matched `token in ALL_FLAGS` against 
 
 Against the corrected P3 baseline on this cache: **46 cases gain a flag, 0 phantom** (every added flag is in truth), **0 true flags removed**, and **2 adjudication flips, both NEEDS_REVIEW→DENIED with truth DENIED** (safe direction, CFA stays 0). Guards proven by unit tests (`tests/test_regression.py`): explicit `none`/`clear`, option legends, and negated sentences (`cleared of biohazard_red`) all yield nothing; the injection differential tests still pass because `_raw` never holds hidden text.
 
-**Confirmed by a full-pipeline eval (2026-07-23, HEAD `17f82ae`, `output/eval_head`):** the committed
-tree runs the real pipeline end-to-end on the 1,000-PDF train set at **dev 119.10** (class 62.41, extr
-41.36, calib 15.32, CFA 0, 0 missing) in 515s — matching the row-18 cache replay to within 0.01, so the
-provisional caveat is discharged. `read_case` non-determinism is still real (it moves ~0.01) but does
-not move the sign or safety. The non-determinism investigation remains open.
+**Confirmed by a full-pipeline eval (2026-07-23, HEAD `17f82ae`, `output/eval_head`):** the committed tree runs the real pipeline end-to-end on the 1,000-PDF train set at **dev 119.10** (class 62.41, extr 41.36, calib 15.32, CFA 0, 0 missing) in 515s — matching the row-18 cache replay to within 0.01, so the provisional caveat is discharged. `read_case` non-determinism is still real (it moves ~0.01) but does not move the sign or safety. The non-determinism investigation remains open.
 
-**Learned decider re-measured on the 119.10 substrate — edge inverted, promotion shelved (2026-07-23,
-`output/eval_head`, dev 5-fold OOF, `scripts/train_decision.py`):**
+**Learned decider re-measured on the 119.10 substrate — edge inverted, promotion shelved (2026-07-23, `output/eval_head`, dev 5-fold OOF, `scripts/train_decision.py`):**
 
 | decider | class /80eq | Brier | CFA |
 | --- | ---: | ---: | ---: |
@@ -136,24 +130,9 @@ not move the sign or safety. The non-determinism investigation remains open.
 | MLP(16, α=1) + cal | 63.14 | 0.1378 | 20 |
 | MLP(32) + branch | 60.16 | 0.2013 | 28 |
 
-The learned decider's advantage over rules has **inverted**: it was +1.16 class pts on the 115.20
-substrate (bake-off above), and is **−0.50** here, with **14 CFAs vs rules' 0** and a worse Brier. The
-mechanism is staleness, not a bug: the learned decider is a *residual-corrector on the rules cascade*,
-and the flag-extraction (row 18) + P3 parse work strengthened rules to the point that there is no
-residual left to correct — it now adds noise and false approvals. Divergence-by-branch confirms it
-bleeds where it diverges: `fee_unknown` (n=50) **−0.73** and `fee_unpaid` (n=2) −0.17 swamp its gains
-(`missing_arrival` +0.26, `missing_sponsor` +0.13, `b13_census` +0.09), and `fee_unknown` is a
-data-availability wall (fee genuinely absent from the document — STATUS Q5), not an ML-winnable cell.
-The CFA veto cannot rescue it: reaching CFA-parity with rules needs t≤0.05 → 58.50 (−3.9). It is
-**strictly dominated** — no veto setting both matches CFA=0 and beats rules' class points.
+The learned decider's advantage over rules has **inverted**: it was +1.16 class pts on the 115.20 substrate (bake-off above), and is **−0.50** here, with **14 CFAs vs rules' 0** and a worse Brier. The mechanism is staleness, not a bug: the learned decider is a *residual-corrector on the rules cascade*, and the flag-extraction (row 18) + P3 parse work strengthened rules to the point that there is no residual left to correct — it now adds noise and false approvals. Divergence-by-branch confirms it bleeds where it diverges: `fee_unknown` (n=50) **−0.73** and `fee_unpaid` (n=2) −0.17 swamp its gains (`missing_arrival` +0.26, `missing_sponsor` +0.13, `b13_census` +0.09), and `fee_unknown` is a data-availability wall (fee genuinely absent from the document — STATUS Q5), not an ML-winnable cell. The CFA veto cannot rescue it: reaching CFA-parity with rules needs t≤0.05 → 58.50 (−3.9). It is **strictly dominated** — no veto setting both matches CFA=0 and beats rules' class points.
 
-The overfitting guard held: the best *naive* dev read, **MLP(16) at 63.14**, wins only by carrying
-**20 CFAs** and a worse Brier — a catastrophic-false-approval pattern that fails the interview bar
-regardless of raw score (MLP already showed 31 CFA on the prior substrate). Holdout was **not** read:
-the dev-OOF measurement already says "don't promote," so there is no frozen model worth a holdout read.
-**Decision: keep `MIB_DECIDER=rules` (already the default); the shipped `decision_model.npz` is
-`d6427f8`-trained and now silently scores drifted features, so it is frozen and marked superseded — not
-a live promotion candidate — until there is an edge the rules cascade cannot capture.**
+The overfitting guard held: the best *naive* dev read, **MLP(16) at 63.14**, wins only by carrying **20 CFAs** and a worse Brier — a catastrophic-false-approval pattern that fails the interview bar regardless of raw score (MLP already showed 31 CFA on the prior substrate). Holdout was **not** read: the dev-OOF measurement already says "don't promote," so there is no frozen model worth a holdout read. **Decision: keep `MIB_DECIDER=rules` (already the default); the shipped `decision_model.npz` is `d6427f8`-trained and now silently scores drifted features, so it is frozen and marked superseded — not a live promotion candidate — until there is an edge the rules cascade cannot capture.**
 
 ---
 
@@ -161,36 +140,16 @@ a live promotion candidate — until there is an edge the rules cascade cannot c
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
 | 19 | 2026-07-23 | (dirty) | **Runtime gate: first-ever contract-limits Docker run** (`scripts/run_docker_submission.py`) of the shipped `skew` config, scored on the container's own output | **119.17** | 62.51 | 41.30 | 15.36 | 0 | **0.54 s/PDF** | keep — baseline |
 
-Row 19 is a **runtime measurement**, not a scoring change: the shipped `skew`/psm11/rules config, but
-run for the first time under the *exact* Docker contract (`--network none --cpus 4 --memory 8g
---pids-limit 512 --read-only --tmpfs /tmp:…size=2g`, image **0.13 GiB**) rather than on a contended
-laptop. Two results, both new:
+Row 19 is a **runtime measurement**, not a scoring change: the shipped `skew`/psm11/rules config, but run for the first time under the *exact* Docker contract (`--network none --cpus 4 --memory 8g --pids-limit 512 --read-only --tmpfs /tmp:…size=2g`, image **0.13 GiB**) rather than on a contended laptop. Two results, both new:
 
-- **Runtime fits with ~11× headroom, and the heavy tail was a contention artifact.** 1,000 PDFs in
-  **542 s wall → 0.54 s/PDF** (budget 6), projecting to **0.75 h for 5,000** (budget 8.3 h). Per-case
-  `cost_ms`: mean 2.16 s, p50 2.01, p90 4.14, p99 6.43, **max 8.33 s**. The laptop figures this repo
-  feared (p99 57 s, max 107 s) were contention, not the pipeline — on 4 dedicated vCPU the tail is
-  tame. Wall = compute (2160 s) / 4 workers, self-consistent. **This dissolves the runtime objection
-  that gated `turn`/`bands` and would gate dual-PSM: even a 2× OCR cost lands far under budget.**
-  (STATUS open-question 2 answered; question 3's premise — that `turn`/`bands` are unaffordable — is
-  now in doubt and should be re-measured directly.)
-- **The shipped container reproduces the host score, and the host↔container OCR skew is score-neutral
-  and CFA-safe.** Container dev **119.17** (class 62.51 / extr 41.30 / calib 15.36 / CFA 0 / Brier
-  0.1159) vs host `eval_head` **119.10** — within nondeterminism. Parity vs `eval_head` at the row
-  level: 0 case-id diffs, but **7/1000 adjudications (0.70%)** and ~4 % of `applicant_name` differ,
-  because the container's Debian `tesseract` is a *different build* than the host's — not run-to-run
-  jitter. The differences roughly cancel in aggregate (class +0.10, extr −0.06) and **CFA stays 0**,
-  so the host replay loop is a faithful proxy for the shipped artifact. Recorded as a standing caveat:
-  the ship number ultimately comes from container output, not host replay.
+- **Runtime fits with ~11× headroom, and the heavy tail was a contention artifact.** 1,000 PDFs in **542 s wall → 0.54 s/PDF** (budget 6), projecting to **0.75 h for 5,000** (budget 8.3 h). Per-case `cost_ms`: mean 2.16 s, p50 2.01, p90 4.14, p99 6.43, **max 8.33 s**. The laptop figures this repo feared (p99 57 s, max 107 s) were contention, not the pipeline — on 4 dedicated vCPU the tail is tame. Wall = compute (2160 s) / 4 workers, self-consistent. **This dissolves the runtime objection that gated `turn`/`bands` and would gate dual-PSM: even a 2× OCR cost lands far under budget.** (STATUS open-question 2 answered; question 3's premise — that `turn`/`bands` are unaffordable — is now in doubt and should be re-measured directly.)
+- **The shipped container reproduces the host score, and the host↔container OCR skew is score-neutral and CFA-safe.** Container dev **119.17** (class 62.51 / extr 41.30 / calib 15.36 / CFA 0 / Brier 0.1159) vs host `eval_head` **119.10** — within nondeterminism. Parity vs `eval_head` at the row level: 0 case-id diffs, but **7/1000 adjudications (0.70%)** and ~4 % of `applicant_name` differ, because the container's Debian `tesseract` is a *different build* than the host's — not run-to-run jitter. The differences roughly cancel in aggregate (class +0.10, extr −0.06) and **CFA stays 0**, so the host replay loop is a faithful proxy for the shipped artifact. Recorded as a standing caveat: the ship number ultimately comes from container output, not host replay.
 
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
 | 20 | 2026-07-23 | (dirty) | **Dual-pass Tesseract PSM 3+11** (`MIB_OCR_PASSES=dual`): a PSM 3 read per image alongside PSM 11, `best()` keeps the stronger | **119.96** | 62.76 | 41.84 | 15.36 | 0 | unresolved | **flag-gated, NOT shipped** |
 
-**+0.87 dev over its own baseline, at CFA 0 — and still not shipped, because the cost never got a
-clean measurement.** Both caches were rebuilt from the current tree so the only difference is the
-flag (`train_skew_psm11.jsonl` vs `train_skew_dual.jsonl`); the psm11 side replays to **119.09**
-against the committed `eval_head` 119.10, which validates the substrate before reading the delta.
+**+0.87 dev over its own baseline, at CFA 0 — and still not shipped, because the cost never got a clean measurement.** Both caches were rebuilt from the current tree so the only difference is the flag (`train_skew_psm11.jsonl` vs `train_skew_dual.jsonl`); the psm11 side replays to **119.09** against the committed `eval_head` 119.10, which validates the substrate before reading the delta.
 
 | cache | Extr | Class | Calib | Total | CFA | Brier |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -199,16 +158,9 @@ against the committed `eval_head` 119.10, which validates the substrate before r
 
 Gains on both axes (4 more `correct`, 4 fewer `conservative_review`), Brier slightly better, CFA 0.
 
-**Why it is off anyway — the cost is a tail, not a factor.** "Dual" doubles the *number* of OCR calls,
-but PSM 3 is a different algorithm from PSM 11: PSM 11 skips layout analysis and hunts text blobs,
-while PSM 3 runs the full pipeline (connected components → blob classification → column detection →
-line/baseline finding → reading order). On the geometrically destroyed scans this corpus is built from,
-PSM 3 tries to infer a page structure that does not exist, and noise inflates the component count that
-its grouping stage is superlinear in. So it is slowest exactly where the pages are worst — and our
-exhaustive variant fan-out (`{embedded, render} × {none, deskew}`) multiplies it by ~4 per scan page.
+**Why it is off anyway — the cost is a tail, not a factor.** "Dual" doubles the *number* of OCR calls, but PSM 3 is a different algorithm from PSM 11: PSM 11 skips layout analysis and hunts text blobs, while PSM 3 runs the full pipeline (connected components → blob classification → column detection → line/baseline finding → reading order). On the geometrically destroyed scans this corpus is built from, PSM 3 tries to infer a page structure that does not exist, and noise inflates the component count that its grouping stage is superlinear in. So it is slowest exactly where the pages are worst — and our exhaustive variant fan-out (`{embedded, render} × {none, deskew}`) multiplies it by ~4 per scan page.
 
-Measured on the host (1,000 cases): psm11 511 s vs dual 2396 s, per-case p50 1948→4145 ms (2.1×),
-p99 5977→63110 ms (10.6×), **max 7879→106718 ms (13.5×)**. The distribution is the point:
+Measured on the host (1,000 cases): psm11 511 s vs dual 2396 s, per-case p50 1948→4145 ms (2.1×), p99 5977→63110 ms (10.6×), **max 7879→106718 ms (13.5×)**. The distribution is the point:
 
 | population | n | median slowdown |
 | --- | ---: | ---: |
@@ -217,26 +169,13 @@ p99 5977→63110 ms (10.6×), **max 7879→106718 ms (13.5×)**. The distributio
 | 3+ scan pages | 353 | 1.7× |
 | **worst 5% of cases** | 50 | **10–13.5×** |
 
-The worst 5% carry **33% of all the added cost**, and the top 8 are all near-fully-scanned packets —
-so it tracks *damage severity*, not page count. The median case behaves like the naive "2×" intuition.
+The worst 5% carry **33% of all the added cost**, and the top 8 are all near-fully-scanned packets — so it tracks *damage severity*, not page count. The median case behaves like the naive "2×" intuition.
 
-**The contract-limits run did not survive.** `run_docker_submission.py --ocr-passes dual` died at
-486/1000 after 1094 s (`unexpected EOF`, exit 125) and took the Docker daemon with it (`/version` and
-`/info` returned 500 afterwards). The host was contended by an unrelated GUI process at the time, so
-the crash is not attributable to dual alone — but two things did happen on the record: the **120 s
-per-case OCR budget fired** (`MIB-000243: OCR budget spent, text layer only for page 3+`), which is a
-silent quality regression, and the run produced no usable timing. **Decision: keep `MIB_OCR_PASSES=psm11`
-(the default, and now pinned in the `Dockerfile`), exactly as `turn`/`bands` are kept reachable but
-unbanked.** Reviving dual means gating the PSM 3 pass rather than running it on every image.
+**The contract-limits run did not survive.** `run_docker_submission.py --ocr-passes dual` died at 486/1000 after 1094 s (`unexpected EOF`, exit 125) and took the Docker daemon with it (`/version` and `/info` returned 500 afterwards). The host was contended by an unrelated GUI process at the time, so the crash is not attributable to dual alone — but two things did happen on the record: the **120 s per-case OCR budget fired** (`MIB-000243: OCR budget spent, text layer only for page 3+`), which is a silent quality regression, and the run produced no usable timing. **Decision: keep `MIB_OCR_PASSES=psm11` (the default, and now pinned in the `Dockerfile`), exactly as `turn`/`bands` are kept reachable but unbanked.** Reviving dual means gating the PSM 3 pass rather than running it on every image.
 
-Incidental: 486 valid rows survived the crash on disk — the row-17 streaming-write robustness working
-under a real container death, where the old `pool.map` design would have left an empty file.
+Incidental: 486 valid rows survived the crash on disk — the row-17 streaming-write robustness working under a real container death, where the old `pool.map` design would have left an empty file.
 
-**Open, and it decides the gate direction:** we do not yet know *which* pages produced the +0.87,
-because the cache stores only the chosen line list, not the winning variant. The plan assumed PSM 3
-should run on pages *below* `GOOD_ENOUGH`; the cost data hints the opposite (PSM 3 earns its keep on
-dense intact forms and burns time on wreckage it cannot segment). Recording the winning variant is a
-one-line instrument and is the prerequisite for any gated retry.
+**Open, and it decides the gate direction:** we do not yet know *which* pages produced the +0.87, because the cache stores only the chosen line list, not the winning variant. The plan assumed PSM 3 should run on pages *below* `GOOD_ENOUGH`; the cost data hints the opposite (PSM 3 earns its keep on dense intact forms and burns time on wreckage it cannot segment). Recording the winning variant is a one-line instrument and is the prerequisite for any gated retry.
 
 ---
 
@@ -247,10 +186,7 @@ one-line instrument and is the prerequisite for any gated retry.
 | 22b | 2026-07-24 | 068e99e | **Refit the stale confidence table.** It dated to `f0e7f62`, fitted when dev was **114.43**, and had never been refit through P1b/P2/P3/rows 16 & 18 | **119.13** | 62.41 | 41.36 | 15.35 | 0 | — | keep |
 | 23 | 2026-07-24 | (dirty) | **C** — `mib/corpus.py`: label-free recurring-sponsor detection + post-stream revision in `solution.py`. No-op on the shipped config; measured by ablation | 119.13 | 62.41 | 41.36 | 15.35 | 0 | — | keep |
 
-**Row 21 — the fitted constants are not the overfit (2026-07-24, `output/audit_oof`, replay on
-`train_skew.jsonl`, dev).** Four constants are fitted by looking at train labels: `STALE_CUTOFF`,
-`FULL/PARTIAL_EMBARGO_WORLDS`, the three mined `REVOKED_SPONSORS` ids, and `confidence_table.json`.
-Refitting each from 4/5 of dev and scoring the held-out fifth attributes the gap:
+**Row 21 — the fitted constants are not the overfit (2026-07-24, `output/audit_oof`, replay on `train_skew.jsonl`, dev).** Four constants are fitted by looking at train labels: `STALE_CUTOFF`, `FULL/PARTIAL_EMBARGO_WORLDS`, the three mined `REVOKED_SPONSORS` ids, and `confidence_table.json`. Refitting each from 4/5 of dev and scoring the held-out fifth attributes the gap:
 
 | refit | Class /80 | Calib /20 | CFA | Δ total |
 | --- | ---: | ---: | ---: | ---: |
@@ -261,53 +197,18 @@ Refitting each from 4/5 of dev and scoring the held-out fifth attributes the gap
 | `confidence_table.json` | 62.41 | 15.09 | 0 | −0.23 |
 | all four | 62.41 | 15.09 | 0 | **−0.23** |
 
-**The honest dev number is 118.86 against a reported 119.10 — a fitting bias of −0.23, entirely the
-confidence table.** The decision constants do not move at all: every fold re-mines *identical* entity
-lists (2 full-embargo worlds, 1 partial, the same 3 sponsor ids), and the `STALE_CUTOFF` refits land
-between 2025-11-08 and 2026-01-02 — each fold's own max-margin midpoint of the empty band between
-its latest stale-denied and earliest fresh non-DIP arrival (the full-corpus band is 2025-12-09 →
-2026-01-26; folds that drop the boundary cases widen it downward), so they are the same decision
-boundary written differently. A shrinkage sweep confirms the table needs no fix either: OOF calibration is 15.10 /
-**15.09** / 15.07 / 15.05 / 15.01 at `SHRINK_K` = 5 / **10** / 20 / 40 / 80, so the shipped k=10 is
-already optimal and the only defect was *reporting* 15.32 as if it generalized.
+**The honest dev number is 118.86 against a reported 119.10 — a fitting bias of −0.23, entirely the confidence table.** The decision constants do not move at all: every fold re-mines *identical* entity lists (2 full-embargo worlds, 1 partial, the same 3 sponsor ids), and the `STALE_CUTOFF` refits land between 2025-11-08 and 2026-01-02 — each fold's own max-margin midpoint of the empty band between its latest stale-denied and earliest fresh non-DIP arrival (the full-corpus band is 2025-12-09 → 2026-01-26; folds that drop the boundary cases widen it downward), so they are the same decision boundary written differently. A shrinkage sweep confirms the table needs no fix either: OOF calibration is 15.10 / **15.09** / 15.07 / 15.05 / 15.01 at `SHRINK_K` = 5 / **10** / 20 / 40 / 80, so the shipped k=10 is already optimal and the only defect was *reporting* 15.32 as if it generalized.
 
 Two methodology notes, both of which changed the answer:
 
-- **The miners must read the label columns, not extracted values.** A first pass mined `home_world`
-  from the pipeline's own output (87.9% accurate) and reported −1.23 with a CFA. That was the audit's
-  own extraction noise: Wolf-1061c is 32/32 denied non-DIP by the labels but only 22/26 by
-  extraction, so it dropped out of the partial-embargo list and `MIB-000752` became a false approval.
-  Constants are derived from labelled data, so a fold-refit has to be too.
-- **A no-refit control is mandatory.** The first attribution run passed live module objects for the
-  constants it was *not* refitting, and the in-place patcher cleared them before copying — so those
-  runs silently executed with empty embargo sets and an empty confidence table. The control (refit
-  nothing → exactly 119.10) is what caught it.
+- **The miners must read the label columns, not extracted values.** A first pass mined `home_world` from the pipeline's own output (87.9% accurate) and reported −1.23 with a CFA. That was the audit's own extraction noise: Wolf-1061c is 32/32 denied non-DIP by the labels but only 22/26 by extraction, so it dropped out of the partial-embargo list and `MIB-000752` became a false approval. Constants are derived from labelled data, so a fold-refit has to be too.
+- **A no-refit control is mandatory.** The first attribution run passed live module objects for the constants it was *not* refitting, and the in-place patcher cleared them before copying — so those runs silently executed with empty embargo sets and an empty confidence table. The control (refit nothing → exactly 119.10) is what caught it.
 
-**Scope, stated plainly:** this varies four *fitted values*. It does not vary the cascade's structure
-— which branches exist, in what order — or the ~10 hand-tuned thresholds (`match_flag_token` 0.7/0.15,
-`_CONFUSION_COST` 0.3, the `snap` cutoffs, the `len(found) <= 3` legend guard). Those were also
-selected on dev and are the more likely source of the v1 dev→holdout gap (115.43 → 113.46, −1.97),
-which this result does **not** explain away.
+**Scope, stated plainly:** this varies four *fitted values*. It does not vary the cascade's structure — which branches exist, in what order — or the ~10 hand-tuned thresholds (`match_flag_token` 0.7/0.15, `_CONFUSION_COST` 0.3, the `snap` cutoffs, the `len(found) <= 3` legend guard). Those were also selected on dev and are the more likely source of the v1 dev→holdout gap (115.43 → 113.46, −1.97), which this result does **not** explain away.
 
-**Row 22 — one rule, two homes, and the wrong one won.** `signals.derive` added `planetary_embargo`
-for any `FULL_EMBARGO_WORLDS` origin. That duplicated policy's `embargo_world` branch and, sitting one
-position earlier in the cascade, shadowed it into dead code: **0 of 700 dev cases ever reached
-`embargo_world`**, and because `fit_confidence.py` never saw a sample the branch was *absent from
-`confidence_table.json`* and silently answered from the hand-set 0.9 fallback. The 31 full-embargo dev
-cases split **15 / 8 / 8**: fifteen carry an *observed* planetary_embargo and legitimately keep
-denying via `disqualifying_flag`, eight are settled earlier by an adjudicator finding, and **eight had
-no observed flag at all** — those were the ones the inference was carrying, and they now land on
-`embargo_world`. (The "23 observed" figure is 15 + the 8 adjudicator cases, not the 23 that were in
-`disqualifying_flag`; conflating the two briefly made this look like a pure no-op.) The branch gains a
-real fitted entry (0.95, n=8, raw 1.000) and a backwards `signals → policy` import goes away.
-Decisions are unchanged — both branches deny.
+**Row 22 — one rule, two homes, and the wrong one won.** `signals.derive` added `planetary_embargo` for any `FULL_EMBARGO_WORLDS` origin. That duplicated policy's `embargo_world` branch and, sitting one position earlier in the cascade, shadowed it into dead code: **0 of 700 dev cases ever reached `embargo_world`**, and because `fit_confidence.py` never saw a sample the branch was *absent from `confidence_table.json`* and silently answered from the hand-set 0.9 fallback. The 31 full-embargo dev cases split **15 / 8 / 8**: fifteen carry an *observed* planetary_embargo and legitimately keep denying via `disqualifying_flag`, eight are settled earlier by an adjudicator finding, and **eight had no observed flag at all** — those were the ones the inference was carrying, and they now land on `embargo_world`. (The "23 observed" figure is 15 + the 8 adjudicator cases, not the 23 that were in `disqualifying_flag`; conflating the two briefly made this look like a pure no-op.) The branch gains a real fitted entry (0.95, n=8, raw 1.000) and a backwards `signals → policy` import goes away. Decisions are unchanged — both branches deny.
 
-**Correction: B2 is exactly score-neutral; the +0.03 came from something else that rode along in the
-same commit.** Refitting the table on the *pre-B2* eval reproduces every shipped value except
-`embargo_world`, which proves the numeric movement was not caused by B2 at all. The old table dated
-to `f0e7f62` — fitted when **dev was 114.43** — and was never refit through P1b, P2, the P3 parse
-work, or rows 16 and 18. So `mib/confidence_table.json` had been ~5 dev points stale for the entire
-run of that work. Decomposed on dev (calibration /20):
+**Correction: B2 is exactly score-neutral; the +0.03 came from something else that rode along in the same commit.** Refitting the table on the *pre-B2* eval reproduces every shipped value except `embargo_world`, which proves the numeric movement was not caused by B2 at all. The old table dated to `f0e7f62` — fitted when **dev was 114.43** — and was never refit through P1b, P2, the P3 parse work, or rows 16 and 18. So `mib/confidence_table.json` had been ~5 dev points stale for the entire run of that work. Decomposed on dev (calibration /20):
 
 | config | calib | Δ |
 | --- | ---: | ---: |
@@ -316,31 +217,13 @@ run of that work. Decomposed on dev (calibration /20):
 | pre-B2 code + **refit table** | 15.35 | **+0.03** |
 | both (shipped `HEAD`) | 15.35 | +0.03 |
 
-B2's entire runtime effect is: `embargo_world` gains an entry and 8 dev cases attribute to it instead
-of `disqualifying_flag`. The staleness refresh moved 10 branches (largest: `clean_approve`
-0.871 → 0.95, `review_flag` 0.645 → 0.687, `missing_visa` 0.392 → 0.446, `transit_visa` 0.95 → 0.929)
-and is worth +0.03 by itself. That it was only +0.03 despite five points of drift is because the
-high-volume branches (`adjudicator_finding`, `disqualifying_flag`) were already clamped at 0.95.
+B2's entire runtime effect is: `embargo_world` gains an entry and 8 dev cases attribute to it instead of `disqualifying_flag`. The staleness refresh moved 10 branches (largest: `clean_approve` 0.871 → 0.95, `review_flag` 0.645 → 0.687, `missing_visa` 0.392 → 0.446, `transit_visa` 0.95 → 0.929) and is worth +0.03 by itself. That it was only +0.03 despite five points of drift is because the high-volume branches (`adjudicator_finding`, `disqualifying_flag`) were already clamped at 0.95.
 
-**Standing hazard:** nothing refits `confidence_table.json` automatically, and nothing warns when it
-goes stale. It silently encodes the accuracy of whatever pipeline last ran `scripts/fit_confidence.py`.
-`mib/confidence_table.meta.json` now stamps what it was fitted on — check it before trusting a
-calibration number, and refit after any change that moves branch membership.
+**Standing hazard:** nothing refits `confidence_table.json` automatically, and nothing warns when it goes stale. It silently encodes the accuracy of whatever pipeline last ran `scripts/fit_confidence.py`. `mib/confidence_table.meta.json` now stamps what it was fitted on — check it before trusting a calibration number, and refit after any change that moves branch membership.
 
-**Row 23 — cross-case correlation, gated on an ablation.** `vocab.REVOKED_SPONSORS` carries three ids
-"inferred from train labels". They are not overfit (row 21 re-mines them from every fold) but they are
-a *coverage* risk: a hardcoded list cannot see a revoked sponsor that exists only in the private set,
-and a missed one falls through to `clean_approve` — a false approval. Ablating the three ids costs
-**−1.80 classification points and produces exactly that CFA** (21 cases move; 18 fall to NEEDS_REVIEW
-branches, 1 to `clean_approve`).
+**Row 23 — cross-case correlation, gated on an ablation.** `vocab.REVOKED_SPONSORS` carries three ids "inferred from train labels". They are not overfit (row 21 re-mines them from every fold) but they are a *coverage* risk: a hardcoded list cannot see a revoked sponsor that exists only in the private set, and a missed one falls through to `clean_approve` — a false approval. Ablating the three ids costs **−1.80 classification points and produces exactly that CFA** (21 cases move; 18 fall to NEEDS_REVIEW branches, 1 to `clean_approve`).
 
-`mib/corpus.py` recovers them without a single label. Sponsor ids are per-case data — each packet
-carries its own — except for the ones that are not, and the occurrence spectrum over 1,000 train cases
-is starkly bimodal with nothing in between: **734 ids appear 1×, 23 appear 2×, then 1 at 9×, 1 at 16×,
-3 at 18×, 1 at 22×** — and those six are exactly the six revoked sponsors. The detector splits the
-spectrum at the largest *ratio* gap (2→9 is 4.5×; the largest *absolute* gap, 9→16, is the wrong
-statistic and would miss `SPN-9090` at 9×) and validates its own precondition: the gap must clear 3×
-and the flagged set must stay under 5% of distinct ids, else it abstains.
+`mib/corpus.py` recovers them without a single label. Sponsor ids are per-case data — each packet carries its own — except for the ones that are not, and the occurrence spectrum over 1,000 train cases is starkly bimodal with nothing in between: **734 ids appear 1×, 23 appear 2×, then 1 at 9×, 1 at 16×, 3 at 18×, 1 at 22×** — and those six are exactly the six revoked sponsors. The detector splits the spectrum at the largest *ratio* gap (2→9 is 4.5×; the largest *absolute* gap, 9→16, is the wrong statistic and would miss `SPN-9090` at 9×) and validates its own precondition: the gap must clear 3× and the flagged set must stay under 5% of distinct ids, else it abstains.
 
 | config | Class /80 | CFA | detected | revised |
 | --- | ---: | ---: | --- | ---: |
@@ -349,19 +232,9 @@ and the flagged set must stay under 5% of distinct ids, else it abstains.
 | ablated + `corpus.revise` | **62.41** | **0** | the 3 ablated ids | 25 |
 | shipped list + `corpus.revise` | 62.41 | 0 | none | **0** |
 
-Perfect recall, zero false positives, and a **provable no-op on the shipped config** — which is also
-why the ablation is the only possible test: on train the detector finds only ids the list already has.
-Two limitations that must travel with it: it **abstains below ~1,000 cases** (at n=250/500 the
-revoked ids' counts fall too close to the 2× bucket to clear the ratio gate, so it reports nothing
-rather than guessing — safe, since the hardcoded list stands), and it is **transductive**: the same
-PDF can score differently depending on what else is in the input directory. The action is the same
-rule policy already applies to a known revoked sponsor — non-DIP only, higher-precedence branches
-untouched, and it can only ever tighten a decision toward DENIED.
+Perfect recall, zero false positives, and a **provable no-op on the shipped config** — which is also why the ablation is the only possible test: on train the detector finds only ids the list already has. Two limitations that must travel with it: it **abstains below ~1,000 cases** (at n=250/500 the revoked ids' counts fall too close to the 2× bucket to clear the ratio gate, so it reports nothing rather than guessing — safe, since the hardcoded list stands), and it is **transductive**: the same PDF can score differently depending on what else is in the input directory. The action is the same rule policy already applies to a known revoked sponsor — non-DIP only, higher-precedence branches untouched, and it can only ever tighten a decision toward DENIED.
 
-Wiring note: the revision runs *after* the stream, as a rewrite of already-written rows via
-`os.replace`, never as a barrier before the first write. `solution.py` streams because the contract
-stops the container at 30,000 s and scores whatever is on disk; killed early, the file is exactly what
-today's pipeline produces (pinned by `test_killed_run_leaves_valid_provisional_output`).
+Wiring note: the revision runs *after* the stream, as a rewrite of already-written rows via `os.replace`, never as a barrier before the first write. `solution.py` streams because the contract stops the container at 30,000 s and scores whatever is on disk; killed early, the file is exactly what today's pipeline produces (pinned by `test_killed_run_leaves_valid_provisional_output`).
 
 ---
 
@@ -369,9 +242,7 @@ today's pipeline produces (pinned by `test_killed_run_leaves_valid_provisional_o
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
 | 24 | 2026-07-24 | (dirty) | **Label-free distribution-shift check on the 5,000-case validation set** (`output/val_shift`) — no labels consulted, so it costs no holdout read and can be repeated on the private set's output | — | — | — | — | — | — | measurement |
 
-Three of the four fitted constants were checked against unseen data by looking only at the *shape* of
-the validation extractions. Two transfer cleanly, one lost its margin, and one distribution moved
-enough to matter.
+Three of the four fitted constants were checked against unseen data by looking only at the *shape* of the validation extractions. Two transfer cleanly, one lost its margin, and one distribution moved enough to matter.
 
 **Sponsor recurrence transfers exactly — the same six ids, at 5× the corpus.**
 
@@ -380,25 +251,16 @@ enough to matter.
 | train (1,000) | 763 | 734×1, 23×2, ‖ 1×9, 1×16, 3×18, 1×22 | the 6 known revoked |
 | validation (5,000) | 2,996 | 2339×1, 542×2, 99×3, 9×4, 1×5, ‖ 73, 76, 90, 103, 109, 118 | **the same 6** |
 
-Zero new ids, zero missing. The low end is busier at 5,000 cases (542 ids appear twice), but the gap
-from 5 to 73 is **14.6×** against the detector's 3× gate, so the split is even less ambiguous than on
-train. Two consequences: the hardcoded list *does* transfer to validation, and `mib/corpus.py` is
-therefore a no-op there too — its value stays purely private-set insurance, exactly as row 23 framed
-it, now confirmed on 5,000 unseen packets rather than argued.
+Zero new ids, zero missing. The low end is busier at 5,000 cases (542 ids appear twice), but the gap from 5 to 73 is **14.6×** against the detector's 3× gate, so the split is even less ambiguous than on train. Two consequences: the hardcoded list *does* transfer to validation, and `mib/corpus.py` is therefore a no-op there too — its value stays purely private-set insurance, exactly as row 23 framed it, now confirmed on 5,000 unseen packets rather than argued.
 
-**`STALE_CUTOFF` transfers, but its margin collapsed from 37 days to 2.** The 2026-01-02 constant was
-chosen as the midpoint of an empty band in the train arrival dates. That band is a small-sample
-artifact — validation fills it in:
+**`STALE_CUTOFF` transfers, but its margin collapsed from 37 days to 2.** The 2026-01-02 constant was chosen as the midpoint of an empty band in the train arrival dates. That band is a small-sample artifact — validation fills it in:
 
 | corpus | nearest arrival below | nearest at/above | margin | within ±7d | `stale_arrival` fires |
 | --- | --- | --- | ---: | ---: | ---: |
 | train | 2025-12-09 | 2026-01-15 | 37 d | 0 / 842 | 1.30% |
 | validation | 2025-12-31 | 2026-01-02 | **2 d** | 6 / 4,230 | 1.28% |
 
-The cutoff still sits exactly inside the (now 2-day) gap, and the branch fires at an essentially
-identical rate on both corpora — so the constant is right and it generalizes. What is gone is the
-*slack*: the max-margin argument in `policy.py:19-23` is a train-only property. Exposure is small
-(6 validation cases within ±7 days, 20 within ±14), so this is a documented risk, not a change.
+The cutoff still sits exactly inside the (now 2-day) gap, and the branch fires at an essentially identical rate on both corpora — so the constant is right and it generalizes. What is gone is the *slack*: the max-margin argument in `policy.py:19-23` is a train-only property. Exposure is small (6 validation cases within ±7 days, 20 within ±14), so this is a documented risk, not a change.
 
 **Render damage shifted 2×, which independently vindicates rejecting the `b13_census` prize.**
 
@@ -407,15 +269,9 @@ identical rate on both corpora — so the constant is right and it generalizes. 
 | train | 149/1000 = **14.9%** | 37.8 / 22.0 / 26.7 / 13.5% |
 | validation | 365/5000 = **7.3%** | 31.4 / 25.5 / 26.6 / 16.5% |
 
-`n_scan_pages == 0` — the single feature the +2.0 `b13_census` model keyed on (see STATUS, rejected
-list) — describes **half as many** validation packets as train ones. A rule or model tuned to that
-population would have fired on a substantially different slice of the private set. This is the
-concrete confirmation that the artifact was a generator property and not a case property.
+`n_scan_pages == 0` — the single feature the +2.0 `b13_census` model keyed on (see STATUS, rejected list) — describes **half as many** validation packets as train ones. A rule or model tuned to that population would have fired on a substantially different slice of the private set. This is the concrete confirmation that the artifact was a generator property and not a case property.
 
-**Decision mix is otherwise stable**, which is the reassuring half: NEEDS_REVIEW 55.7 → 54.1%, DENIED
-34.8 → 34.3%, APPROVED 9.5 → 11.5%; branch order is unchanged with `adjudicator_finding` 25.8 → 27.5%
-and `fee_unknown` 21.9 → 24.5%. The two cells that hold the unreachable loss are, if anything,
-slightly *larger* on validation.
+**Decision mix is otherwise stable**, which is the reassuring half: NEEDS_REVIEW 55.7 → 54.1%, DENIED 34.8 → 34.3%, APPROVED 9.5 → 11.5%; branch order is unchanged with `adjudicator_finding` 25.8 → 27.5% and `fee_unknown` 21.9 → 24.5%. The two cells that hold the unreachable loss are, if anything, slightly *larger* on validation.
 
 ---
 
@@ -424,14 +280,7 @@ slightly *larger* on validation.
 | 25 | 2026-07-24 | (dirty) | **Digit-tolerant decoy filter, OCR pages only** (`textmatch.plausible_misread` + `packet.assemble`): a scan page whose only case ID is one glyph off the active case is the applicant's own page misread, not a decoy. Text-layer pages keep exact match (text layers don't misread; guards adjacent-case decoys) | 119.26 | 62.50 | 41.40 | 15.36 | 0 | — | keep |
 | 26 | 2026-07-24 | (dirty) | **Future-impossible arrival-year snap** (`vocab.snap`): OCR year ≥2028 one glyph off `2026` → `2026`; past years untouched (a genuine 2024 is a plausible stale date — rewriting it risks a false approval). Repairs all 23 `2028` reads, 0 adjudication changes | **119.27** | 62.50 | 41.42 | 15.36 | 0 | — | keep |
 
-Both rows are mechanism-first: train effect sizes (17 dropped pages, 23 bad years in 1,000 cases) are
-too small to select on, so the acceptance evidence is the invariants — the 3 known true decoy pages
-still drop, the misread pages (incl. MIB-000363's adjudicator note) are kept, no new `stale_arrival`
-denials, 0 extra/missing cases, suite green. The exploratory full-train counterfactual (+0.098) was
-measured before the dev gate and is recorded here as context, not evidence. What the tolerance cannot
-reach: sponsor-id misreads (8 of 9 have a single candidate — no in-packet anchor; that is variant-merge
-territory) and month/day date errors (no anchor exists). See BACKGROUND §3 for the revoked-neighbor
-trap found during this probe: never fuzzy-match an id *toward* the revoked list.
+Both rows are mechanism-first: train effect sizes (17 dropped pages, 23 bad years in 1,000 cases) are too small to select on, so the acceptance evidence is the invariants — the 3 known true decoy pages still drop, the misread pages (incl. MIB-000363's adjudicator note) are kept, no new `stale_arrival` denials, 0 extra/missing cases, suite green. The exploratory full-train counterfactual (+0.098) was measured before the dev gate and is recorded here as context, not evidence. What the tolerance cannot reach: sponsor-id misreads (8 of 9 have a single candidate — no in-packet anchor; that is variant-merge territory) and month/day date errors (no anchor exists). See BACKGROUND §3 for the revoked-neighbor trap found during this probe: never fuzzy-match an id *toward* the revoked list.
 
 ---
 
@@ -439,33 +288,16 @@ trap found during this probe: never fuzzy-match an id *toward* the revoked list.
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
 | 27 | 2026-07-24 | (dirty) | **Review sweep, score-neutral by construction**: deleted the closed learned decider (`mib/{decision,features}.py`, `decision_model.npz`, `scripts/{train,export}_decision.py`, the runner S5 swap, `MIB_DECIDER`/`MIB_CFA_VETO` + their stamp keys); retired never-set knobs (`MIB_WORKERS`, `MIB_CASE_BUDGET_S` → constants); deleted dead code (`cache.read_meta`, `scripts/{fee,crossdoc}_probe.py`); corrected ~20 stale doc claims | — | — | — | — | — | — | keep — suite 42 passed / 1 xfailed |
 
-Row 27 changed no shipped behavior: the deleted decider ran only into the sidecar (default `rules`),
-both retired knobs were never set anywhere, and the container path reads no env beyond what the
-Dockerfile pins. Verified two ways: suite green, and a replay of `train_skew.jsonl` from the cleaned
-working tree is **byte-identical** on all 1,000 predictions to a replay from a clean `fbb3d97`
-worktree. Found during the same review, two **unlogged behavior changes**: `c905f00` fixed the full
-restoration ladder ON (previously shipped `skew`) and `4767919` changed the ink mask — no scored row
-existed for either, and all scores since 119.10 replayed the *skew* cache. Row 28 closes that gap.
+Row 27 changed no shipped behavior: the deleted decider ran only into the sidecar (default `rules`), both retired knobs were never set anywhere, and the container path reads no env beyond what the Dockerfile pins. Verified two ways: suite green, and a replay of `train_skew.jsonl` from the cleaned working tree is **byte-identical** on all 1,000 predictions to a replay from a clean `fbb3d97` worktree. Found during the same review, two **unlogged behavior changes**: `c905f00` fixed the full restoration ladder ON (previously shipped `skew`) and `4767919` changed the ink mask — no scored row existed for either, and all scores since 119.10 replayed the *skew* cache. Row 28 closes that gap.
 
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
 | 28 | 2026-07-24 | (dirty) | **The full-ladder substrate, priced** (the missing `c905f00`/`4767919` rows, and STATUS Q3): fresh `bands` cache from HEAD (`output/cache/train_bands.jsonl`, 1,000 cases), replayed against the skew substrate through identical code | **121.36** | 63.37 | 42.45 | 15.54 | 0 | see note | keep — this is the committed config |
 
-**+2.09 dev over the skew substrate (119.27, which the same code reproduces exactly — a validated
-baseline).** The `turn`/`bands` prize did not shrink on the stronger substrate the way the learned
-decider's edge did; it *grew* (+1.68 → +2.09). CFA stays 0 (confusion adds one APPROVED→DENIED,
-which costs 0), classification +10 correct / −9 conservative-review, Brier 0.1160 → 0.1116, and the
-gains are broad, not one field: sponsor_id +21 cases, home_world +22, arrival_date +19, visa_class
-+14, declared_purpose +20, species_code +18, risk_flags +11. Three caveats that travel with the row:
+**+2.09 dev over the skew substrate (119.27, which the same code reproduces exactly — a validated baseline).** The `turn`/`bands` prize did not shrink on the stronger substrate the way the learned decider's edge did; it *grew* (+1.68 → +2.09). CFA stays 0 (confusion adds one APPROVED→DENIED, which costs 0), classification +10 correct / −9 conservative-review, Brier 0.1160 → 0.1116, and the gains are broad, not one field: sponsor_id +21 cases, home_world +22, arrival_date +19, visa_class +14, declared_purpose +20, species_code +18, risk_flags +11. Three caveats that travel with the row:
 
-- **Cost is laptop-only so far**: the bands dump ran 1,231 s / 1,000 PDFs (p50 4,861 ms, p99 14.4 s,
-  max 18.3 s per case) vs the skew cache's ~1,100 s — but laptop timings are not evidence (standing
-  hazard), and row 19 measured `skew` at 0.54 s/PDF with ~11× headroom under the real contract. The
-  ladder **already ships** (it is fixed in code), so `run_docker_submission.py` must be re-run to
-  confirm the budget for what is already shipping — it decides a revert, not an adoption.
-- **`confidence_table.json` is still fitted on the skew substrate.** Branch membership moved (188 vs
-  197 conservative reviews), so per the standing refit hazard (row 22) the table should be refit on
-  this substrate and measured as its own row; the 15.54 calibration above is with the stale table.
+- **Cost is laptop-only so far**: the bands dump ran 1,231 s / 1,000 PDFs (p50 4,861 ms, p99 14.4 s, max 18.3 s per case) vs the skew cache's ~1,100 s — but laptop timings are not evidence (standing hazard), and row 19 measured `skew` at 0.54 s/PDF with ~11× headroom under the real contract. The ladder **already ships** (it is fixed in code), so `run_docker_submission.py` must be re-run to confirm the budget for what is already shipping — it decides a revert, not an adoption.
+- **`confidence_table.json` is still fitted on the skew substrate.** Branch membership moved (188 vs 197 conservative reviews), so per the standing refit hazard (row 22) the table should be refit on this substrate and measured as its own row; the 15.54 calibration above is with the stale table.
 - Dev only; holdout untouched (last read 113.46 at `v1`).
 
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
@@ -476,90 +308,33 @@ gains are broad, not one field: sponsor_id +21 cases, home_world +22, arrival_da
 | 32 | 2026-07-25 | a157fc6 | **Eroded-label registry recovery** (`parse.registry_fallback_kv`, OCR registry pages only): the extract's two-line labels erode on faint scans, fusing tails onto values (`World Ens Relay`) or leaving bare values; recover via canonical-label-tail regexes + vocab snap (cutoff 0.7) + bare-TitleCase-pair name capture. Motivated by MIB-000293 (worst dev case, extraction 0/45, user eyeballed the page as clearly parseable): now name/species/world/date all recover and `Eris Relay` lands the `embargo_world` DENIED — truth | **122.24** | 63.63 | 42.97 | 15.65 | 0 | — | keep — 3 dev cases improved, 0 regressed; suite 44 passed / 1 xfailed; regression tests added |
 | 33 | 2026-07-25 | 54c38ec | **OCR-misread tolerance in `identity_conflict`**: an OCR-sourced registry name at name-similarity ≥0.75 to the emitted applicant is agreement, not conflict (text layers keep exact match). Max-margin threshold: all true conflicts mined at ≤0.5, the lone misread (MIB-000523, `Ixoul Solx` vs `Ixoul Solix`) at 0.947, band empty. Surfaced by row 32's recovery on 523 — a HOLDOUT case the dev gate couldn't see (its truth row was read for the diagnosis; logged here for honesty). Train-wide diff vs row 32: exactly one case changes, 523 back to APPROVED @0.95 | 122.24 | 63.63 | 42.97 | 15.65 | 0 | — | keep — dev unchanged by construction (523 is holdout); suite 45 passed / 1 xfailed |
 
-Row 29 is the residue after row 27's sweep: an AST scan of all 47 files (every def/class
-cross-referenced against every use site repo-wide) found nothing else. Checked and deliberately
-kept: `EARLY_STOP` (frozen for cache-stamp joinability), the `MIB_DECIDER` tombstone comment in
-`runner.py`, and the four zero-doc-reference dev scripts (`repair_gallery`, `probe_variant_merge`,
-`gallery_ocr_inputs`, `make_splits` — all live instruments). No eval run: nothing removed was
-reachable from the container path or the suite.
+Row 29 is the residue after row 27's sweep: an AST scan of all 47 files (every def/class cross-referenced against every use site repo-wide) found nothing else. Checked and deliberately kept: `EARLY_STOP` (frozen for cache-stamp joinability), the `MIB_DECIDER` tombstone comment in `runner.py`, and the four zero-doc-reference dev scripts (`repair_gallery`, `probe_variant_merge`, `gallery_ocr_inputs`, `make_splits` — all live instruments). No eval run: nothing removed was reachable from the container path or the suite.
 
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
 | 34 | 2026-07-25 | (dirty) | **Strikethrough → value void** (`stages.extract._struck_values` + `packet._void_struck`): a red strike over a field value in the PDF vector layer voids it — the document crossing out its own printed value, so it is not sourceable evidence (like hidden text / damage markers). S1 detects it from `page.get_drawings()`, the merge drops any field whose value matches (equality, never substring). General (all fields), gated CFA 0 | **122.44** | 63.76 | 42.98 | 15.70 | 0 | +54s backfill | keep |
 
-**Clean A/B on the keystone substrate (`train_bands_reads.jsonl`), current code + keystone table,
-only `struck` differs: baseline 122.24 (= row 33 exactly) → +struck 122.44 (+0.20).** CFA stays 0,
-Brier 0.1089 → 0.1074. Dev movers are exactly two, both false denials driven by trusting a struck
-value: **MIB-000514** (DIP-1 whose fee receipt `unpaid` is struck; DENIED→NEEDS_REVIEW, truth
-APPROVED) and **MIB-000614** (DENIED→NEEDS_REVIEW, truth NEEDS_REVIEW). No case moves *to* APPROVED —
-CFA-safe by construction: a struck value is never the truth (deterministic: 452 text-layer receipts
-struck ⟺ printed≠truth, 0 counterexamples; visa 0/29, sponsor 0/47), so voiding only removes a value
-or surfaces the true one from another document.
+**Clean A/B on the keystone substrate (`train_bands_reads.jsonl`), current code + keystone table, only `struck` differs: baseline 122.24 (= row 33 exactly) → +struck 122.44 (+0.20).** CFA stays 0, Brier 0.1089 → 0.1074. Dev movers are exactly two, both false denials driven by trusting a struck value: **MIB-000514** (DIP-1 whose fee receipt `unpaid` is struck; DENIED→NEEDS_REVIEW, truth APPROVED) and **MIB-000614** (DENIED→NEEDS_REVIEW, truth NEEDS_REVIEW). No case moves *to* APPROVED — CFA-safe by construction: a struck value is never the truth (deterministic: 452 text-layer receipts struck ⟺ printed≠truth, 0 counterexamples; visa 0/29, sponsor 0/47), so voiding only removes a value or surfaces the true one from another document.
 
-**General, but on dev it reduces to fee.** Checking *emitted* values (not the struck strings):
-sponsor 36/36 and visa 19/19 struck instances already emit truth — the strike is almost always paired
-with a rank-0 `Manual correction` (e.g. MIB-000067: struck `TRANSIT-7`, `Manual correction: visa class
-is XW-1.` right under it, decided by a page-3 `Finding: DENIED`) or overridden by a higher branch. The
-fee receipt is the lone single-source field, so it is the only place the struck value slips through.
-Sponsor/visa/name voids are kept as private-set insurance (a struck value with no paired correction —
-the 514/614 shape on a non-fee field — would otherwise fool us there).
+**General, but on dev it reduces to fee.** Checking *emitted* values (not the struck strings): sponsor 36/36 and visa 19/19 struck instances already emit truth — the strike is almost always paired with a rank-0 `Manual correction` (e.g. MIB-000067: struck `TRANSIT-7`, `Manual correction: visa class is XW-1.` right under it, decided by a page-3 `Finding: DENIED`) or overridden by a higher branch. The fee receipt is the lone single-source field, so it is the only place the struck value slips through. Sponsor/visa/name voids are kept as private-set insurance (a struck value with no paired correction — the 514/614 shape on a non-fee field — would otherwise fool us there).
 
-**Holdout signal (transfers to unseen data):** MIB-000025 (holdout) went APPROVED→NEEDS_REVIEW with
-`fee_status` waived→unknown, both matching truth (its receipt's `waived` is struck). A struck-driven
-false approval on unseen data, fixed by the void. One holdout truth row was read to diagnose this,
-logged for honesty (as row 33 did for 523); no tuning to holdout.
+**Holdout signal (transfers to unseen data):** MIB-000025 (holdout) went APPROVED→NEEDS_REVIEW with `fee_status` waived→unknown, both matching truth (its receipt's `waived` is struck). A struck-driven false approval on unseen data, fixed by the void. One holdout truth row was read to diagnose this, logged for honesty (as row 33 did for 523); no tuning to holdout.
 
-**`confidence_table.json` refit on the keystone+struck substrate** (`fit_confidence.py`): neutral on
-the aggregate (122.44), but `fee_unpaid` 0.893 → 0.95 — the branch is a purer signal once the
-decoy-`unpaid` cases are voided out of it; other branches drift ≤0.02. Meta re-stamped to the shipping
-substrate, discharging the row-28/row-31 refit hazard for this change.
+**`confidence_table.json` refit on the keystone+struck substrate** (`fit_confidence.py`): neutral on the aggregate (122.44), but `fee_unpaid` 0.893 → 0.95 — the branch is a purer signal once the decoy-`unpaid` cases are voided out of it; other branches drift ≤0.02. Meta re-stamped to the shipping substrate, discharging the row-28/row-31 refit hazard for this change.
 
-**Scope / gates.** Strikes are vector graphics on text-layer pages; scanned-receipt red-*pixel* strikes
-(OCR is grayscale) are a logged follow-up. `verify_render` 8/8 identical (live re-read reproduces the
-`struck` sets and the ensemble); replay diff moves only the struck cases; suite 48 passed / 1 xfailed
-(three new regression tests: `_void_struck` equality-not-substring, real-PDF detection on 514, and the
-end-to-end fee void). Cache carries `struck` via a `SCHEMA` 1→2 bump (backward compatible: schema-1
-caches rehydrate `struck=[]`); `scripts/backfill_struck.py` augments an existing cache in ~54 s with no
-re-OCR, since strike detection is a pure function of the vector layer.
+**Scope / gates.** Strikes are vector graphics on text-layer pages; scanned-receipt red-*pixel* strikes (OCR is grayscale) are a logged follow-up. `verify_render` 8/8 identical (live re-read reproduces the `struck` sets and the ensemble); replay diff moves only the struck cases; suite 48 passed / 1 xfailed (three new regression tests: `_void_struck` equality-not-substring, real-PDF detection on 514, and the end-to-end fee void). Cache carries `struck` via a `SCHEMA` 1→2 bump (backward compatible: schema-1 caches rehydrate `struck=[]`); `scripts/backfill_struck.py` augments an existing cache in ~54 s with no re-OCR, since strike detection is a pure function of the vector layer.
 
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
 | 35 | 2026-07-25 | (dirty) | **Flag-scan doc-type gate deleted** (`signals.observed_flags` + `has_flag_evidence`): scan every doc and variant reading for flag lines; the per-line legend/negation/≤3-flags guards are the safety mechanism, not `FLAG_DOC_TYPES`. Positive clause of `has_flag_evidence` now shares the widened scan (census can't contradict an emitted flag); the `'flag'+none/clear` negative clause stays biometric-restricted (CFA-risk direction, unmeasured) | **122.79** | 63.93 | 43.10 | 15.76 | 0 | — | keep — every added flag true; suite 50 passed / 1 xfailed |
 
-**Anchor expectation failed in the good direction.** TODO 2.1 predicted exactly three cases change
-(MIB-000656/771/979, the mined doc-gate misses for `illegible_biometrics` — BACKGROUND §3's P=1.00
-evidence was for that flag only). The train-wide replay diff vs row 34 shows **18 cases** change:
-the gate had also been blocking legible flags of other classes on header-mangled pages —
-planetary_embargo ×6, illegible_biometrics ×5, identity_conflict ×3, biohazard_red ×3,
-memory_tampering ×1. **Every one of the 18 added flags matches truth; zero false positives.** 17/18
-now exact-match `risk_flags` (MIB-000724 gains a true flag but still misses the full set); 3 cases
-flip NEEDS_REVIEW→DENIED (85/193/276), all truth-DENIED, via `disqualifying_flag`. 11 of the 18 are
-dev, 7 holdout — the holdout *labels* for those 7 were read only to verify the flag verdicts (no
-tuning; logged for honesty per rows 33/34). Confidence refit on this substrate
-(`fit_confidence.py output/replay_flaggate`): confidence-only nudges (review_flag 0.709→0.718,
-b13_census 0.285→0.279, …), dev total unchanged at reported precision. Two new regression tests
-from the mined lines (656/771/979 verbatim reads on DOC_OTHER pages; 747/506 damage-marker
-controls on both page types).
+**Anchor expectation failed in the good direction.** TODO 2.1 predicted exactly three cases change (MIB-000656/771/979, the mined doc-gate misses for `illegible_biometrics` — BACKGROUND §3's P=1.00 evidence was for that flag only). The train-wide replay diff vs row 34 shows **18 cases** change: the gate had also been blocking legible flags of other classes on header-mangled pages — planetary_embargo ×6, illegible_biometrics ×5, identity_conflict ×3, biohazard_red ×3, memory_tampering ×1. **Every one of the 18 added flags matches truth; zero false positives.** 17/18 now exact-match `risk_flags` (MIB-000724 gains a true flag but still misses the full set); 3 cases flip NEEDS_REVIEW→DENIED (85/193/276), all truth-DENIED, via `disqualifying_flag`. 11 of the 18 are dev, 7 holdout — the holdout *labels* for those 7 were read only to verify the flag verdicts (no tuning; logged for honesty per rows 33/34). Confidence refit on this substrate (`fit_confidence.py output/replay_flaggate`): confidence-only nudges (review_flag 0.709→0.718, b13_census 0.285→0.279, …), dev total unchanged at reported precision. Two new regression tests from the mined lines (656/771/979 verbatim reads on DOC_OTHER pages; 747/506 damage-marker controls on both page types).
 
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
 | 36 | 2026-07-25 | (dirty) | **Whole-value flag rescue, one weighted matcher** (`vocab.match_flag_value` + `signals.observed_flags` value tier; `snap("observed_flags")` refactored onto `match_flag_token`, killing the parallel per-token difflib@0.8 path): a labelled `Observed flags:` value the token matcher can't resolve is scored whole (confusion-weighted, alnum-normalized) and accepted single-read at ≥0.55/margin ≥0.15 or by ≥2-reading cross-variant quorum at ≥0.44/≥0.10. OCR readings only — text layers keep exact semantics | **122.86** | 63.93 | 43.14 | 15.78 | 0 | — | keep — anchors exact; suite 52 passed / 1 xfailed |
 
-**Bars mined, not guessed** (`experiments/flag_probe.py --values` over `train_bands.jsonl`): 563
-labelled observed-flags values the token path missed; every argmax-FALSE row at score ≤0.40 /
-margin ≤0.08 (the `[RISK PANEL …]` damage markers cluster at 0.36/0.04), every TRUE at ≥0.44 /
-≥0.10 — the band between is empty. The metric is `_weighted_sim`, not plain sequence ratio, which
-mis-orders the anchors (BACKGROUND §3 geometry table: innocent `biometrics ok` outscores the true
-252 mangle under difflib). Replay diff vs row 35: **exactly 4 cases** — the three TODO anchors
-252/595/990 (all emit `illegible_biometrics`, truth-confirmed; 252/595 single-read, 990 by
-quorum) plus holdout 438 (`planetary_embargo` by quorum-6, NEEDS_REVIEW→DENIED, truth DENIED —
-label read only to verify, logged per rows 33–35). Controls silent: 747/506 damage markers,
-`biometrics ok`, explicit `none`, healthy pages (no other case moved). A bonus class surfaced by
-the mining: space-split values (`illegible biometrics`) score 1.00 whole but are invisible to the
-token path — several table rows, already emitted via sibling variants, now have a second
-independent route. Confidence refit score-neutral (122.86; confidence-only nudges). Regression
-tests: single-read bars incl. text-layer restriction and innocent/none controls; quorum-required
-below the single bar (one 990 mangle alone must not emit).
+**Bars mined, not guessed** (`experiments/flag_probe.py --values` over `train_bands.jsonl`): 563 labelled observed-flags values the token path missed; every argmax-FALSE row at score ≤0.40 / margin ≤0.08 (the `[RISK PANEL …]` damage markers cluster at 0.36/0.04), every TRUE at ≥0.44 / ≥0.10 — the band between is empty. The metric is `_weighted_sim`, not plain sequence ratio, which mis-orders the anchors (BACKGROUND §3 geometry table: innocent `biometrics ok` outscores the true 252 mangle under difflib). Replay diff vs row 35: **exactly 4 cases** — the three TODO anchors 252/595/990 (all emit `illegible_biometrics`, truth-confirmed; 252/595 single-read, 990 by quorum) plus holdout 438 (`planetary_embargo` by quorum-6, NEEDS_REVIEW→DENIED, truth DENIED — label read only to verify, logged per rows 33–35). Controls silent: 747/506 damage markers, `biometrics ok`, explicit `none`, healthy pages (no other case moved). A bonus class surfaced by the mining: space-split values (`illegible biometrics`) score 1.00 whole but are invisible to the token path — several table rows, already emitted via sibling variants, now have a second independent route. Confidence refit score-neutral (122.86; confidence-only nudges). Regression tests: single-read bars incl. text-layer restriction and innocent/none controls; quorum-required below the single bar (one 990 mangle alone must not emit).
 
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
@@ -568,3 +343,13 @@ below the single bar (one 990 mangle alone must not emit).
 | # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
 | 38 | 2026-07-25 | (probe) | **Source/rung ablations, offline via filtered-cache replay** (no OCR): (a) drop turn rungs on strong-base pages (2,772 reads, 16% of OCR) → predictions IDENTICAL, 122.86 — the skip is lossless on train but ships only conf-gated (Track 1), not ev-gated; (b) drop the embedded source entirely (render-only, 8,465 reads, 50% of OCR) → **121.88 (−0.98)**, ~170 field diffs incl. MIB-000130's revoked `SPN-4040` misread `SPN-4020` (a lost true denial) | 121.88 (b) | 63.49 | 42.77 | — | 0 | −50% OCR | **reject (b)**: raw embedded pixels genuinely out-read the interpolated render on many pages; the two sources are complementary, not redundant |
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 39 | 2026-07-25 | (dirty) | **Stale arrival outranks unknown fee** (`policy.adjudicate`: `stale_arrival` moved above `fee_unknown` — the cascade's one positive-evidence-vs-ignorance order inversion, found by the co-fire audit `experiments/cofire_probe.py`) | **123.02** | 64.09 | 43.14 | 15.79 | 0 | — | keep — CFA-safe direction, truth-side cell empty corpus-wide; regression test + confidence refit |
+
+**Found by auditing structure, not tuning on residuals** (STATUS question 8's order component, now settled): `experiments/cofire_probe.py` evaluates all 16 branch predicates independently per dev case. 487/700 cases co-fire ≥2 predicates, but almost every overlap is same-decision (order moves only calibration/attribution mass); by construction every deny branch preceded every review branch **except** `fee_unknown` (8) before `stale_arrival` (9). Label mining: the truth-side cell "fee genuinely unknown ∧ stale ∧ non-DIP" is **empty across all 1,000 train labels** — thin evidence of a generator law (≈1.6 co-occurrences expected under independence, so P(empty|noise) ≈ 0.20; corrected 2026-07-25, same session), but every one of the 8 train cases the *pipeline* lands there carries a polluted `fee_unknown` (a real stale arrival whose fee failed to extract), 7 of 8 truth DENIED, and the review branch was preempting a real denial on extraction noise. The decision stands on that observed mix + the CFA-safe direction + the manual's staleness rule, not on the empty cell alone. Corpus flips: exactly 8, all NEEDS_REVIEW→DENIED (of the 8-case co-fire cell, 4 were already preempted by higher branches — a live instance of the pattern-count≠impact-count hazard). Dev: MIB-000031/929/983 truth DENIED (+18 raw), MIB-000096 truth NEEDS_REVIEW (−7 raw; the TODO anchor dead-page control — **autopsied 2026-07-25, same session**: its arrival read is *correct* (truth 2025-07-25, genuinely stale); the failure is the visa — the OCR ensemble vote fabricated `MED-3` (provenance VOTE_DOC) against a truth of DIP-1, so `known_non_dip` armed on wrong-but-positive evidence and the case lost its staleness exemption. Pre-reorder it was right *by accident* via `fee_unknown`. The lesson generalizes: the positive-evidence guard treats an OCR-plurality vote as positive evidence, which on dead-page packets can be confident fabrication). Holdout: 104/351/593/745, labels read only to verify (logged per rows 33–36): all four truth DENIED. Net dev +11 raw class. Brier 0.1052 (unchanged to 4 places). Confidence refit (`fit_confidence.py` on `output/replay_staleorder`): `fee_unknown` 0.488→0.494, `stale_arrival` n 9→13 stays 0.95, `b13_census` 0.272 unchanged. Suite 53 passed / 1 xfailed incl. a new regression test pinning the order (`test_stale_arrival_outranks_an_unknown_fee`). The same audit's EV pass also *validated* the rest of the cascade: every remaining EV-argmax disagreement is either a forbidden CFA route (wholesale-approving `b13_census`/`fee_unknown` — the exact CFA pool is now quantified: ~30 truth-DENIED dev cases hide inside the epistemic branches) or an n≤3 dev-memorizing cell. Follow-ups tracked in TODO Track 5.
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 40 | 2026-07-25 | (dirty) | **PNM plumbing** (`imaging.to_pnm_bytes`, `render._sources`/`reads_for`): tesseract inputs switch from PNG round-trips to raw PNM on the two lossless paths (pixmap→samples direct; restoration arrays) — the embedded-original-bytes path deliberately untouched (its exact source encoding is load-bearing, PIL vs leptonica JPEG decoders are not bit-exact). Found en route: the old render PNGs carried pymupdf's default **96-DPI pHYs chunk** and tesseract segmentation was tuned on it — PNM declares `--dpi 96` on the render base to preserve the accident; the honest-DPI variant (202) changes segmentation and is a deferred scored experiment | 123.02 | — | — | — | 0 | S2 overhead −42% (21.5→12.4s/10 PDFs) | keep — `verify_render` 9/9 identical, suite green |

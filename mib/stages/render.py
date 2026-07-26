@@ -40,6 +40,8 @@ import time
 from pathlib import Path
 
 import fitz
+import numpy as np
+from PIL import Image
 
 from .. import imaging
 from ..config import ocr_optical as _ocr_optical
@@ -70,10 +72,13 @@ PRIMARY_PSM = 11
 SECONDARY_PSM = 3
 
 
-def _tesseract(image_path, psm=PRIMARY_PSM):
+def _tesseract(image_path, psm=PRIMARY_PSM, dpi=None):
+    args = ["tesseract", str(image_path), "stdout", "--psm", str(psm)]
+    if dpi:
+        args += ["--dpi", str(dpi)]
     try:
         result = subprocess.run(
-            ["tesseract", str(image_path), "stdout", "--psm", str(psm)],
+            args,
             capture_output=True, text=True, timeout=20,
             env={**os.environ, "OMP_THREAD_LIMIT": "1"},
         )
@@ -162,10 +167,12 @@ def _sources(doc, page, tmp):
     native_zoom = native_px / max(1.0, page.rect.width)
     zoom = max(RENDER_ZOOM, min(native_zoom, MAX_RENDER_ZOOM))
     pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
-    path = Path(tmp) / "render.png"
-    pix.save(path)
-    raw = path.read_bytes()
-    yield "render", raw, imaging.to_gray(raw)
+    # Straight from the pixmap samples — the old path went pixmap -> PNG ->
+    # PIL -> array, paying a deflate encode + decode for identical pixels
+    # (PNG is lossless). Tesseract gets the same RGB samples as PNM (P6).
+    rgb = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+    gray = np.asarray(Image.fromarray(rgb).convert("L"))
+    yield "render", imaging.to_pnm_bytes(rgb), gray
 
 
 def reads_for(doc, page, page_no):
@@ -183,7 +190,7 @@ def reads_for(doc, page, page_no):
     with tempfile.TemporaryDirectory(prefix="mibocr") as tmp:
         written = 0
 
-        def read(encoded, variant):
+        def read(encoded, variant, dpi=None):
             nonlocal written
             written += 1
             path = Path(tmp) / f"p{written}.png"
@@ -191,16 +198,21 @@ def reads_for(doc, page, page_no):
             for psm in psms:
                 suffix = "" if psm == PRIMARY_PSM else f"+psm{psm}"
                 t0 = time.time()
-                lines = _tesseract(path, psm)
+                lines = _tesseract(path, psm, dpi)
                 reads.append(Read(page_no=page_no, lines=lines, variant=variant + suffix,
                                   quality=evidence_score(lines),
                                   cost_ms=round((time.time() - t0) * 1000)))
 
         sources = list(_sources(doc, page, tmp))
         for name, encoded, gray in sources:
-            read(encoded, name)
+            # The old render PNGs carried pymupdf's default 96-DPI pHYs chunk
+            # and tesseract's segmentation was tuned with that (wrong but
+            # load-bearing) value; PNM has no metadata, so the render base
+            # declares it explicitly. Restorations and embedded originals never
+            # had DPI metadata — no flag, tesseract estimates as before.
+            read(encoded, name, dpi=96 if name == "render" else None)
             for variant, image in _restorations(gray):
-                read(imaging.to_png_bytes(image), f"{name}+{variant}")
+                read(imaging.to_pnm_bytes(image), f"{name}+{variant}")
         # Optical rung, gated: only when the geometric ensemble read this page
         # weakly (below the intact-form bar) does a binarized/contrast pass earn a
         # place, so it cannot outscore a page that already reads well. See
@@ -208,7 +220,7 @@ def reads_for(doc, page, page_no):
         if _ocr_optical() and (not reads or max(r.quality for r in reads) < GOOD_ENOUGH):
             for name, encoded, gray in sources:
                 for variant, image in _optical_restorations(gray):
-                    read(imaging.to_png_bytes(image), f"{name}+{variant}")
+                    read(imaging.to_pnm_bytes(image), f"{name}+{variant}")
     return reads
 
 
