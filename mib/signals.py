@@ -213,14 +213,35 @@ def identity_conflict(packet, values):
     return True
 
 
+_FINDING_RE = re.compile(r"Finding:\s*(APPROVED|DENIED|NEEDS_REVIEW)")
+
+
 def adjudicator_finding(packet):
-    """Explicit decision on a Manual Adjudicator Note — highest-trust evidence. (validated)"""
+    """Explicit decision on a Manual Adjudicator Note — highest-trust evidence. (validated)
+
+    The primary read of the note wins outright. When it lost the Finding line
+    (a weaker variant won the page — observed under the optical rung on
+    MIB-000065, where the finding fell to `fee_unknown`'s 0.494 confidence),
+    the losing OCR variants of the same note are the same visible evidence read
+    differently, so they answer — but only unanimously: two variants reading
+    different findings is a misread by construction (one page, one stamp), and
+    fabricating a winner from that is worse than letting the cascade decide.
+    """
     adjudicator = packet.adjudicator
-    if not adjudicator:
-        return None
-    text = " ".join(adjudicator.get("_raw", []))
-    m = re.search(r"Finding:\s*(APPROVED|DENIED|NEEDS_REVIEW)", text)
-    return m.group(1) if m else None
+    if adjudicator:
+        m = _FINDING_RE.search(" ".join(adjudicator.get("_raw", [])))
+        if m:
+            return m.group(1)
+    seen = set()
+    for dtype, kv in packet.variant_docs:
+        if dtype != parse.DOC_ADJUDICATOR:
+            continue
+        m = _FINDING_RE.search(" ".join(kv.get("_raw", [])))
+        if m:
+            seen.add(m.group(1))
+    if len(seen) == 1:
+        return seen.pop()
+    return None
 
 
 def waiver_code(packet):
