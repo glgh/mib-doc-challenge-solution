@@ -62,7 +62,8 @@ the mined ids from recurrence structure alone (row 23) — a provable no-op on t
 
 ## What we tried and kept
 
-Mechanism, not just the delta — the deltas and full evidence are in [experiments.md](experiments.md).
+Mechanism, not just the delta — this list curates the *arcs*, one bullet per mechanism, not one
+per shipped row; [experiments.md](experiments.md) is the complete per-row record.
 
 - **Ship `skew` as the default** (+0.70, row 15). The default was `off`, so a container built from
   the last commit scored 114.50 while the log's headline read 116.88. Only the default moved.
@@ -102,6 +103,12 @@ Mechanism, not just the delta — the deltas and full evidence are in [experimen
   truth (452 receipts, 0 counterexamples); voiding it fixes struck-fee false denials, and the fee
   receipt is the one single-source field where the strike slips through (sponsor/visa strikes are
   100% paired with a rank-0 manual correction — kept as private-set insurance).
+- **Flag recovery: gate deleted, values scored whole** (+0.35 and +0.07, rows 35–36). The
+  flag-scan doc-type gate was hiding true flags on header-mangled pages — deleting it recovered 18
+  (five flag classes, zero false positives); the per-line legend/negation guards, not doc typing,
+  are the safety mechanism. A labelled `Observed flags:` value shattered past any token
+  (`Bagitie bematics`) is scored whole, confusion-weighted, at bars mined from the 563-value
+  safety table — anchors 252/595/990 recovered, damage-marker controls stay silent.
 
 ---
 
@@ -182,13 +189,21 @@ correct, the instruments build understanding, and the record (experiments.md) ke
 None of it is a precondition for doing what's architecturally right — see the house rule in
 [BACKGROUND.md](BACKGROUND.md).
 
-**The fast loop** — seconds per variant, instead of a 40-minute pipeline run:
+**The fast loop** — subset-first (user directive, 2026-07-25): S2/OCR changes are probed on the
+hard iteration set, and a **full-corpus regen is rare and needs the user's approval** — it exists
+to bank a change that already proved itself on the subset, not to explore.
 
 ```bash
-scripts/dump_text.py <pdf_dir> output/cache/train_bands.jsonl   # once, ~20 min idle
-scripts/replay.py output/cache/train_bands.jsonl output/replay_foo   # seconds
-scripts/score_split.py output/replay_foo dev
+MIB_WORKERS=9 scripts/dump_text.py            # default: experiments/hard_set.txt, ~80s
+scripts/replay.py output/cache/hard_set_bands.jsonl output/replay_probe   # seconds
+scripts/score_split.py output/replay_probe dev   # warns: probe number, NOT a dev number
+# only after subset proof + user approval:
+MIB_WORKERS=9 scripts/dump_text.py --full     # ~10 min at 9 workers (~20 at 4)
 ```
+
+`experiments/hard_set.txt` is dev-only by policy (the loop reads truth freely, so holdout stays
+out) — 72 curated hard cases + 10 healthy controls. Subset caches carry a loud `SUBSET=` stamp;
+S3–S5 changes don't need any of this — they replay against the existing full cache in seconds.
 
 **The two gates.** Use the right one — they cover opposite halves of the pipeline:
 
@@ -218,7 +233,8 @@ joined `skew`-derived text against `bands`-derived predictions and produced conf
 at the time — within nondeterminism), but host and container OCR are **not byte-identical** — the
 Debian `tesseract` is a different build, moving 7/1000 adjudications and ~4% of `applicant_name`.
 The differences roughly cancel and CFA stays 0, so host replay is a faithful proxy; the number that
-ultimately ships still comes from container output.
+ultimately ships still comes from container output. The local Docker Desktop VM fits exactly **one**
+contract-sized container — `docker ps` before any timing run.
 
 ---
 
@@ -232,7 +248,7 @@ ultimately ships still comes from container output.
 | 4 | ~~Is CFA 0 a hard gate or a priced cost?~~ **MOOT** | learned decider deleted; rules run at CFA 0 with no veto. Revives only with a future decider (then the honest count is the OOF CFAs — 12 on the 115.20 substrate, 14 on 119.10 — not the in-sample 5) |
 | 5 | ~~Where do the remaining classification points go?~~ **ANSWERED — and they are not reachable** | `fee_unknown` (7.11) has no signal: all model families lose to rules and add CFAs; the fee is genuinely absent from the document (visible 0.0%, 3.6% with OCR, hidden-only in 41 cases). `b13_census` (6.25) has signal, but it is the `n_scan_pages` render artifact. See the rejected list |
 | 6 | ~~Can the `illegible_biometrics` structural gap be read or argued?~~ **ANSWERED — mode A recovered (rows 35–36), mode B dead** | Two-mode label mining ([BACKGROUND.md §3](BACKGROUND.md), incl. the mangled-value geometry table). Mode A (printed token): the fix family shipped — the flag-scan doc-type gate is deleted (row 35: 18 true flags recovered, not just the 3 mined `illegible_biometrics` misses — the gate was also blocking other flag classes on header-mangled pages) and the whole-value weighted resolver reads values shattered past any token (row 36: 252/595/990, bars mined from the 563-value safety table, zero false positives). Mode B (condition-derived, no token printed): every observable proxy tops out at P≤0.38 — emission is expected-negative on a weight-8 exact-set field; dead |
-| 7 | Does Tesseract word-level confidence (TSV `conf`) resolve the valid-vs-valid vote ties? | Capture TSV in `_tesseract` (same recognition pass), store per-line conf in `Read`, A/B a conf-weighted vote offline on the ensemble cache. Evidence so far: the variant-merge probe found ties where generation order picks wrong in one direction each (025 date / 037 name) and only word conf wins both; and the MIB-000990/252 ladder autopsy showed every conf metric ranking the repaired variants above the tilted raw render that `evidence_score` chose — the tilted winner's margin came from a well-formed-but-**wrong** value (`MIB-000000`, misread of 000990, +1 via CASE_ID_RE). Shape-validity credits confident garbage; the engine's own conf does not. Per-line conf is the right unit for the flag scan; page-level conf mass just rewards word count. Autopsy numbers (2026-07-25 session, TSV runs not yet cached): 990 p1 mean word conf 59.6 deskewed vs 42.1 tilted winner; 252 p2 57.1 vs 47.8. Related: the dev evidence-score distribution valley sits at ev=5, not the hand-picked `GOOD_ENOUGH=6` (`8d56832`) — if conf replaces `evidence_score`, re-derive that gate from the conf distribution |
+| 7 | Does Tesseract word-level confidence (TSV `conf`) resolve the valid-vs-valid vote ties? | Capture TSV in `_tesseract` (same recognition pass), store per-line conf in `Read`, A/B a conf-weighted vote offline on the ensemble cache. Evidence so far: the variant-merge probe found ties where generation order picks wrong in one direction each (025 date / 037 name) and only word conf wins both; and the MIB-000990/252 ladder autopsy showed every conf metric ranking the repaired variants above the tilted raw render that `evidence_score` chose — the tilted winner's margin came from a well-formed-but-**wrong** value (`MIB-000000`, misread of 000990, +1 via CASE_ID_RE). Shape-validity credits confident garbage; the engine's own conf does not. **1.1 probe graduated (2026-07-25, `experiments/conf_probe.py`, 13 pages, user-judged galleries):** the `MIB-000000` line got conf 36 — the pathology does not transfer; candidate metric = guarded excess mass, Σ max(0, conf−40) per word excluding page-furniture lines (plain mean is gamed by rotated few-word reads, raw mass by debris volume and the render footer's conf-90+ boilerplate). TSV text ≠ stdout text on 93/111 reads, so 1.2 captures conf via an additive TSV pass, not a text-source swap. Earlier autopsy numbers (pre-probe, different aggregation): 990 p1 mean 59.6 deskewed vs 42.1 tilted; 252 p2 57.1 vs 47.8. Related: the dev evidence-score distribution valley sits at ev=5, not the hand-picked `GOOD_ENOUGH=6` (`8d56832`) — the gate gets re-derived from the conf distribution when selection moves |
 | 8 | Does the fitted-constant audit generalize to the cascade's *structure*? | **Open, and it is the real question.** Row 21 cleared the four fitted values at −0.23, which does **not** explain the v1 dev→holdout gap of −1.97. Branch order, which branches exist, and ~10 hand-tuned thresholds were also picked on dev and are unaudited |
 | 9 | ~~Do the fitted constants survive contact with unseen data?~~ **ANSWERED, label-free** | row 24 (`output/val_shift`, 5,000 validation packets): sponsor recurrence transfers **exactly** (same six ids, gap 14.6×); `STALE_CUTOFF` is correct but its margin fell 37 d → 2 d (logged risk, not a change); render damage **halved**, independently confirming the `b13_census` artifact would not have transferred |
 | 10 | Does the dev→holdout gap still hold? | holdout untouched since 113.46 at `v1`; read only at a milestone |
@@ -304,12 +320,20 @@ commit) before an A/B, and diff the non-decision fields to catch it.
 conclusion drawn from them had to be retracted from two documents. Only
 `scripts/run_docker_submission.py` under the real limits settles a runtime question.
 
+**A pattern count is not an impact count.** The strikethrough signal appeared on 138 train cases
+and collapsed to 2 dev movers (row 34): sponsor 36/36 and visa 19/19 struck instances *already
+emitted the truth* via a rank-0 manual correction or a higher branch. Before building on a
+corpus-wide pattern, join it to what the pipeline currently emits (`predictions.jsonl` +
+`debug.jsonl` branch/provenance) and split *fooled* vs *already-correct*. Next candidate that must
+pass this check first: the off-header adjudicator-`Finding` recovery idea (37 such pages counted;
+how many we currently *miss* has not been counted).
+
 ---
 
 ## Immediate next steps
 
-Highest leverage first. Steps 3–4 are broken into anchored sub-items in [TODO.md](TODO.md)
-(the granular tracker for the OCR-quality work, hard-examples-first):
+Strategic items only — **all in-flight OCR-quality work (TSV confidence, flag recovery, visual
+defects, and their statuses) is tracked in [TODO.md](TODO.md)**, not restated here:
 
 1. **Audit the cascade's structure, not just its constants** (question 8). Branch order and the ~10
    hand-tuned thresholds are the remaining dev→holdout-gap candidates and nothing has measured them.
@@ -317,9 +341,4 @@ Highest leverage first. Steps 3–4 are broken into anchored sub-items in [TODO.
 2. **Re-run the Docker gate at the shipped ladder's cost** (question 3). The ladder already ships,
    so this decides a revert, not an adoption; expectation is "fits" (~2.4× laptop cost against ~11×
    measured headroom).
-3. **TSV word confidence** (question 7): capture in `_tesseract`, A/B the conf-weighted vote and the
-   per-line-conf flag scan offline against the ensemble cache.
-4. **The `illegible_biometrics` fix family** (question 6): printed-but-untyped-page doc-gate fix +
-   label-anchored `Observed flags:` value recovery (~+0.8 dev ceiling, mode-A misses only).
-5. Deferred: the `MIB_OCR_OPTICAL` faint-scan track (gated, unmeasured); reviving dual-PSM needs the
-   winning-variant instrument first (row 20). Holdout read only at the next milestone.
+3. Holdout read only at the next milestone (question 10).

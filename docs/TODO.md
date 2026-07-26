@@ -37,25 +37,24 @@ from scratchpad 2026-07-25).
 
 ## Track 1 — OCR confidence (Q7)
 
-### 1.1 ☐ TSV conf probe on the anchor pages (no pipeline change)
-Run tesseract `tsv` on the existing ladder variants of 990 p1 / 252 p2 / 595 p3 plus ~10 more
-hard-set pages picked by `mine_hard.py`; store per-line mean conf beside the current reads.
-**Expected on anchors:** conf ranking prefers the deskewed/deshredded variants on 990 and 252
-(session-verified once: mean conf 59.6 vs 42.1 on 990; 57.1 vs 47.8 on 252 — recorded in STATUS
-Q7); establish it isn't an artifact of these two pages. **Must also probe the failure mode conf
-can't be assumed immune to:** tesseract word conf is lexicon-biased, so check conf specifically
-on wrong-but-well-formed lines (the `MIB-000000` shape) — if hallucinated-but-plausible reads
-also carry high conf, conf inherits `evidence_score`'s pathology instead of fixing it.
-**Graduate when:** conf-preferred variant is as-good-or-better on ~10 of 12 probe pages by eye.
+### 1.1 ☑ TSV conf probe — GRADUATED (user-judged galleries, 2026-07-25)
+`experiments/conf_probe.py`, 13 pages (3 anchors + 10 stratified hard picks). Findings:
+- **The `ev` pathology does not transfer**: 990's hallucinated `MIB-000000` line got conf 36 (page
+  junk level); every repaired variant out-confs the tilted render `ev` crowned.
+- **Metric shape matters**: plain mean is gamed by rotated few-confident-words reads; raw mass by
+  debris volume; render-source boilerplate (footer `Packet MIB-… / page N`, watermark — conf 90+)
+  biases any mass metric toward `render`. Winner: **guarded excess mass** = Σ max(0, conf−40) per
+  word over non-page-furniture lines. User verdict on the 8 differ-pages: conf-pick no worse.
+- **TSV line text ≠ stdout text on 93/111 reads** — "same pass, free conf" is false; 1.2 must run
+  TSV additively (2nd pass) or re-baseline.
+- Incidental: the `Packet MIB-XXXXXX / page N` footer premise of 3.3 is real on probe pages.
 
 ### 1.2 ☐ Capture conf in the pipeline (`records.Read.conf`, `mib/stages/render.py`, `mib/cache.py`)
-Same recognition pass (`tsv` output), per-line mean word conf; old caches rehydrate `conf=None`
-(keystone rehydration pattern, same as row 34's `struck=[]`). **Known risk:** TSV line text
-reconstructed from word rows (grouping/spacing/blanks) is not guaranteed byte-identical to
-`stdout` text — the replay-diff gate arbitrates; if they diverge, either parse TSV additively
-beside the existing text output or accept an explicit re-baseline, but don't discover this
-mid-regen. Correctness-gated (house rule): replay diff empty with conf unused, suite green. Full
-dump regen happens HERE, once, only after 1.1 graduates.
+**Additive TSV pass** (per 1.1: TSV text diverges from stdout on 84% of reads, so text keeps the
+stdout pass; ~2× OCR cost is inside the ~3× runtime headroom). Store per-line conf + word counts;
+old caches rehydrate `conf=None` (keystone rehydration pattern, same as row 34's `struck=[]`).
+Correctness-gated (house rule): replay diff empty with conf unused, suite green. Dump regen:
+hard set first (subset-first directive), full regen with user approval, only after this lands.
 
 ### 1.3 ☐ Conf-aware selection A/B (`records.best_read`)
 Offline on the regenerated cache: conf metrics vs `evidence_score` for the page-primary pick.
