@@ -494,3 +494,32 @@ def test_identity_conflict_tolerates_ocr_misread_of_registry_name():
     assert not conflict("Ixoul Solx", "Ixoul Solix", SRC_OCR)      # misread
     assert conflict("Ixoul Solx", "Ixoul Solix", SRC_TEXT)         # text is exact
     assert conflict("Oritari Ixovara", "Zarix Ixotari", SRC_OCR)   # real conflict
+
+
+def test_sepless_label_lines_parse_with_corroboration():
+    """Row 50: the [:.;] separator is the smallest glyph on a label line and
+    dies first. A label head claims the rest of the line only when the value
+    corroborates the claimed field (mined lines: 073 'Fee Status waved', 125's
+    receipt, 866 p4's eroded Applicant label)."""
+    kv = parse.parse_kv(["Fee Status waved"])
+    assert kv.get("fee_status") == "waved"          # snaps to 'waived' downstream
+    kv = parse.parse_kv(["Apphcant Onvoss Mesh"])
+    assert kv.get("applicant_name") == "Onvoss Mesh"
+    kv = parse.parse_kv(["Case ID MIB-000243"])
+    assert kv.get("case_id") == "MIB-000243"
+
+
+def test_sepless_claim_rejects_prose_and_bait_shapes():
+    """Row 50's first cut claimed 'Sponsor SPN-5086 attests that ...' as a
+    sponsor_id, poisoning the text-layer field with an 11-token value and
+    handing the vote to decoy-page bait ids (SPN-0000/SPN-4040, 30+ cases).
+    Prose is not a label line: values cap at 4 tokens, and a head must match a
+    label of the SAME token count (a lost separator does not delete label
+    words)."""
+    kv = parse.parse_kv(["Sponsor SPN-5086 attests that Miradane Ludane is expected on Earth"])
+    assert "sponsor_id" not in kv
+    kv = parse.parse_kv(["Applicant is expected on Earth for xenobotany"])
+    assert "applicant_name" not in kv
+    # damage markers never corroborate
+    kv = parse.parse_kv(["Fee Status [FEE STATUS OBSCURED]"])
+    assert "fee_status" not in kv

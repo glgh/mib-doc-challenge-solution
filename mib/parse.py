@@ -116,8 +116,69 @@ def _loose_key_for(text):
     return KEY_MAP[close[0]] if close else None
 
 
+# All 979 train truth names are 2-3 alphabetic tokens, every token
+# capitalized. The capitalization requirement is deliberate: separator-less
+# corroboration sees prose fragments (`Applicant is expected on ...`) whose
+# lowercase continuations would otherwise pass a bare token-shape test.
+_NAME_SHAPE_RE = re.compile(r"[A-Z][A-Za-z'-]+( [A-Z][A-Za-z'-]+){1,2}")
+
+
+def _plausible_value(field, value):
+    """Could `value` really be this field? The corroboration bar for a label
+    claim without a separator: closed fields must validate or repair into
+    their vocabulary (deny-safe snaps included), open name fields must fit the
+    census shape, free-text purpose must land in the closed 10-purpose set.
+    """
+    from . import vocab
+    if field in ("applicant_name", "registry_name"):
+        return bool(_NAME_SHAPE_RE.fullmatch(value.strip()))
+    if valid_value(field, value):
+        return True
+    if field == "declared_purpose":
+        return vocab.repairable_purpose(value)
+    snapped = vocab.snap(field, value)
+    return snapped not in (None, "unknown")
+
+
+def _sepless_kv(line):
+    """`Label Value` with the separator lost entirely — the [:.;] glyph is the
+    smallest mark on the line and dies first (`Fee Status waved`, `Sponsor ID
+    SP14-3584`, `Apphcant Onvoss Mesh`). A label head may claim the rest of
+    the line only when the whole line still has label-line SHAPE and the value
+    corroborates the claimed field (the principle that guards the loose key
+    match). Shape means: the head fuzzy-matches a label of the SAME token
+    count (a lost separator does not also delete label words), and the value
+    is at most 4 tokens (a prose sentence — `Sponsor SPN-5086 attests that
+    ...` — is not a label line, and claiming it poisoned the text-layer
+    sponsor field with an unusable 11-token value, handing the vote to a
+    decoy-page bait id). Longest head first; one recognized head decides.
+    """
+    toks = line.split()
+    for k in range(min(3, len(toks) - 1), 0, -1):
+        if len(toks) - k > 4:
+            continue
+        head = " ".join(toks[:k])
+        key = key_for(head)
+        if not key or len(_label_for(key, head).split()) != k:
+            continue
+        value = " ".join(toks[k:])
+        return (key, value) if _plausible_value(key, value) else (None, None)
+    return None, None
+
+
+def _label_for(key, head):
+    """The canonical label text `head` matched for `key` (for shape checks)."""
+    t = head.strip().lower()
+    if t in KEY_MAP:
+        return t
+    close = difflib.get_close_matches(t, [k for k, v in KEY_MAP.items() if v == key],
+                                      n=1, cutoff=0.8)
+    return close[0] if close else t
+
+
 def parse_kv(lines):
-    """Extract pairs from 'Key: Value' lines and 'Key' / 'Value' line pairs.
+    """Extract pairs from 'Key: Value' lines, 'Key' / 'Value' line pairs, and
+    corroborated separator-less 'Key Value' lines (`_sepless_kv`).
 
     Separator is tolerant ([:.;]) — OCR reads colons as periods ('Observed
     flags. active_warrant'), which caused a catastrophic false approval
@@ -137,6 +198,12 @@ def parse_kv(lines):
             loose, value = _loose_key_for(m.group(1)), m.group(2).strip()
             if loose and valid_value(loose, value):
                 kv.setdefault(loose, value)
+                i += 1
+                continue
+        else:
+            key, value = _sepless_kv(line)
+            if key:
+                kv.setdefault(key, value)
                 i += 1
                 continue
         key = key_for(line)

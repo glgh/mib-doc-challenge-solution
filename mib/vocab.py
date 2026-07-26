@@ -46,6 +46,15 @@ def _closest(value, options, cutoff):
     return match[0] if match else None
 
 
+def repairable_purpose(value):
+    """Does the value land in the closed purpose vocabulary at the snap bar?
+
+    `snap("declared_purpose")` passes unmatched values through (free-text
+    field), so corroboration checks — is this string really a purpose? — need
+    the strict form."""
+    return _closest((value or "").lower(), PURPOSES, 0.6) is not None
+
+
 def snap(field, value):
     """Repair an OCR-read value toward its closed vocabulary; None if hopeless."""
     v = (value or "").strip()
