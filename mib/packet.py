@@ -1,4 +1,5 @@
 """Case assembly: active case id, document census, precedence-ordered field merge."""
+import difflib
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -362,7 +363,8 @@ def _variant_vote(field_name, kvs):
             continue
         norm = textmatch.normalize(v)
         clean = norm == _edge_strip(norm)   # stripping removed nothing: no debris
-        groups.setdefault(key, []).append((v, clean, _line_conf(kv, v), seq))
+        groups.setdefault(key, []).append(
+            (v, clean, _line_conf(kv, v), seq, kv.get("_page_no")))
     if field_name == "applicant_name":
         collapsed = {}
         for key, entries in groups.items():
@@ -372,14 +374,38 @@ def _variant_vote(field_name, kvs):
         return None, 0
 
     def group_rank(entries):
-        best_conf = max((c for _v, _cl, c, _s in entries if c is not None), default=-1.0)
-        first_seen = min(s for _v, _cl, _c, s in entries)
-        return (-len(entries), -best_conf, first_seen)
+        # For closed-vocabulary fields, in-vocabulary groups outrank everything:
+        # the value universe is closed and saturated (13 worlds / 12 species /
+        # 10 purposes — the passthrough post-mortem), so an unsnappable group is
+        # never the truth. Without this, MIB-000134's systematic truncation
+        # `fiel` (reproduced on TWO pages — a cross-page OCR failure mode, not
+        # agreement) outranked the one-page in-vocabulary `field repair`.
+        snappable = True
+        if field_name in ("declared_purpose", "species_code", "home_world",
+                          "visa_class", "fee_status"):
+            from . import vocab
+            rep = entries[0][0]
+            # purpose's snap passes unmatched values through (free-text form),
+            # so the STRICT membership check is repairable_purpose.
+            snappable = (vocab.repairable_purpose(rep)
+                         if field_name == "declared_purpose"
+                         else vocab.snap(field_name, rep) is not None)
+        # Distinct contributing PAGES outrank raw read count: a decoy page's
+        # fan-out of fragmented reads pooled into one bloc and outvoted the
+        # truth's consistent reads (rows 47/50/52 — one extra read of a decoy
+        # page kept tipping votes, and the grid multiplies per-page variants).
+        # Cross-page agreement is what fan-out cannot fake; within a page-count
+        # tie, read count still lets a page's plurality beat single junk reads.
+        pages = len({p for *_x, p in entries})
+        best_conf = max((c for _v, _cl, c, _s, _p in entries if c is not None),
+                        default=-1.0)
+        first_seen = min(s for _v, _cl, _c, s, _p in entries)
+        return (not snappable, -pages, -len(entries), -best_conf, first_seen)
 
     entries = min(groups.values(), key=group_rank)
 
     def rep_rank(e):
-        v, clean, conf, seq = e
+        v, clean, conf, seq, _page = e
         # Cleanest first (no edge debris), then the expanded stroke-merge form
         # (longer), then the engine's own preference, then generation order.
         return (not clean, -len(textmatch.normalize(v)),
@@ -388,15 +414,78 @@ def _variant_vote(field_name, kvs):
     return min(entries, key=rep_rank)[0], len(entries)
 
 
+def _name_families(packet):
+    """Every reading of applicant_name pooled by collapsed vote key, with the
+    breadth of its support: which distinct documents assert it (text or OCR
+    doc-level parse), on which pages, and how many ensemble reads agree."""
+    fams = {}
+
+    def fam(key):
+        return fams.setdefault(key, {"docs": set(), "pages": set(), "reads": 0,
+                                     "cands": []})
+
+    for c in candidates(packet):
+        if c.field_name != "applicant_name" or not c.valid:
+            continue
+        f = fam(_collapse(_vote_key(c.value)))
+        f["docs"].add(c.doc_type)
+        f["pages"].add(c.page_no)
+        f["cands"].append(c)
+    for kv in ([kv for _dt, kv in packet.variant_docs] +
+               [kv for _dt, src, kv in packet.docs if src == SRC_OCR]):
+        v = kv.get("applicant_name")
+        if v and parse.valid_value("applicant_name", v):
+            f = fam(_collapse(_vote_key(v)))
+            f["pages"].add(kv.get("_page_no"))
+            f["reads"] += 1
+    return fams
+
+
+def _name_corroboration(packet, incumbent):
+    """Multi-document corroboration challenge for applicant_name.
+
+    Multi-applicant packets plant a decoy applicant's intake form (or sponsor
+    letter) with the active case id stamped on every page — the id cannot
+    attribute, so `_preference`'s single-document winner is sometimes the
+    decoy's name while sponsor letter + registry + a near-unanimous OCR vote
+    agree on the true applicant (MIB-000081: two text layers and 13/13 reads
+    lose to one intake text layer). The measured rule (grid counterfactual,
+    FIXED 6 / BROKE 0 dev): a challenger family must be asserted by at least
+    TWO distinct documents and strictly more documents than the incumbent's
+    family. Weaker clauses (OCR read/page breadth, one doc + dominant vote)
+    were measured net-negative (11 fixed / 26 broke naive; 9/11 with a
+    zero-read-incumbent clause) — garble families out-spread clean text.
+
+    Returns (value, (doc_type, source)) or None if no challenger qualifies.
+    """
+    fams = _name_families(packet)
+    inc_key = _collapse(_vote_key(incumbent or ""))
+    inc_docs = len(fams.get(inc_key, {"docs": ()})["docs"])
+    best = None
+    for key, f in fams.items():
+        if key == inc_key or len(f["docs"]) < 2 or len(f["docs"]) <= inc_docs:
+            continue
+        rank = (len(f["docs"]), len(f["pages"]), f["reads"])
+        if best is None or rank > best[0]:
+            best = (rank, f)
+    if best is None:
+        return None
+    winner = min(best[1]["cands"], key=_preference)
+    return winner.value, (winner.doc_type, winner.source)
+
+
 def merge_fields(packet, provenance=None):
-    """Best value per schema field: manual corrections override, then documents
-    in trust order, then a plurality vote across the whole OCR ensemble for any
-    field the text layer (or a signed note) did not supply.
+    """Best value per schema field: documents in trust order, then a plurality
+    vote across the whole OCR ensemble for any field the text layer did not
+    supply, then the name-corroboration challenge; a signed manual correction
+    overrides everything.
 
     The vote is why `variant_docs` exists: a reading `best_read` rejected for
     the page can still hold the best copy of one field, and agreement across
     independently-restored variants is strong evidence for an OCR value. Clean
-    text-layer values are never outvoted — text layers don't misread.
+    text-layer values are never outvoted — text layers don't misread — but a
+    text-layer name CAN lose the corroboration challenge to a name asserted by
+    strictly more documents (multi-applicant packets, `_name_corroboration`).
 
     If `provenance` is a dict it is filled with fname -> (doc_type, source);
     vote-settled fields carry doc_type VOTE_DOC.
@@ -408,19 +497,25 @@ def merge_fields(packet, provenance=None):
             continue
         values[cand.field_name] = cand.value
         prov[cand.field_name] = (cand.doc_type, cand.source)
-    for fname, value in manual_corrections(packet).items():
-        values[fname] = value
-        prov[fname] = (0, 0)  # rank-0: signed manual note
     ocr_kvs = ([kv for _, kv in packet.variant_docs] +
                [kv for _, src, kv in packet.docs if src == SRC_OCR])
     if ocr_kvs:
         for fname in parse.FIELDS:
             if prov.get(fname, (0, SRC_OCR))[1] == SRC_TEXT:
-                continue  # clean text-layer (or manual-note) value stays
+                continue  # clean text-layer value stays
             value, _agree = _variant_vote(fname, ocr_kvs)
             if value:
                 values[fname] = value.strip()
                 prov[fname] = (VOTE_DOC, SRC_OCR)
+    challenged = _name_corroboration(packet, values.get("applicant_name"))
+    if challenged is not None:
+        values["applicant_name"] = challenged[0].strip()
+        prov["applicant_name"] = challenged[1]
+    # Signed manual notes are rank-0 evidence: applied last, they override the
+    # doc merge, the vote, and the corroboration challenge alike.
+    for fname, value in manual_corrections(packet).items():
+        values[fname] = value
+        prov[fname] = (0, 0)
     return values
 
 
@@ -445,10 +540,65 @@ _UNPAID_PHRASE_RE = re.compile(r"fee\s+unpaid|unpaid.{0,10}fee", re.I)
 _DIP_WAIVER_RE = re.compile(r"D[Il1]P[-\s~]?WA[Il1]VER|DIP[-\s~]?WAVER|"
                             r"WAIVER.{0,6}DIP", re.I)
 
+# The packet can also SAY the fee state is unrecoverable — `Fee Status: unknown`
+# (inline, split onto the receipt's next line, or prose: `Reason: Fee status
+# unknown.`, `Manual correction: fee status is unknown.`) and the damage marker
+# `[FEE STATUS OBSCURED]` with its OCR mangles and render truncations
+# (`Fee Status: [FEE STATUS O`). A statement is not silence: silence is the
+# generator withholding a state (paid scores its 69% base rate), a statement is
+# evidence the state itself is unknown — 22 of the 122 fee_unknown-branch dev
+# packets carry one, truth `unknown` in 20 (grid census 2026-07-26). Fuzzy on
+# key and value because unknown is the safe direction (policy has already sent
+# these to review); the same fuzz toward paid/waived/unpaid is FORBIDDEN —
+# explicit non-unknown receipt values are planted traps (MIB-000514's receipt
+# reads `unpaid` on a truth-APPROVED paid case).
+_ALPHA_RE = re.compile(r"[^a-z]+")
+
+
+def _fee_keyish(pair):
+    return difflib.SequenceMatcher(None, pair, "fee status").ratio() >= 0.72
+
+
+def _unknownish(tok):
+    if tok.startswith("unk"):
+        return True
+    return len(tok) >= 5 and (
+        difflib.SequenceMatcher(None, tok, "unknown").ratio() >= 0.75)
+
+
+def _fee_unknown_stated(lines):
+    for i, line in enumerate(lines):
+        if _INJECTION_RE.search(line):
+            continue
+        toks = _ALPHA_RE.sub(" ", line.lower()).split()
+        key_at = [j for j in range(len(toks) - 1)
+                  if _fee_keyish(f"{toks[j]} {toks[j + 1]}")]
+        if not key_at:
+            continue
+        rest = toks[key_at[0] + 2:]
+        # First fee-value-ish token after the key must be unknown/obscured — a
+        # legible paid/waived/unpaid there means the line states a value, not
+        # damage, and no fuzz may touch it.
+        vals = [t for t in rest[:4] if t in ("paid", "waived", "unpaid")
+                or _unknownish(t) or t.startswith("obscur")]
+        if vals and (_unknownish(vals[0]) or vals[0].startswith("obscur")):
+            return True
+        if len(key_at) > 1 and any(b in line for b in "[({"):
+            return True     # key repeats inside a bracket: truncated damage marker
+        if not rest and i + 1 < len(lines) and not _INJECTION_RE.search(lines[i + 1]):
+            nxt = _ALPHA_RE.sub(" ", lines[i + 1].lower()).split()
+            if 0 < len(nxt) <= 2 and _unknownish(nxt[0]):
+                return True     # text-layer receipts split label / value lines
+    return False
+
 
 def fee_fallback(packet):
     """Fee inference for packets whose fee never parsed: unpaid-phrase (7/7 dev
-    precision) > DIP-WAIVER value (7/7) > 'paid', the silence base rate.
+    precision) > DIP-WAIVER value (7/7) > explicit-unknown statement > 'paid',
+    the silence base rate. The waiver code outranks an unknown statement by
+    measurement, not intuition: both dev packets holding the two together
+    (MIB-000219/554) are truth-waived — a visible waiver code is affirmative
+    state, an obscured/unknown receipt only reports damage.
 
     DISPLAY-ONLY by contract: the runner applies this after `policy.adjudicate`
     has seen the merged value, so the fee_unknown -> NEEDS_REVIEW branch and
@@ -457,18 +607,22 @@ def fee_fallback(packet):
     catastrophic false approval (silent-unpaid MIB-000332, whose packet never
     states the fee) — that trade is the user's to take, not a default.
     """
-    unpaid = dip_waiver = False
+    unpaid = dip_waiver = unknown_stated = False
     for kv in ([kv for _dt, _src, kv in packet.docs]
                + [kv for _dt, kv in packet.variant_docs]):
-        for line in kv.get("_raw", []):
+        lines = kv.get("_raw", [])
+        for line in lines:
             if _INJECTION_RE.search(line):
                 continue
             if _UNPAID_PHRASE_RE.search(line):
                 unpaid = True
             if _DIP_WAIVER_RE.search(line):
                 dip_waiver = True
+        unknown_stated = unknown_stated or _fee_unknown_stated(lines)
     if unpaid:
         return "unpaid"
     if dip_waiver:
         return "waived"
+    if unknown_stated:
+        return "unknown"
     return "paid"

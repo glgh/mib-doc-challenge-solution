@@ -452,20 +452,22 @@ def _norm(v):
     return " ".join(str(v or "").split()).strip().rstrip(".")
 
 
-def oracle(cache_path):
+def oracle(cache_path, pred_path):
     """Upper bound for ALL selection/fusion work (A3's addressable market).
 
-    For every dev case field the shipped replay gets wrong (non-empty truth),
+    For every dev case field the given replay gets wrong (non-empty truth),
     ask: does the truth string appear in ANY read's parse of ANY page, raw or
     snap-repaired? Reachable = a merge that chose perfectly would have scored
     it; unreachable = no arbitration can help, the value was never read.
+    Predictions must come from the same rev/substrate as the cache, or the
+    wrong-set is stale and the bound aims at already-fixed cases.
     """
     import csv
     from mib import packet as pk
     dev = set(json.loads((ROOT / "data_splits.json").read_text())["dev"])
     truth = {r["case_id"]: r for r in
              csv.DictReader(open(CH / "data/train_labels.csv"))}
-    pred_path = EVAL_BASE / "arb_shipped/predictions.jsonl"
+    print(f"predictions: {pred_path}")
     preds = {json.loads(l)["case_id"]: json.loads(l)
              for l in open(pred_path)}
     _meta, recs = load(cache_path)
@@ -530,6 +532,9 @@ if __name__ == "__main__":
     ap.add_argument("cmd", choices=["census", "score", "diff", "oracle", "fee"])
     ap.add_argument("variants", nargs="*", default=None)
     ap.add_argument("--cache", default=str(CACHE))
+    ap.add_argument("--pred", default=str(EVAL_BASE / "arb_shipped/predictions.jsonl"),
+                    help="oracle only: predictions.jsonl from the SAME rev/substrate "
+                         "as --cache")
     a = ap.parse_args()
     names = a.variants or list(VARIANTS)
     if a.cmd not in ("fee", "oracle"):
@@ -541,7 +546,7 @@ if __name__ == "__main__":
     elif a.cmd == "score":
         score(a.cache, names)
     elif a.cmd == "oracle":
-        oracle(a.cache)
+        oracle(a.cache, a.pred)
     elif a.cmd == "fee":
         fee(a.cache, a.variants[0] if a.variants else "full")
     else:

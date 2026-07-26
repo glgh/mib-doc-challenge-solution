@@ -313,13 +313,48 @@ def page_case_ids(lines):
 # [PURPOSE ILLEGIBLE], and OCR-mangled variants like [MAME CUT OUT]. These are
 # the document saying the value is unrecoverable, which is exactly `unknown` —
 # not a value. 51 of them were being emitted verbatim as answers.
-_DAMAGE_MARKER_RE = re.compile(r"^\[[^\]]{3,40}\]$")
+# OCR mutates the bracket glyphs themselves: MIB-000071's marker read as
+# `[PURPOSE ILLEGIBLE}` and MIB-000114's as `(FEE STATUS OBSCURED}` — a strict
+# `[...]` match let the mutated marker through as a field VALUE. Any
+# bracket-ish open + close counts; rejecting a candidate is the deny-safe
+# direction (the field falls through to other sources).
+_DAMAGE_MARKER_RE = re.compile(r"^[\[({][^\])}]{3,40}[\])}]$")
+
+# The marker vocabulary is closed (mined corpus-wide 2026-07-27: nine phrases,
+# 995 clean occurrences, tail = OCR mangles of the same nine: `MAME CUT OUT`,
+# `SPEQES WHITEOUT`, `NAME GUT OUT`, `ILLEGIBLE}`…). A marker that lost its
+# brackets or half its glyphs is still not a value; fuzzy-reject against the
+# vocabulary so the vote cannot crown a mangled marker once the clean form is
+# rejected (the widened-regex diff showed exactly that: `PIAME CUT OUT]` won
+# MIB-000561's name after `(NAME CUT OUT]` was refused).
+_DAMAGE_PHRASES = (
+    "name cut out", "species whiteout", "date washed out", "purpose illegible",
+    "visa class torn", "registry lost", "sponsor id blank",
+    "fee status obscured", "risk panel missing", "risk panel ng",
+)
+
+
+# Stamp/watermark furniture vocabulary (mirrors render._WATERMARK_RE): these
+# words appear as page furniture the OCR sometimes fuses into a value line.
+_WATERMARK_TOKENS = {"SAMPLE", "DENIAL", "SPECIMEN", "COPY", "VOID", "DRAFT",
+                     "DUPLICATE"}
+
+
+def _damage_markerish(value):
+    v = re.sub(r"[^a-z ]", " ", value.lower())
+    v = " ".join(v.split())
+    if len(v) < 6:
+        return False
+    for phrase in _DAMAGE_PHRASES:
+        if v in phrase or difflib.SequenceMatcher(None, v, phrase).ratio() >= 0.75:
+            return True
+    return False
 
 
 def valid_value(field, value):
     if not value or value.lower() in ("n/a", "unknown", ""):
         return False
-    if _DAMAGE_MARKER_RE.match(value.strip()):
+    if _DAMAGE_MARKER_RE.match(value.strip()) or _damage_markerish(value):
         return False
     if field == "visa_class":
         return value in VISA_CLASSES
@@ -329,14 +364,34 @@ def valid_value(field, value):
         if not DATE_RE.fullmatch(value):
             return False
         try:                        # reject well-shaped but impossible dates (2026-03-41)
-            date.fromisoformat(value)
+            parsed = date.fromisoformat(value)
         except ValueError:
             return False
-        return True
+        # OCR year garble forms plausible ISO dates (MIB-000826's 2928 = 2026
+        # under 9/0 stroke confusion, 2976) that then outvote the true reading
+        # and confuse the staleness math. This is a contemporary intake corpus;
+        # a wide decade window kills garble without riding the label
+        # distribution. The 1900-01-01 missing sentinel is emitted downstream
+        # of validity and is unaffected.
+        return 2020 <= parsed.year <= 2030
     if field == "fee_status":
         return value.lower() in FEE_STATUSES
     if field == "species_code":
         return bool(re.fullmatch(r"[A-Z][A-Z_]+", value))
+    if field == "applicant_name":
+        # Structural shape, total across all 1000 train truths (census
+        # 2026-07-26): exactly two alphabetic tokens, each >= 4 chars (the
+        # closed 144-part name pool has no shorter part). Kills the junk-vote
+        # winners marker rejection freed (`ciaty`, `oe`, `tix`, `SCANTABS`,
+        # `MAME CUT:`) and single-token truncations (`Zatari` for `Zatari
+        # Lutari`), whose family siblings carry the full form. Watermark
+        # furniture is not a name (`Ixe COPY ARTIFACT`, MIB-000743). Edge
+        # punctuation is OCR debris, not structure — strip per token first.
+        toks = [re.sub(r"^[^A-Za-z]+|[^A-Za-z]+$", "", t) for t in value.split()]
+        toks = [t for t in toks if t]
+        if len(toks) != 2 or any(len(t) < 4 or not t.isalpha() for t in toks):
+            return False
+        return not any(t.upper() in _WATERMARK_TOKENS for t in toks)
     return True
 
 

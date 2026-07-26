@@ -52,6 +52,32 @@ def _otsu(values):
     return int(np.argmax(between))
 
 
+def faintness(gray, thresh=INK):
+    """The faint-page decision as measurements: {'ink_frac', 'starved', 'faint',
+    'otsu'}. `faint` is True exactly when `ink_mask` would adapt its threshold
+    (mask starved AND ink gray-not-sparse-black AND enough sub-paper pixels for
+    an honest Otsu); `otsu` is the adapted threshold when it would, else None.
+    Exported so the S2 damage profile and the optical-rung policy read the SAME
+    decision `ink_mask` acts on — one implementation of "this page is faint".
+    """
+    base = gray < thresh
+    frac = float(base.mean())
+    out = {"ink_frac": frac, "starved": frac < STARVED, "faint": False, "otsu": None}
+    if not out["starved"]:
+        return out
+    if (gray < FAINT_HI).mean() < FAINT_RATIO * max(frac, 1e-6):
+        return out                      # ink already dark (sparse-black)
+    sub = gray[gray < PAPER_CUT]
+    if sub.size < MIN_ADAPT_PX:
+        return out                      # blank: don't fabricate ink from noise
+    t = _otsu(sub.astype(np.int64))
+    if t is None:
+        return out
+    out["faint"] = True
+    out["otsu"] = int(min(t, INK_CEIL))
+    return out
+
+
 def ink_mask(gray, thresh=INK):
     """Boolean ink mask for the geometry detectors, adaptive on faint/gray scans.
 
@@ -61,20 +87,12 @@ def ink_mask(gray, thresh=INK):
     FAINT_HI than at `thresh`) is the threshold re-derived by Otsu over the
     below-paper range, capped at INK_CEIL. A near-blank page (too little sub-paper
     ink) keeps the base mask rather than have a threshold invented from noise.
+    The decision itself lives in `faintness`; this is its actor.
     """
-    base = gray < thresh
-    frac = base.mean()
-    if frac >= STARVED:
-        return base
-    if (gray < FAINT_HI).mean() < FAINT_RATIO * max(frac, 1e-6):
-        return base                     # ink already dark (sparse-black), leave it
-    sub = gray[gray < PAPER_CUT]
-    if sub.size < MIN_ADAPT_PX:
-        return base                     # blank: don't fabricate ink from noise
-    t = _otsu(sub.astype(np.int64))
-    if t is None:
-        return base
-    return gray < min(t, INK_CEIL)
+    f = faintness(gray, thresh)
+    if f["faint"]:
+        return gray < f["otsu"]
+    return gray < thresh
 
 
 def skew_sweep(gray):
@@ -110,6 +128,44 @@ def skew_angle(gray):
     if scores is None:
         return 0.0
     return float(angles[int(np.argmax(scores))])
+
+
+def orientation_profile(gray):
+    """Readability hints per quarter-turn: {q: {"sharpness": s, "skew_deg": a}}.
+
+    `skew_deg` is the in-frame deskew angle from the standard sweep (rules
+    included — the border IS the deskew signal), computed here once so the
+    caller never re-runs the sweep on a frame this function measured.
+
+    `sharpness` is the row-projection peakedness of GLYPH ink only — long
+    straight runs stripped in both axes first, because form rules dominate the
+    raw projection and invert the signal: turning a form page makes its
+    vertical rules horizontal, which projects sharper than the actual text
+    (raw sweep scored 6/14 against the eyeball-labeled geometry registry;
+    rule-stripped scores 12/14, the residue being the 90-vs-270 tie
+    projections cannot see and one turned+6.5-degree page).
+
+    Hints ORDER candidates for gated consumers (expansion priority, psm3 frame
+    choice); they never decide membership — a wrong prune on a weak page would
+    violate the coverage floor.
+    """
+    out = {}
+    for q in (0, 1, 3):
+        frame = gray if q == 0 else turn(gray, q)
+        angles, scores = skew_sweep(frame)
+        skew_deg = 0.0 if scores is None else float(angles[int(np.argmax(scores))])
+        glyphs = _text_ink(frame) & _text_ink(np.ascontiguousarray(frame.T)).T
+        ys = np.nonzero(glyphs)[0]
+        if len(ys) < 50:
+            out[q] = {"sharpness": 0.0, "skew_deg": skew_deg}
+            continue
+        prof = np.bincount(ys, minlength=frame.shape[0]).astype(np.float64)
+        mean = prof.mean()
+        out[q] = {
+            "sharpness": round(float((prof ** 2).mean() / (mean ** 2)), 3) if mean else 0.0,
+            "skew_deg": skew_deg,
+        }
+    return out
 
 
 def rotate(gray, degrees):

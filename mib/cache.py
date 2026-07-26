@@ -76,7 +76,8 @@ def to_case(page_dicts):
             reads = [Read(page_no=page_no, lines=list(r["lines"]),
                           variant=r.get("variant", ""),
                           quality=r.get("quality", 0.0),
-                          conf=r.get("conf"))   # pre-conf caches rehydrate None
+                          conf=r.get("conf"),   # pre-conf caches rehydrate None
+                          cost_ms=r.get("cost_ms", 0))   # pre-schema-5: 0
                      for r in p["reads"]]
         elif p.get("ocr_lines"):
             reads = [Read(page_no=page_no, lines=list(p["ocr_lines"]),
@@ -107,8 +108,11 @@ def from_case(pages, reads_by_page):
             "hidden_lines": p.hidden_lines,
             "struck": p.struck,
             "ocr_lines": primary.lines if primary else [],
+            # cost_ms is wall clock: real for offline cost analysis, poison for
+            # any identity comparison (verify_render excludes it by key).
             "reads": [{"variant": r.variant, "quality": r.quality,
-                       "conf": r.conf, "lines": r.lines} for r in reads],
+                       "conf": r.conf, "lines": r.lines,
+                       "cost_ms": r.cost_ms} for r in reads],
             "image_count": p.image_count,
             "is_scan_only": p.is_scan_only,
         })

@@ -288,7 +288,16 @@ def derive(packet, values):
         "emit_flags": observed,
         "finding": adjudicator_finding(packet),
         "waiver_code": waiver_code(packet),
-        "has_biometric": packet.has_doc(parse.DOC_BIOMETRIC),
+        # Presence counts LOSING variants too (fourth application of the
+        # losing-variants principle, after the flag union, the finding
+        # fallback, and identity agreement): MIB-000886's B-13 page is typed
+        # by several variants while the grid's primary lost the header to a
+        # composed-optical read — a slip plainly read by any variant exists.
+        # Presence is a weaker claim than field sourcing; values still come
+        # only from the trust-ordered docs and the vote.
+        "has_biometric": (packet.has_doc(parse.DOC_BIOMETRIC)
+                          or any(d == parse.DOC_BIOMETRIC
+                                 for d, _kv in packet.variant_docs)),
         # A B-13 we could not read the flag line from is evidence of nothing.
         # `has_biometric` only says a slip was detected; the risk-concealment
         # census is about whether its risk line was actually read, so policy

@@ -20,18 +20,68 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Geometric scan restoration. S2 always runs the full ladder — deskew,
-# quarter-turn, shred-band realignment — because it recovers turned/skewed/
-# shredded scan pages that no cheaper rung reaches. The selectable `off`/`skew`/
-# `turn` rungs are gone: they existed to A/B the ladder (experiments.md rows
-# 11-14, still on the record) and to retreat if the full ladder overran the
-# budget, but the submission runs the image with no `-e`, so the retreat was
-# always a rebuild — i.e. a checkout — not a flag.
+# S2 enumeration plans. Two enumerators live behind one seam (render.reads_for):
 #
-# Kept as a stamp constant so caches written before the removal stay joinable,
-# and so a legacy `skew` cache is still correctly *refused* rather than silently
-# mixed into a bands run.
-RESTORE = "bands+local"
+# `ladder` — the frozen legacy set (raw + _restorations per source; optical on
+# raw gray gated by evidence_score < GOOD_ENOUGH). Its stamp remains
+# "bands+local" because it IS that pipeline — the refactor that introduced the
+# seam is provable against the live cache only through this alias.
+#
+# `grid` — the canonical composition grid (docs/TODO.md Track 6): raw + every
+# orientation's in-frame correction chain unconditionally (turn-gating on
+# page-level weakness was offline-proven unsafe — MIB-000509-class pages clear
+# the bar on raw while the turn read carries the fields); weak pages (frozen
+# page_score) expand with optical modules composed OVER the corrected frames;
+# a still-dead page may get one last-resort PSM-3 pass. Anchors: MIB-000061
+# (skew+deshred+adapt reads the fee line), MIB-000030 p2 (turn1 chains read a
+# six-field intake block).
+#
+# MIB_PLAN selects the preset; the MIB_GEOM_SET / MIB_OPT_SET / MIB_OPT_BASE /
+# MIB_LAST_RESORT env knobs override individual grid fields for A/Bs (the
+# ladder is frozen and ignores them). Plan identity feeds the `restore` stamp,
+# so require_agreement/verify_render refuse cross-plan joins with no new code.
+GRID_PRESETS = {
+    "ladder": {"name": "ladder", "geom": ("skew", "turn1", "turn3", "deshred", "local"),
+               "opt": ("adapt", "autocon"), "opt_base": "raw", "last_resort": "off"},
+    "grid": {"name": "grid", "geom": ("skew", "turn1", "turn3", "deshred", "local"),
+             "opt": ("adapt", "autocon"), "opt_base": "frames", "last_resort": "off"},
+}
+DEFAULT_PLAN = "grid"            # flipped 2026-07-27 (Track 6 Phase 3: dev 124.94 -> 125.35, CFA 0, FIXED 25 / BROKE 0); `MIB_PLAN=ladder` remains the frozen legacy for A/Bs
+
+
+def grid_plan():
+    """The resolved S2 enumeration plan for this process."""
+    name = os.environ.get("MIB_PLAN", DEFAULT_PLAN).strip().lower()
+    plan = dict(GRID_PRESETS.get(name, GRID_PRESETS[DEFAULT_PLAN]))
+    if plan["name"] == "ladder":
+        return plan
+    if os.environ.get("MIB_GEOM_SET"):
+        plan["geom"] = tuple(t.strip() for t in os.environ["MIB_GEOM_SET"].split(",") if t.strip())
+    if os.environ.get("MIB_OPT_SET"):
+        plan["opt"] = tuple(t.strip() for t in os.environ["MIB_OPT_SET"].split(",") if t.strip())
+    if os.environ.get("MIB_OPT_BASE") in ("raw", "frames"):
+        plan["opt_base"] = os.environ["MIB_OPT_BASE"]
+    if os.environ.get("MIB_LAST_RESORT") in ("off", "psm3"):
+        plan["last_resort"] = os.environ["MIB_LAST_RESORT"]
+    return plan
+
+
+def _restore_for(plan):
+    """Plan identity as the `restore` stamp value. The ladder aliases the
+    historical "bands+local" (same pipeline); any grid deviation from its
+    preset is spelled out so no two behaviours share a stamp."""
+    if plan["name"] == "ladder":
+        return "bands+local"
+    diffs = []
+    base = GRID_PRESETS["grid"]
+    for key in ("geom", "opt", "opt_base", "last_resort"):
+        if plan[key] != base[key]:
+            val = ",".join(plan[key]) if isinstance(plan[key], tuple) else plan[key]
+            diffs.append(f"{key}={val}")
+    return "grid" + (f"[{';'.join(diffs)}]" if diffs else "")
+
+
+RESTORE = _restore_for(grid_plan())
 
 # 2: page dicts carry `struck` (red-strikethrough value cells). Older schema-1
 # caches lack the key and rehydrate with struck=[] (no voiding) — backward
@@ -43,7 +93,12 @@ RESTORE = "bands+local"
 # per-line confidence queryable (vote ties, per-field preference, consensus).
 # Schema-3 caches rehydrate 3-tuples; consumers index [:3] and must not unpack
 # by arity.
-SCHEMA = 4
+# 5: reads carry `cost_ms` (that pass's tesseract wall time). Older caches
+# rehydrate cost_ms=0. Wall clock is nondeterministic by construction, so it
+# must NEVER join a comparison key (verify_render excludes it); it exists so
+# pass-level cost is learnable offline (the row-20 PSM-3 gate-direction
+# question, plan-ablation cost accounting).
+SCHEMA = 5
 
 # A mismatch here means the two artifacts describe different pipelines and any
 # join across them is meaningless. A key MISSING from a stamp (artifact written
@@ -151,7 +206,7 @@ def stamp(**extra):
     rev, dirty = _git_state()
     return {
         "schema": SCHEMA,
-        "restore": RESTORE,
+        "restore": _restore_for(grid_plan()),   # live, not the import-time constant
         "early_stop": EARLY_STOP,
         "ocr_passes": ocr_passes(),
         "ocr_optical": ocr_optical(),

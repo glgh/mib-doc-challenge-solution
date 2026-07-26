@@ -60,8 +60,13 @@ def main(cache_path, n_scans=4, n_random=2):
                          "regenerate it with scripts/dump_text.py.")
 
     def norm_reads(reads):
-        # JSON round-trips conf tuples as lists; live reads carry tuples.
-        return [{**r, "conf": None if r.get("conf") is None else
+        # Fixed identity keys only. `cost_ms` (schema 5) is wall clock —
+        # nondeterministic by construction, comparing it would fail every run;
+        # a schema-4 cache simply lacks it. Conf tuples JSON-round-trip as
+        # lists; live reads carry tuples.
+        return [{"variant": r.get("variant", ""), "quality": r.get("quality", 0.0),
+                 "lines": r["lines"],
+                 "conf": None if r.get("conf") is None else
                  [tuple(t) for t in r["conf"]]} for r in reads]
 
     def page_key(p):

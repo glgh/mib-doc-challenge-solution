@@ -35,6 +35,8 @@ is what keeps this affordable, not skipping work.
 discarded readings survive the seam, which is what an ensemble over variants
 needs. Choosing among them is `best()`, deliberately separate.
 """
+import difflib
+import hashlib
 import os
 import re
 import subprocess
@@ -50,7 +52,7 @@ from .. import imaging
 from ..config import ocr_optical as _ocr_optical
 from ..config import ocr_passes as _ocr_passes
 from ..parse import ALL_FLAGS, CASE_ID_RE, DATE_RE, SPONSOR_RE, VISA_CLASSES, key_for
-from ..records import Read, best_read
+from ..records import Read, best_read, conf_excess_mass
 from ..vocab import HOME_WORLDS, SPECIES, clean_ocr_line
 
 MIN_EMBEDDED_WIDTH = 1000
@@ -209,27 +211,118 @@ def _restorations(gray):
         yield "local", corrected
 
 
-def _optical_restorations(gray):
-    """Optical variants (behind config.ocr_optical): local-adaptive threshold +
-    autocontrast, which recover faint/unevenly-lit ink that reads as blank and
-    that a global binarization erases. Emitted by `reads_for` ONLY when the
-    geometric ensemble read the page below GOOD_ENOUGH — the unguarded A/B showed
-    a well-formed-but-wrong binarized read can outscore and displace a correct
-    reading on a page that already reads well (dev: 11 fields recovered, 10
-    corrupted). Gating on weak geometric evidence keeps the rescues on dead pages
-    and cannot touch healthy ones.
+# Optical rendering modules: contrast-domain fixes applied AFTER geometry
+# (binarizing before rotation re-blurs the strokes the threshold just sharpened
+# — measured on MIB-000061: adapt-then-skew kept `Fee Stan waved`, skew-then-
+# adapt read `Fee Status waved` verbatim). `adapt` recovers faint/unevenly-lit
+# ink a global binarization erases; `autocon` stretches gray-stock levels.
+# Gated to weak pages: the unguarded A/B showed well-formed-but-wrong binarized
+# reads displacing correct ones on pages that already read well (11 recovered /
+# 10 corrupted, dev).
+_OPTICAL_MODULES = {
+    "adapt": imaging.local_threshold,
+    "autocon": imaging.autocontrast,
+}
 
-    A faint AND tilted page defeats both single-axis rungs: deskew alone cannot
-    see ink this faint, and adapt alone binarizes tilted strokes into garble
-    (MIB-000061: `Fee Stan waved`). The composed rung deskews first, then
-    thresholds — binarizing AFTER rotation, because rotating a binary image
-    re-blurs the strokes the threshold just sharpened (adapt-then-skew kept the
-    garble; skew-then-adapt read `Fee Status waved` verbatim)."""
-    yield "adapt", imaging.local_threshold(gray)
-    yield "autocon", imaging.autocontrast(gray)
-    angle = imaging.skew_angle(gray)
-    if abs(angle) >= imaging.MIN_SKEW:
-        yield "skew+adapt", imaging.local_threshold(imaging.rotate(gray, angle))
+
+def _orientation_chains(gray, q, skew_deg, geom):
+    """(chain, image) pairs for ONE orientation frame's correction ladder.
+
+    Canonical order inside the frame: turn -> deskew -> band realign. The
+    correction detectors self-gate in-frame (`realign_bands` returns None when
+    no full-width border is found there), which is what lets a turned+shredded
+    page finally get the band fix in the right frame — the flat ladder ran
+    deshred only at 0 degrees. Turn frames are always resampled by their
+    in-frame argmax angle (the historical behaviour); the `skew` chain segment
+    is claimed only when the angle clears MIN_SKEW.
+    """
+    if q and f"turn{q}" not in geom:
+        return
+    chain = () if q == 0 else (f"turn{q}",)
+    frame = gray if q == 0 else imaging.turn(gray, q)
+    skewed = abs(skew_deg) >= imaging.MIN_SKEW
+    if q:
+        base = imaging.rotate(frame, skew_deg)
+        base_chain = chain + (("skew",) if skewed else ())
+        yield base_chain, base
+    elif "skew" in geom and skewed:
+        base = imaging.rotate(frame, skew_deg)
+        base_chain = chain + ("skew",)
+        yield base_chain, base
+    else:
+        base, base_chain = frame, chain
+    deshredded = None
+    if "deshred" in geom:
+        deshredded = imaging.realign_bands(base)
+        if deshredded is not None:
+            yield base_chain + ("deshred",), deshredded
+    if "local" in geom:
+        corrected = imaging.realign_local(base)
+        if corrected is not None and (deshredded is None
+                                      or not np.array_equal(corrected, deshredded)):
+            yield base_chain + ("local",), corrected
+
+
+# ---------------------------------------------------------------------------
+# page_score: the weak-page gate, decoupled from S3.
+#
+# `evidence_score` imports parse/vocab, so a KEY_MAP edit silently changes
+# which pages the optical rung expands on and invalidates the OCR cache (the
+# documented "S3's vocabulary silently drives S2" hazard). This score is a
+# FROZEN snapshot (2026-07-27) — deliberately NOT imported — plus the two
+# guards the arbitration lab proved necessary (experiments/probe_arbitration
+# m_guards): label credit needs a >=2-token line, and watermark lines
+# (SAMPLE DENIAL / SPECIMEN / COPY / VOID) earn nothing, so a page cannot
+# saturate the bar on boilerplate while its faint field block goes unread.
+_SCORE_LABELS = (
+    "case id", "applicant", "purpose", "registry name", "species code",
+    "species match", "home world", "visa class", "sponsor id", "arrival date",
+    "declared purpose", "fee status", "waiver code", "registry status",
+    "observed flags", "biometric confidence", "finding",
+)
+_SCORE_VALUE_PATTERNS = (
+    re.compile(r"\bMIB-\d{6}\b"),
+    re.compile(r"\bSPN-\d{4}\b"),
+    re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
+)
+_SCORE_VALUE_WORDS = (
+    "XW-1", "XW-2", "DIP-1", "MED-3", "TRANSIT-7",
+    "ALPHA_DRACONIAN", "ANDROMEDAN", "AQUARIAN_MANTIS", "ARCTURIAN",
+    "CENTAURI_SYNTH", "JOVIAN_GASFORM", "KAIJU_MICRO", "LUNA_SECURID",
+    "ORION_GRAYS", "SIRIUS_AVIAN", "TRIANGULAN", "VENUSIAN_MYCELIAL",
+    "Barnard-c", "Eris Relay", "Europa Station", "Gliese-581g", "Kepler-186f",
+    "Luyten-b", "Mars Dome-7", "Proxima-b", "Sirius Outpost", "TRAPPIST-1e",
+    "Titan Freeport", "Wolf-1061c", "Zeta Reticuli",
+    "memory_tampering", "planetary_embargo", "active_warrant", "biohazard_red",
+    "identity_conflict", "sponsor_mismatch", "illegible_biometrics", "rescinded_denial",
+)
+_WATERMARK_RE = re.compile(r"\b(sample|denial|specimen|copy|void)\b", re.I)
+
+# Initial bar mirrors GOOD_ENOUGH for continuity; re-derived from the dev
+# score distribution during the grid's probe phase (the ev distribution's
+# valley sits at 5, not the hand-picked 6 — hand-picked bars go stale).
+WEAK_BAR = 6
+
+
+def page_score(lines):
+    """Frozen, guarded evidence shape of one reading (see block comment)."""
+    score = 0
+    kept = []
+    for line in lines:
+        if _WATERMARK_RE.search(line):
+            continue
+        kept.append(line)
+        if len(line.split()) < 2:
+            continue
+        head = line.split(":")[0].split(".")[0].split(";")[0].strip().lower()
+        if head in _SCORE_LABELS or difflib.get_close_matches(
+                head, _SCORE_LABELS, n=1, cutoff=0.8):
+            score += 1
+    text = "\n".join(kept)
+    score += sum(len(p.findall(text)) for p in _SCORE_VALUE_PATTERNS)
+    score += sum(1 for w in _SCORE_VALUE_WORDS
+                 if re.search(r"\b" + re.escape(w) + r"\b", text))
+    return score
 
 
 def _sources(doc, page, tmp):
@@ -260,10 +353,30 @@ def _sources(doc, page, tmp):
 def reads_for(doc, page, page_no):
     """Every OCR reading of one page, in generation order (cheapest first).
 
+    Two enumerations behind one seam (config.grid_plan):
+
+    `ladder` — the frozen legacy set: raw + `_restorations` per source, optical
+    modules on raw gray gated by evidence_score < GOOD_ENOUGH. Kept verbatim so
+    the refactor is provable against the live cache.
+
+    `grid` — the canonical composition grid: raw + EVERY orientation's
+    correction chain unconditionally (each turn frame gets its OWN in-frame
+    corrections, hint-ordered; gating turns on page-level weakness was
+    offline-proven unsafe the day it was designed — see the base-tier
+    comment); when the page still reads weak (frozen `page_score` < WEAK_BAR),
+    expand with the optical modules composed over the corrected frames, not
+    just raw gray; a still-dead page may get one last-resort PSM-3 pass on its
+    best frame. Expansion only ever ADDS beyond the unconditional base — the
+    early stop that truncated coverage measured −0.21 (row 16) and stays
+    impossible by construction. Pixel-hash dedupe keeps no-op compositions
+    from paying an OCR pass.
+
     A 300-DPI grayscale/autocontrast retry was tried here and reverted: +0.21
     dev pts for 43x runtime (experiments.md row 8). The pages it targeted were
     turned or shredded, not low-resolution — hence the geometric path instead.
     """
+    from .. import config
+    plan = config.grid_plan()
     # Which PSM passes to OCR each image with. `dual` adds PSM 3 per image and
     # keeps the stronger via best(); an intact page still reads at PSM 11, so the
     # second pass is pure upside on the dense forms PSM 11 fragments.
@@ -271,13 +384,14 @@ def reads_for(doc, page, page_no):
     reads = []
     with tempfile.TemporaryDirectory(prefix="mibocr") as tmp:
         written = 0
+        hashed = set()
 
-        def read(encoded, variant, dpi=None):
+        def read(encoded, variant, dpi=None, only_psm=None):
             nonlocal written
             written += 1
             path = Path(tmp) / f"p{written}.png"
             path.write_bytes(encoded)
-            for psm in psms:
+            for psm in ((only_psm,) if only_psm else psms):
                 suffix = "" if psm == PRIMARY_PSM else f"+psm{psm}"
                 t0 = time.time()
                 lines, conf = _recognize(path, psm, dpi)
@@ -285,24 +399,110 @@ def reads_for(doc, page, page_no):
                                   quality=evidence_score(lines), conf=conf,
                                   cost_ms=round((time.time() - t0) * 1000)))
 
+        frame_images = {}
+
+        def read_image(image, variant):
+            """OCR a restored frame once per unique pixel content."""
+            digest = hashlib.sha1(image.tobytes()).hexdigest()
+            if digest in hashed:
+                return
+            hashed.add(digest)
+            frame_images[variant] = image
+            read(imaging.to_pnm_bytes(image), variant)
+
         sources = list(_sources(doc, page, tmp))
-        for name, encoded, gray in sources:
-            # The old render PNGs carried pymupdf's default 96-DPI pHYs chunk
-            # and tesseract's segmentation was tuned with that (wrong but
-            # load-bearing) value; PNM has no metadata, so the render base
-            # declares it explicitly. Restorations and embedded originals never
-            # had DPI metadata — no flag, tesseract estimates as before.
-            read(encoded, name, dpi=96 if name == "render" else None)
-            for variant, image in _restorations(gray):
-                read(imaging.to_pnm_bytes(image), f"{name}+{variant}")
-        # Optical rung, gated: only when the geometric ensemble read this page
-        # weakly (below the intact-form bar) does a binarized/contrast pass earn a
-        # place, so it cannot outscore a page that already reads well. See
-        # `_optical_restorations` for the A/B evidence behind the guard.
-        if _ocr_optical() and (not reads or max(r.quality for r in reads) < GOOD_ENOUGH):
+
+        if plan["name"] == "ladder":
             for name, encoded, gray in sources:
-                for variant, image in _optical_restorations(gray):
+                # The old render PNGs carried pymupdf's default 96-DPI pHYs chunk
+                # and tesseract's segmentation was tuned with that (wrong but
+                # load-bearing) value; PNM has no metadata, so the render base
+                # declares it explicitly (the honest-DPI variant is a deferred
+                # scored experiment, row 40). Restorations and embedded originals
+                # never had DPI metadata — no flag, tesseract estimates as before.
+                read(encoded, name, dpi=96 if name == "render" else None)
+                for variant, image in _restorations(gray):
                     read(imaging.to_pnm_bytes(image), f"{name}+{variant}")
+            if _ocr_optical() and (not reads or max(r.quality for r in reads) < GOOD_ENOUGH):
+                for name, encoded, gray in sources:
+                    for mod in ("adapt", "autocon"):
+                        read(imaging.to_pnm_bytes(_OPTICAL_MODULES[mod](gray)),
+                             f"{name}+{mod}")
+            return reads
+
+        # --- grid enumeration -------------------------------------------------
+        geom, opt = plan["geom"], plan["opt"]
+        oprofs = {name: imaging.orientation_profile(gray)
+                  for name, _e, gray in sources}
+        for _name, _e, gray in sources:
+            hashed.add(hashlib.sha1(gray.tobytes()).hexdigest())
+        # finals[(source, q)] = (chain, image): the most-corrected frame per
+        # orientation actually produced — the bases optical composes over.
+        finals = {}
+
+        def emit_orientation(name, gray, q):
+            for chain, image in _orientation_chains(
+                    gray, q, oprofs[name][q]["skew_deg"], geom):
+                finals[(name, q)] = (chain, image)
+                read_image(image, "+".join((name,) + chain))
+
+        # Base tier: raw + EVERY orientation's correction chain, unconditional.
+        # Gating turns on page-level weakness was designed, offline-proven
+        # unsafe, and reverted the same day (2026-07-27): a page can clear the
+        # bar on its raw read while the TURN read carries the actual field
+        # block (MIB-000509/501/235 lost species/world/sponsor in the drop
+        # test) — page-grain weakness cannot license skipping an orientation.
+        # The hints still ORDER the turns (sharpest projection first).
+        for name, encoded, gray in sources:
+            # Honest DPI, grid-only: the ladder keeps the 96-DPI pHYs accident
+            # its tuning inherited (row 40); the hard-set probe (2026-07-27,
+            # experiments/dpi_probe.py) scored honest 37 wins / 19 losses /
+            # 296 ties against it, so the grid declares the render's REAL
+            # resolution and the accident dies with the flip.
+            honest = round(72 * gray.shape[1] / max(1.0, page.rect.width))
+            read(encoded, name, dpi=honest if name == "render" else None)
+            frame_images[name] = gray
+            finals[(name, 0)] = ((), gray)
+            # Fixed orientation order. Hint-ordering the base tier was built
+            # and removed the same day: both turns always run, so ordering
+            # buys nothing there — it only shuffles read order, which feeds
+            # the vote's first-seen tie-breaks (an uncontrolled degree of
+            # freedom). The calibrated hint (imaging.orientation_profile,
+            # 12/14 on the labeled registry with rule-stripped glyphs) is for
+            # future GATED consumers: expansion priority, psm3 frame choice.
+            for q in (0, 1, 3):
+                emit_orientation(name, gray, q)
+
+        def weak():
+            if not reads:
+                return True
+            return max(page_score(r.lines) for r in reads) < WEAK_BAR
+
+        # Expansion tier: optical composition over the corrected frames, only
+        # while the page still reads weak.
+        if weak():
+            if _ocr_optical() and opt:
+                for name, encoded, gray in sources:
+                    if plan["opt_base"] == "frames":
+                        bases = [((), gray)] + [
+                            finals[(name, q)] for q in (0, 1, 3)
+                            if finals.get((name, q)) and finals[(name, q)][0]]
+                    else:
+                        bases = [((), gray)]
+                    for chain, image in bases:
+                        for mod in opt:
+                            read_image(_OPTICAL_MODULES[mod](image),
+                                       "+".join((name,) + chain + (mod,)))
+        # Last-resort tier: one full-layout pass on the best frame of a page
+        # nothing else could read (row 20's +0.87 recipe, affordable only
+        # because it is one call per still-dead page, never per image).
+        if plan["last_resort"] == "psm3" and weak():
+            candidates = [r for r in reads if r.variant in frame_images]
+            if candidates:
+                top = max(candidates,
+                          key=lambda r: (conf_excess_mass(r) or 0.0, r.variant))
+                read(imaging.to_pnm_bytes(frame_images[top.variant]),
+                     top.variant + "+psm3", only_psm=SECONDARY_PSM)
     return reads
 
 
