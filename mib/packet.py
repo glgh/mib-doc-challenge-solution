@@ -136,27 +136,30 @@ def assemble(pages, reads_by_page, fallback_case_id):
     for pt in pages:
         best = best_read(reads_by_page.get(pt.page_no) or [])
         if best is not None:
-            primary[pt.page_no] = best.lines
+            primary[pt.page_no] = best
 
     id_votes = Counter()
     for pt in pages:
         id_votes.update(parse.page_case_ids(pt.visible_lines))
-        id_votes.update(parse.page_case_ids(primary.get(pt.page_no, [])))
+        best = primary.get(pt.page_no)
+        id_votes.update(parse.page_case_ids(best.lines if best else []))
     case_id = id_votes.most_common(1)[0][0] if id_votes else fallback_case_id
 
     packet = Packet(case_id=case_id)
     for pt in pages:
-        lines, source = (pt.visible_lines, SRC_TEXT)
+        lines, source, conf = (pt.visible_lines, SRC_TEXT, None)
         if pt.is_scan_only:
             packet.scan_only_pages += 1
-            if primary.get(pt.page_no):
-                lines, source = (primary[pt.page_no], SRC_OCR)
+            best = primary.get(pt.page_no)
+            if best is not None and best.lines:
+                lines, source, conf = (best.lines, SRC_OCR, best.conf)
             for r in reads_by_page.get(pt.page_no) or []:
                 if r.lines is lines or not r.lines or _decoy(r.lines, case_id, ocr=True):
                     continue
                 kv = _parse_lines(r.lines, ocr=True)
                 kv["_raw"] = r.lines
                 kv["_page_no"] = pt.page_no
+                kv["_conf"] = r.conf
                 packet.variant_docs.append((parse.detect_doc_type(r.lines), kv))
         if _decoy(lines, case_id, ocr=(source == SRC_OCR)):
             continue  # decoy page for a different applicant
@@ -164,6 +167,7 @@ def assemble(pages, reads_by_page, fallback_case_id):
         _void_struck(kv, pt.struck)   # a value the page crossed out is not evidence
         kv["_raw"] = lines
         kv["_page_no"] = pt.page_no
+        kv["_conf"] = conf
         packet.docs.append((parse.detect_doc_type(lines), source, kv))
     packet.docs.sort(key=lambda t: (t[0], t[1]))
     return packet
@@ -254,36 +258,103 @@ def _preference(cand):
 
 VOTE_DOC = 99  # provenance doc_type marking a value settled by the variant vote
 
+# Stroke merges the single-char confusion table cannot price: tesseract reads
+# `rn` as `m` and `ri` as `n` (adjacent strokes fusing), and it does so MORE
+# confidently than the true glyphs, so raw conf must not arbitrate between the
+# two forms. Positions are census-bound (train labels, 2026-07-25): `rn`>`m`
+# merges anywhere (all six dev flips landed on truth: Qornax, Orizarn x2,
+# Mirazarn, Qorzarn; the reverse m->rn split is unobserved), but `ri`>`n` only
+# at token end (ZERO truth names end a token in bare `n` or `m`, yet inner
+# `ri`/`n` are both common — an inner merge conflated the legitimate
+# `Miradane` with the hallucinated expansion `Miradarie`, row 45). No two
+# distinct truth names collide under this map, so merging cannot conflate two
+# real applicants; the expanded form is the representative.
+_NAME_COLLAPSES = ((re.compile("rn"), "m"), (re.compile(r"ri\b"), "n"))
+
+
+def _edge_strip(normalized):
+    """Tokens with edge punctuation removed; inner structure (id hyphens, date
+    dashes) untouched. `Zazam_` -> `zazam`, `spn-1234.` -> `spn-1234`."""
+    toks = (re.sub(r"^[^a-z0-9]+|[^a-z0-9]+$", "", t) for t in normalized.split())
+    return " ".join(t for t in toks if t)
+
+
+def _vote_key(field_name, value):
+    """Agreement key for the variant vote: edge punctuation is not disagreement
+    (`Zazam_`, `Zazam.` and `Zazam` are one reading with debris), and for the
+    open-vocabulary applicant_name neither is a stroke merge (`Xanzarn` /
+    `Xanzam` are one name read twice, not a 1-1 tie)."""
+    key = _edge_strip(textmatch.normalize(value))
+    if field_name == "applicant_name":
+        for expanded, merged in _NAME_COLLAPSES:
+            key = expanded.sub(merged, key)
+    return key
+
+
+def _line_conf(kv, value):
+    """The engine's confidence in the tsv line that carries `value`, or None.
+
+    Matched by alnum substring against the conf entries' line text (schema 4);
+    schema-3 caches have no text and yield None, so everything downstream falls
+    back to first-seen order exactly as before.
+    """
+    want = re.sub(r"[^a-z0-9]", "", str(value).lower())
+    if not want:
+        return None
+    best = None
+    for entry in kv.get("_conf") or []:
+        if len(entry) > 3 and want in re.sub(r"[^a-z0-9]", "", entry[3].lower()):
+            best = entry[0] if best is None else max(best, entry[0])
+    return best
+
 
 def _variant_vote(field_name, kvs):
-    """Plurality over valid, normalized values for one field across OCR readings.
+    """Plurality over valid values for one field across OCR readings, grouped
+    by `_vote_key` so debris and stroke-merge variants pool their votes instead
+    of splitting them (the 1-1 "ties" of row 42 were mostly one reading
+    fragmented by punctuation).
 
-    Ties break first-seen, which is generation order: cheapest variant first
-    within a page, pages in document order — the same bias `best_read` had.
-    A page-level conf weight was tried and rejected (row 43): whole-read conf
-    mass is uncorrelated with the correctness of one field's line, and the
-    weighted ties went 5 better / 8 worse — field ties need per-LINE conf,
-    which waits on the tsv-line-text capture (schema 4). A steer-ties-away-
-    from-revoked-sponsors guard was tried in the same batch and also reverted:
-    MIB-000130's `SPN-4040` is genuinely revoked (truth DENIED) and the guard
-    handed the case to its misread neighbor `SPN-4080` — on a tie, the revoked
-    reading is the deny-safe direction, not the hazard (the hazard is *repair*
-    translating digits toward the list, guarded in vocab.snap).
+    Genuine ties break by per-line engine confidence (`_line_conf`), then
+    first-seen generation order. A PAGE-level conf weight was tried and
+    rejected (row 43): whole-read mass is uncorrelated with one line's
+    correctness — the line the value sits on is the right grain. A steer-ties-
+    away-from-revoked-sponsors guard was tried in the same batch and also
+    reverted: MIB-000130's `SPN-4040` is genuinely revoked (truth DENIED) and
+    the guard handed the case to its misread neighbor `SPN-4080` — on a tie,
+    the revoked reading is the deny-safe direction, not the hazard (the hazard
+    is *repair* translating digits toward the list, guarded in vocab.snap).
 
     Returns (representative raw value, agreement count) or (None, 0).
     """
-    counts, rep = Counter(), {}
-    for kv in kvs:
+    groups = {}   # vote key -> [(value, clean, line_conf, seq)]
+    for seq, kv in enumerate(kvs):
         v = kv.get(field_name)
         if not v or not parse.valid_value(field_name, v):
             continue
-        key = textmatch.normalize(v)
-        counts[key] += 1
-        rep.setdefault(key, v)
-    if not counts:
+        key = _vote_key(field_name, v)
+        if not key:
+            continue
+        norm = textmatch.normalize(v)
+        clean = norm == _edge_strip(norm)   # stripping removed nothing: no debris
+        groups.setdefault(key, []).append((v, clean, _line_conf(kv, v), seq))
+    if not groups:
         return None, 0
-    top = max(counts, key=lambda k: counts[k])
-    return rep[top], counts[top]
+
+    def group_rank(entries):
+        best_conf = max((c for _v, _cl, c, _s in entries if c is not None), default=-1.0)
+        first_seen = min(s for _v, _cl, _c, s in entries)
+        return (-len(entries), -best_conf, first_seen)
+
+    entries = min(groups.values(), key=group_rank)
+
+    def rep_rank(e):
+        v, clean, conf, seq = e
+        # Cleanest first (no edge debris), then the expanded stroke-merge form
+        # (longer), then the engine's own preference, then generation order.
+        return (not clean, -len(textmatch.normalize(v)),
+                -(conf if conf is not None else -1.0), seq)
+
+    return min(entries, key=rep_rank)[0], len(entries)
 
 
 def merge_fields(packet, provenance=None):
