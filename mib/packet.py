@@ -240,7 +240,10 @@ def candidates(packet):
 
 
 def _preference(cand):
-    """Sort key deciding which candidate for a field wins: read quality, then trust.
+    """Sort key deciding which candidate for a field wins: source (clean text
+    beats OCR), then field-manual trust order. (`Candidate.quality` is NOT
+    consulted — source IS the read-quality signal at this seam; the numeric
+    field stays a documented future seam, records.py.)
 
     `packet.docs` is ordered (doc_type, source), which ranks whole *documents* and
     therefore lets an OCR'd high-trust document win every field at once over a
