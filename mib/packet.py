@@ -260,15 +260,16 @@ VOTE_DOC = 99  # provenance doc_type marking a value settled by the variant vote
 
 # Stroke merges the single-char confusion table cannot price: tesseract reads
 # `rn` as `m` and `ri` as `n` (adjacent strokes fusing), and it does so MORE
-# confidently than the true glyphs, so raw conf must not arbitrate between the
-# two forms. Positions are census-bound (train labels, 2026-07-25): `rn`>`m`
-# merges anywhere (all six dev flips landed on truth: Qornax, Orizarn x2,
-# Mirazarn, Qorzarn; the reverse m->rn split is unobserved), but `ri`>`n` only
-# at token end (ZERO truth names end a token in bare `n` or `m`, yet inner
-# `ri`/`n` are both common — an inner merge conflated the legitimate
-# `Miradane` with the hallucinated expansion `Miradarie`, row 45). No two
-# distinct truth names collide under this map, so merging cannot conflate two
-# real applicants; the expanded form is the representative.
+# confidently than the true glyphs, so engine conf must not arbitrate between
+# the two forms. This mechanism survives its own ablation at corpus scale
+# (row 49): with the merge disabled on the schema-4 substrate, per-line conf
+# alone regresses 7 names / recovers 0 — the merge is load-bearing, not a
+# case patch. Positions are census-bound (train labels): `rn`>`m` anywhere;
+# `ri`>`n` token-final only (inner `ri`/`n` are both common in real names —
+# an inner merge conflated `Miradane` with the hallucinated `Miradarie`,
+# row 45). No two distinct truth names collide under this map, so merging
+# cannot conflate two real applicants; the expanded form is the
+# representative (the merge direction never runs backward in this corpus).
 _NAME_COLLAPSES = ((re.compile("rn"), "m"), (re.compile(r"ri\b"), "n"))
 
 
@@ -346,9 +347,10 @@ def _variant_vote(field_name, kvs):
             continue
         # An INNER colon in a voted value means the parse mis-keyed a line —
         # the value swallowed another field's label (`Home World: Europa
-        # Station` winning the *name* vote on MIB-000027). Real values never
-        # carry one. A trailing colon is mere edge debris (`Solul Qorzarn:`)
-        # — the edge-strip key already absorbs it, and dropping those reads
+        # Station` winning the *name* vote). Schema-grounded, not case-bound:
+        # ZERO of the 12,000 train truth values contain a colon (census, row
+        # 49). A trailing colon is mere edge debris (`Solul Qorzarn:`) — the
+        # edge-strip key already absorbs it, and dropping those reads
         # reshuffled first-seen ties into regressions.
         if re.search(r":\s*\S", v):
             continue
