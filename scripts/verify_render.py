@@ -44,13 +44,16 @@ def main(cache_path, n_scans=4, n_random=2):
     mid = len(by_ocr) // 2
     sample = by_ocr[:n_scans] + by_ocr[mid:mid + n_random]
 
-    # Pre-ensemble caches lack the per-page `reads` list; against those the
-    # comparison covers the primary reading only (still a real S1/S2 check).
+    # Pre-ensemble caches lack the per-page `reads` list; pre-strike caches lack
+    # `struck`. Against those the comparison drops the missing key rather than
+    # false-positiving on None-vs-value (still a real S1/S2 check on the rest).
     with_reads = all("reads" in p for rec in sample for p in rec["pages"])
+    with_struck = all("struck" in p for rec in sample for p in rec["pages"])
 
     def page_key(p):
         base = (p["visible_lines"], p["hidden_lines"], p["ocr_lines"], p["image_count"])
-        return base + ((p.get("reads"),) if with_reads else ())
+        base += ((p.get("reads"),) if with_reads else ())
+        return base + ((p.get("struck"),) if with_struck else ())
 
     bad = 0
     for rec in sample:

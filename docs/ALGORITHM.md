@@ -1,12 +1,13 @@
 # Algorithm: how the pipeline works right now
 
-_Last updated: 2026-07-23. Rewrite this file in place when the algorithm changes; do not append._
+_Last updated: 2026-07-25. Rewrite this file in place when the algorithm changes; do not append._
 
 The reference for **what the system actually does**, stage by stage, with the real
 constants. Sister docs answer the other questions: [STATUS.md](STATUS.md) — where we are and
 what we tried; [experiments.md](experiments.md) — one scored row per change; [BACKGROUND.md](BACKGROUND.md) —
 the evidence behind the constants (organizer rulings, label mining, fraud-signal taxonomy, scan
-geometry, competitor intel); the challenge's own [EVALUATION.md](../../mib-doc-challenge/EVALUATION.md) —
+geometry, competitor intel, signal-space verdicts); [FIELDS.md](FIELDS.md) — the same evidence
+indexed per schema field; the challenge's own [EVALUATION.md](../../mib-doc-challenge/EVALUATION.md) —
 what the evaluator rewards. [CLAUDE.md](../CLAUDE.md) briefs a newcomer on the problem.
 
 Keep this honest against the code. When a constant or branch here disagrees with `mib/`, the
@@ -55,9 +56,16 @@ A page `is_scan_only` when `image_count > 0 and len(visible_lines) <= 3` — its
 not text, so it needs S2. Hidden lines are retained separately for the injection differential
 tests only.
 
+S1 also records **struck** value cells: text a red strikethrough crosses out in the vector layer
+(`get_drawings()` — a thin, horizontal, reddish line over the span). This is the document voiding its
+own printed value (a fee receipt's `unpaid`, an intake's decoy sponsor/visa), which the text layer
+still reads — so, like hidden text, a struck value is not sourceable evidence and S4 drops it. Only
+text-layer strikes are visible here; scanned red-*pixel* strikes are not (OCR is grayscale).
+
 ## S2 — render / OCR (`mib/stages/render.py` + `mib/imaging.py`)
 
-Runs only on scan-only pages (~25% of packets). Pixel sources, cheapest first: the embedded
+Runs only on scan-only pages — 47% of train pages; 85% of packets carry at least one (only 149 of
+1,000 train packets are fully text-layer). Pixel sources, cheapest first: the embedded
 raster if `width >= 1000`, then a 200-DPI re-render (`zoom 2.8`). Engine is **Tesseract PSM 11**
 (sparse text), `OMP_THREAD_LIMIT=1`, 20 s per-call timeout.
 
@@ -113,9 +121,16 @@ has been removed, so there is no longer a switch for it. Cost is bounded by
 
 **`assemble`**:
 - **case_id** by majority vote across all pages (visible + OCR lines); pages naming a *different*
-  case_id are dropped as decoys for another applicant.
+  case_id are dropped as decoys for another applicant — with one tolerance (row 25): an *OCR* page
+  whose only id is one glyph off the active case is kept (the applicant's own page misread, not a
+  decoy); text-layer pages get exact match only.
 - On OCR'd pages, `_repair_ocr_kv` snaps values toward closed vocabularies (`vocab.snap`) and
   **deletes** hopeless id/enum reads — including `observed_flags` — so absent beats wrong.
+- `_void_struck` drops any field whose value the page **struck through** (S1's `struck` set): the
+  document crossed out its own value, so the true value must come from another document, else the
+  field degrades to unknown. Match is normalized equality (never substring: a struck `unpaid` must
+  not void a `paid`). `_raw` is untouched, so flag scanning and manual corrections still read (row 34,
+  +0.20 dev, CFA 0; the deterministic fee-decoy negation — struck ⟺ printed value ≠ truth).
 - Documents are stored `(doc_type, source)`-sorted, where `source` is text (0) < OCR (1).
 
 **`merge_fields`**: `candidates()` materializes *every* value seen for every field, sorted by
@@ -176,7 +191,8 @@ unreadable" is the guard that removed the MIB-000672 false approval.
 
 Key constants (train-validated, see [BACKGROUND.md](BACKGROUND.md) §2):
 - `STALE_CUTOFF = 2026-01-02` — midpoint of the empty 48-day band between the latest stale-denied
-  and earliest fresh arrival (max-margin; no visible receipt date exists in the corpus).
+  arrival (2025-12-09) and the earliest fresh **non-DIP** arrival (2026-01-26); max-margin, since no
+  visible receipt date exists in the corpus.
 - Full-embargo `{TRAPPIST-1e, Eris Relay}` (denial via the `embargo_world` branch — no flag is
   inferred); partial-embargo `{Wolf-1061c}` (non-DIP only).
 - Revoked sponsors `{SPN-0007, SPN-0139, SPN-4040}` (manual) + `{SPN-2718, SPN-7331, SPN-9090}`
@@ -184,22 +200,19 @@ Key constants (train-validated, see [BACKGROUND.md](BACKGROUND.md) §2):
 
 ### Historical: the learned decider (deleted)
 
-A calibrated-logistic decider (66 features, EV-argmax over the real scoring matrix, numpy-only
-forward pass) ran beside the rules cascade as a permanent sidecar A/B. Its +1.16 OOF edge was
-measured on the 115.20 substrate; re-measured at 119.10 it **inverted to −0.50 with 14 CFAs vs
-rules' 0** — strictly dominated, shelved, then decision-layer ML was closed outright (STATUS.md;
-`fee_unknown`/`b13_census` are information-limited, not model-limited). The code
-(`mib/decision.py`, `mib/features.py`, `mib/decision_model.npz`, `scripts/{train,export}_decision.py`)
-and the `MIB_DECIDER`/`MIB_CFA_VETO` knobs were deleted and live in git history. The CFA-gate
-question (hard gate vs priced cost) is moot until some future decider earns candidacy.
+A calibrated-logistic decider (66 features, EV-argmax over the real scoring matrix) ran beside the
+rules cascade as a sidecar A/B. Its edge inverted on the stronger substrate (−0.50 class, 14 CFAs
+vs rules' 0), decision-layer ML was closed, and the code (`mib/{decision,features}.py`,
+`decision_model.npz`, `scripts/{train,export}_decision.py`, the `MIB_DECIDER`/`MIB_CFA_VETO` knobs)
+was deleted — git history only. Full story: STATUS rejected list, experiments rows 18/27.
 
 ## Confidence + emit (`mib/confidence.py`, `mib/emit.py`)
 
-- **Rules path:** per-branch table fitted from dev empirical accuracy (Laplace-shrunk, clamped,
-  `mib/confidence_table.json`); hand-set fallback if the table is absent. Never a constant — the
-  calibration section scores `20·max(0, 1 − 2·mean_brier)`.
-- **Learned path:** its own 1-D sigmoid calibrator on the chosen-class probability, clamped to
-  `[0.05, 0.95]`.
+- Per-branch table fitted from dev empirical accuracy (Laplace k=10, clamped to [0.05, 0.95],
+  `mib/confidence_table.json`, via `scripts/fit_confidence.py`); hand-set fallback if the table is
+  absent. Never a constant — the calibration section scores `20·max(0, 1 − 2·mean_brier)`.
+  `confidence_table.meta.json` stamps the substrate it was fitted on (currently the shipping
+  keystone+struck cache, rows 31/34); refit after any change that moves branch membership.
 - **`emit.validate`** is the schema safety net (the evaluator hard-fails on bad enums / confidence /
   duplicate or malformed ids): clamps enums and confidence, repairs `case_id` (last resort
   `MIB-000000`, a valid shape that matches no case — strictly better than a fatal malformed id),
@@ -243,12 +256,12 @@ is caught and logged, keeping the provisional rows.
 | var | default | effect |
 | --- | --- | --- |
 | `MIB_OCR_PASSES` | `psm11` | `dual` adds a PSM 3 pass per image (experiments.md row 20 — +0.87 dev, unshipped for cost) |
-| `MIB_OCR_OPTICAL` | off | in-flight faint-scan variants (local threshold + autocontrast), gated on weak geometric reads |
+| `MIB_OCR_OPTICAL` | off | faint-scan variants (local-adaptive threshold + autocontrast, `mib/imaging.py`), gated on weak geometric reads; unmeasured |
+| `MIB_WORKERS` | 4 | local wall-clock knob only (`config.workers()` — the contract's vCPU count is the default). Output is byte-identical at any worker count, so it is deliberately not stamped |
 | `MIB_DEBUG_JSONL` | unset | path for the per-case diagnostic sidecar |
 
-The per-case OCR wall-clock bound (120 s) and the pool size (4, the contract's vCPU count) are
-constants (`runner.CASE_OCR_BUDGET_S`, `solution.WORKERS`), not knobs — nothing ever overrode them,
-and experiments override the budget per-call via `read_case(pdf, budget_s=...)`.
+The per-case OCR wall-clock bound (120 s) is a constant (`runner.CASE_OCR_BUDGET_S`), not a knob;
+experiments override it per-call via `read_case(pdf, budget_s=...)`.
 
 ## Known gaps
 

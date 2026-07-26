@@ -78,6 +78,36 @@ def _parse_lines(lines, ocr):
     return _repair_ocr_kv(kv) if ocr else kv
 
 
+# "Key: Value" on one line, so an inline strike ("Fee Status: unpaid") matches by
+# its value part as well as the whole line.
+_INLINE_KV_RE = re.compile(r"^[A-Za-z0-9][A-Za-z _0-9]{1,28}?\s*[:.;]\s*(.+)$")
+
+
+def _void_struck(kv, struck):
+    """Drop any field whose value the document crossed out (red strikethrough).
+
+    `struck` is the joined text of struck value cells for this page (from
+    stages.extract). A struck value is the document voiding its own printed value
+    — not sourceable evidence, like a hidden span or a damage marker — so it must
+    not source a field; the true value comes from another document, or the field
+    degrades to unknown. Match is normalized equality (never substring: a struck
+    `unpaid` must not void a `paid` elsewhere on the page), plus the value part of
+    an inline `Key: Value` strike. `_raw` is left intact, so flag scanning and
+    manual-correction reading are unaffected.
+    """
+    if not struck:
+        return kv
+    voided = {textmatch.normalize(s) for s in struck}
+    for s in struck:
+        m = _INLINE_KV_RE.match(s)
+        if m:
+            voided.add(textmatch.normalize(m.group(1)))
+    for fname in list(kv):
+        if not fname.startswith("_") and textmatch.normalize(kv[fname]) in voided:
+            del kv[fname]
+    return kv
+
+
 def _decoy(lines, case_id, ocr):
     """Does this reading belong to a different applicant?
 
@@ -131,6 +161,7 @@ def assemble(pages, reads_by_page, fallback_case_id):
         if _decoy(lines, case_id, ocr=(source == SRC_OCR)):
             continue  # decoy page for a different applicant
         kv = _parse_lines(lines, ocr=(source == SRC_OCR))
+        _void_struck(kv, pt.struck)   # a value the page crossed out is not evidence
         kv["_raw"] = lines
         kv["_page_no"] = pt.page_no
         packet.docs.append((parse.detect_doc_type(lines), source, kv))

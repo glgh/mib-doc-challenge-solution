@@ -38,11 +38,18 @@ class Page:
     """One page's text layer, with hidden spans quarantined.
 
     Hidden lines are retained for diagnostics and for the injection tests, and
-    must never reach field extraction (docs/fraud-signals.md §1).
+    must never reach field extraction (docs/BACKGROUND.md section 3).
+
+    `struck` holds value-cell text the document crossed out with a red
+    strikethrough (S1 detects it from the vector layer). A struck value is the
+    document voiding its own printed value — not sourceable evidence, exactly
+    like a hidden span or a damage marker — so the merge drops any field whose
+    value matches one (mib/packet.py).
     """
     page_no: int = 0
     visible_lines: list = field(default_factory=list)
     hidden_lines: list = field(default_factory=list)
+    struck: list = field(default_factory=list)
     image_count: int = 0
 
     @property

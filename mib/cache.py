@@ -67,6 +67,7 @@ def to_case(page_dicts):
             page_no=page_no,
             visible_lines=list(p["visible_lines"]),
             hidden_lines=list(p["hidden_lines"]),
+            struck=list(p.get("struck", [])),   # absent in pre-strike caches -> []
             image_count=p["image_count"],
         ))
         if p.get("reads") is not None:
@@ -101,6 +102,7 @@ def from_case(pages, reads_by_page):
             "page_no": p.page_no,
             "visible_lines": p.visible_lines,
             "hidden_lines": p.hidden_lines,
+            "struck": p.struck,
             "ocr_lines": primary.lines if primary else [],
             "reads": [{"variant": r.variant, "quality": r.quality,
                        "lines": r.lines} for r in reads],

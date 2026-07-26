@@ -3,9 +3,13 @@
 Each of these cost real points once. They are cheap to keep and they are the
 part of the suite that compounds: every future CFA or mis-repair lands here.
 """
+from pathlib import Path
+
 import pytest
 
 from mib import parse, vocab
+
+_TRAIN = Path(__file__).resolve().parent.parent.parent / "mib-doc-challenge/data/train"
 
 
 def test_policy_constants_have_a_single_source():
@@ -269,6 +273,59 @@ def test_registry_eroded_labels_recover_values():
     assert kv["home_world"] == "Ens Relay"
     assert kv["species_code"] == "ANDROMEDAN"
     assert kv["arrival_date"] == "2026-04-14"
+
+
+def test_struck_value_is_voided_but_a_lookalike_is_not():
+    """MIB-000514/000614: the fee receipt reads `unpaid`, but the value is crossed
+    out with a red strikethrough — the document voiding its own value. `_void_struck`
+    drops the struck field. The match is equality, never substring, so a struck
+    `unpaid` must not also void a `paid` (one edit away, opposite meaning) elsewhere
+    on the page; and `_raw` is preserved so flags/manual-corrections still read."""
+    from mib.packet import _void_struck
+
+    kv = {"fee_status": "unpaid", "visa_class": "DIP-1", "_raw": ["MIB Fee Receipt"]}
+    _void_struck(kv, ["unpaid"])
+    assert "fee_status" not in kv          # the crossed-out value did not source
+    assert kv["visa_class"] == "DIP-1"     # unrelated field untouched
+    assert kv["_raw"] == ["MIB Fee Receipt"]
+
+    keep = {"fee_status": "paid"}
+    _void_struck(keep, ["unpaid"])         # equality, not substring
+    assert keep["fee_status"] == "paid"
+
+    inline = {"fee_status": "unpaid"}
+    _void_struck(inline, ["Fee Status: unpaid"])   # inline "Key: Value" strike
+    assert "fee_status" not in inline
+
+
+def test_red_strikethrough_on_the_fee_receipt_is_detected():
+    """S1 reads the strike from the vector layer (the text layer still says
+    `unpaid`). MIB-000514 page 2 is a fee receipt whose `unpaid` is struck."""
+    pdf = _TRAIN / "MIB-000514.pdf"
+    if not pdf.exists():
+        pytest.skip("train corpus not present")
+    from mib.stages import extract
+
+    with extract.open_document(pdf) as doc:
+        pages = extract.pages(doc)
+    assert "unpaid" in {s for p in pages for s in p.struck}
+
+
+def test_struck_fee_does_not_source_fee_status():
+    """End to end through the merge: a struck fee value never becomes the emitted
+    `fee_status`, so it can no longer drive a false `fee_unpaid` denial. Without the
+    strike the same page supplies `unpaid`, which is the pre-change behavior."""
+    from mib.records import Page
+    from mib import packet
+
+    lines = ["MIB Fee Receipt", "Case ID: MIB-000999", "Fee Status", "unpaid",
+             "Amount", "$809.00", "Waiver Code", "N/A"]
+    struck = packet.assemble([Page(page_no=0, visible_lines=lines, struck=["unpaid"])],
+                             {}, "MIB-000999")
+    assert packet.merge_fields(struck).get("fee_status") is None
+
+    plain = packet.assemble([Page(page_no=0, visible_lines=lines)], {}, "MIB-000999")
+    assert packet.merge_fields(plain).get("fee_status") == "unpaid"
 
 
 def test_registry_fallback_ignores_boilerplate_and_debris():

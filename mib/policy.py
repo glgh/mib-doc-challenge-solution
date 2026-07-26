@@ -1,8 +1,8 @@
 """Adjudication rule engine.
 
 Ordered cascade per the MIB field manual + train-validated inferences (see
-docs/label-mining.md, docs/fraud-signals.md; every rule's hit/collateral was
-measured via scripts/mine_signals.py before inclusion). Branches are named so
+docs/BACKGROUND.md sections 2-3; every rule's hit/collateral was measured via
+scripts/mine_signals.py before inclusion). Branches are named so
 confidence is calibrated per-branch and eval residuals attribute to the rule
 that fired.
 """
@@ -18,8 +18,9 @@ PARTIAL_EMBARGO_WORLDS = {"Wolf-1061c"}
 
 # No visible receipt date exists in the corpus, so the 180-day staleness rule
 # needs a boundary constant. Train has a 48-day empty band between the latest
-# stale-denied arrival (2025-12-09) and the earliest fresh one (2026-01-26);
-# any cutoff inside fits "perfectly". Max-margin choice: the band midpoint.
+# stale-denied arrival (2025-12-09) and the earliest fresh non-DIP one
+# (2026-01-26; the lone arrival between them, 2026-01-15, is a staleness-exempt
+# DIP-1). Any cutoff inside fits "perfectly". Max-margin choice: the band midpoint.
 # The slack is a train-only property: on the 5,000-case validation set the band
 # narrows to 2 days (2025-12-31 / 2026-01-02, experiments.md row 24). The cutoff
 # still sits inside the gap and the branch fires at the same ~1.3% rate, so the

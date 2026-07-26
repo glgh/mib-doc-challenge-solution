@@ -33,7 +33,11 @@ ROOT = Path(__file__).resolve().parent.parent
 # mixed into a bands run.
 RESTORE = "bands"
 
-SCHEMA = 1
+# 2: page dicts carry `struck` (red-strikethrough value cells). Older schema-1
+# caches lack the key and rehydrate with struck=[] (no voiding) — backward
+# compatible, so this is a documentation signal, not a join gate (require_agreement
+# does not check SCHEMA).
+SCHEMA = 2
 
 # A mismatch here means the two artifacts describe different pipelines and any
 # join across them is meaningless.

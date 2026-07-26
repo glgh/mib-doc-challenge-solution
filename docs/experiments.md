@@ -264,9 +264,10 @@ Refitting each from 4/5 of dev and scoring the held-out fifth attributes the gap
 **The honest dev number is 118.86 against a reported 119.10 — a fitting bias of −0.23, entirely the
 confidence table.** The decision constants do not move at all: every fold re-mines *identical* entity
 lists (2 full-embargo worlds, 1 partial, the same 3 sponsor ids), and the `STALE_CUTOFF` refits land
-between 2025-11-08 and 2026-01-02 — all inside the empty band separating the corpus's stale arrivals
-(≤2025-11-15) from its fresh ones (≥2026-01-15), so they are the same decision boundary written
-differently. A shrinkage sweep confirms the table needs no fix either: OOF calibration is 15.10 /
+between 2025-11-08 and 2026-01-02 — each fold's own max-margin midpoint of the empty band between
+its latest stale-denied and earliest fresh non-DIP arrival (the full-corpus band is 2025-12-09 →
+2026-01-26; folds that drop the boundary cases widen it downward), so they are the same decision
+boundary written differently. A shrinkage sweep confirms the table needs no fix either: OOF calibration is 15.10 /
 **15.09** / 15.07 / 15.05 / 15.01 at `SHRINK_K` = 5 / **10** / 20 / 40 / 80, so the shipped k=10 is
 already optimal and the only defect was *reporting* 15.32 as if it generalized.
 
@@ -471,9 +472,9 @@ gains are broad, not one field: sponsor_id +21 cases, home_world +22, arrival_da
 | - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
 | 29 | 2026-07-24 | (dirty) | **Dead-code sweep, score-neutral by construction**: deleted the unreferenced `Packet.intake` property (its `DOC_INTAKE` import with it) and nine unused imports (`gallery_ocr_inputs.py` ×6 — the script now uses only `visualize_restore` + PIL — plus `np` in `repair_bench.py`, `Counter` in `reads_probe.py`, `pytest` in `test_invariants.py`) | — | — | — | — | — | — | keep — suite 42 passed / 1 xfailed |
 | 30 | 2026-07-25 | `4afeb58` | **Keystone: OCR ensemble across the seam + per-field variant vote + flag union.** Seam/cache carry every reading (`23f5643`, behavior-frozen: replay of the old bands cache vs row-28 reference IDENTICAL); merge settles non-text fields by plurality over valid values across all readings, flags union across losing variants. A/B on the SAME fresh ensemble dump (`train_bands_reads.jsonl`): frozen behavior 121.36 (= row 28 exactly, substrate stable) → keystone 122.10 | **122.10** | 63.54 | 42.92 | 15.63 | 0 | 4.8s p50/case dump | keep — probes reproduced exactly (fields 581→600, adj 78→80, rf 73→75 on hard set) |
-| 31 | 2026-07-25 | (this) | **Confidence-table refit on the keystone substrate** (`scripts/fit_confidence.py output/replay_keystone`): per-branch nudges (b13_census 0.303→0.285, fee_unknown 0.469→0.481, review_flag 0.687→0.708, …) | 122.10 | — | — | — | 0 | — | keep — dev score/Brier unchanged at reported precision; table now provenance-matches the shipped substrate |
-| 32 | 2026-07-25 | (this) | **Eroded-label registry recovery** (`parse.registry_fallback_kv`, OCR registry pages only): the extract's two-line labels erode on faint scans, fusing tails onto values (`World Ens Relay`) or leaving bare values; recover via canonical-label-tail regexes + vocab snap (cutoff 0.7) + bare-TitleCase-pair name capture. Motivated by MIB-000293 (worst dev case, extraction 0/45, user eyeballed the page as clearly parseable): now name/species/world/date all recover and `Eris Relay` lands the `embargo_world` DENIED — truth | **122.24** | 63.63 | 42.97 | 15.65 | 0 | — | keep — 3 dev cases improved, 0 regressed; suite 44 passed / 1 xfailed; regression tests added |
-| 33 | 2026-07-25 | (this) | **OCR-misread tolerance in `identity_conflict`**: an OCR-sourced registry name at name-similarity ≥0.75 to the emitted applicant is agreement, not conflict (text layers keep exact match). Max-margin threshold: all true conflicts mined at ≤0.5, the lone misread (MIB-000523, `Ixoul Solx` vs `Ixoul Solix`) at 0.947, band empty. Surfaced by row 32's recovery on 523 — a HOLDOUT case the dev gate couldn't see (its truth row was read for the diagnosis; logged here for honesty). Train-wide diff vs row 32: exactly one case changes, 523 back to APPROVED @0.95 | 122.24 | 63.63 | 42.97 | 15.65 | 0 | — | keep — dev unchanged by construction (523 is holdout); suite 45 passed / 1 xfailed |
+| 31 | 2026-07-25 | ac5a235 | **Confidence-table refit on the keystone substrate** (`scripts/fit_confidence.py output/replay_keystone`): per-branch nudges (b13_census 0.303→0.285, fee_unknown 0.469→0.481, review_flag 0.687→0.708, …) | 122.10 | — | — | — | 0 | — | keep — dev score/Brier unchanged at reported precision; table now provenance-matches the shipped substrate |
+| 32 | 2026-07-25 | a157fc6 | **Eroded-label registry recovery** (`parse.registry_fallback_kv`, OCR registry pages only): the extract's two-line labels erode on faint scans, fusing tails onto values (`World Ens Relay`) or leaving bare values; recover via canonical-label-tail regexes + vocab snap (cutoff 0.7) + bare-TitleCase-pair name capture. Motivated by MIB-000293 (worst dev case, extraction 0/45, user eyeballed the page as clearly parseable): now name/species/world/date all recover and `Eris Relay` lands the `embargo_world` DENIED — truth | **122.24** | 63.63 | 42.97 | 15.65 | 0 | — | keep — 3 dev cases improved, 0 regressed; suite 44 passed / 1 xfailed; regression tests added |
+| 33 | 2026-07-25 | 54c38ec | **OCR-misread tolerance in `identity_conflict`**: an OCR-sourced registry name at name-similarity ≥0.75 to the emitted applicant is agreement, not conflict (text layers keep exact match). Max-margin threshold: all true conflicts mined at ≤0.5, the lone misread (MIB-000523, `Ixoul Solx` vs `Ixoul Solix`) at 0.947, band empty. Surfaced by row 32's recovery on 523 — a HOLDOUT case the dev gate couldn't see (its truth row was read for the diagnosis; logged here for honesty). Train-wide diff vs row 32: exactly one case changes, 523 back to APPROVED @0.95 | 122.24 | 63.63 | 42.97 | 15.65 | 0 | — | keep — dev unchanged by construction (523 is holdout); suite 45 passed / 1 xfailed |
 
 Row 29 is the residue after row 27's sweep: an AST scan of all 47 files (every def/class
 cross-referenced against every use site repo-wide) found nothing else. Checked and deliberately
@@ -481,3 +482,43 @@ kept: `EARLY_STOP` (frozen for cache-stamp joinability), the `MIB_DECIDER` tombs
 `runner.py`, and the four zero-doc-reference dev scripts (`repair_gallery`, `probe_variant_merge`,
 `gallery_ocr_inputs`, `make_splits` — all live instruments). No eval run: nothing removed was
 reachable from the container path or the suite.
+
+| # | Date | Commit | Change | Total | Class /80 | Extr /50 | Calib /20 | CFA | Wall | Decision |
+| - | ---- | ------ | ------ | ----: | --------: | -------: | --------: | --: | ---: | -------- |
+| 34 | 2026-07-25 | (dirty) | **Strikethrough → value void** (`stages.extract._struck_values` + `packet._void_struck`): a red strike over a field value in the PDF vector layer voids it — the document crossing out its own printed value, so it is not sourceable evidence (like hidden text / damage markers). S1 detects it from `page.get_drawings()`, the merge drops any field whose value matches (equality, never substring). General (all fields), gated CFA 0 | **122.44** | 63.76 | 42.98 | 15.70 | 0 | +54s backfill | keep |
+
+**Clean A/B on the keystone substrate (`train_bands_reads.jsonl`), current code + keystone table,
+only `struck` differs: baseline 122.24 (= row 33 exactly) → +struck 122.44 (+0.20).** CFA stays 0,
+Brier 0.1089 → 0.1074. Dev movers are exactly two, both false denials driven by trusting a struck
+value: **MIB-000514** (DIP-1 whose fee receipt `unpaid` is struck; DENIED→NEEDS_REVIEW, truth
+APPROVED) and **MIB-000614** (DENIED→NEEDS_REVIEW, truth NEEDS_REVIEW). No case moves *to* APPROVED —
+CFA-safe by construction: a struck value is never the truth (deterministic: 452 text-layer receipts
+struck ⟺ printed≠truth, 0 counterexamples; visa 0/29, sponsor 0/47), so voiding only removes a value
+or surfaces the true one from another document.
+
+**General, but on dev it reduces to fee.** Checking *emitted* values (not the struck strings):
+sponsor 36/36 and visa 19/19 struck instances already emit truth — the strike is almost always paired
+with a rank-0 `Manual correction` (e.g. MIB-000067: struck `TRANSIT-7`, `Manual correction: visa class
+is XW-1.` right under it, decided by a page-3 `Finding: DENIED`) or overridden by a higher branch. The
+fee receipt is the lone single-source field, so it is the only place the struck value slips through.
+Sponsor/visa/name voids are kept as private-set insurance (a struck value with no paired correction —
+the 514/614 shape on a non-fee field — would otherwise fool us there).
+
+**Holdout signal (transfers to unseen data):** MIB-000025 (holdout) went APPROVED→NEEDS_REVIEW with
+`fee_status` waived→unknown, both matching truth (its receipt's `waived` is struck). A struck-driven
+false approval on unseen data, fixed by the void. One holdout truth row was read to diagnose this,
+logged for honesty (as row 33 did for 523); no tuning to holdout.
+
+**`confidence_table.json` refit on the keystone+struck substrate** (`fit_confidence.py`): neutral on
+the aggregate (122.44), but `fee_unpaid` 0.893 → 0.95 — the branch is a purer signal once the
+decoy-`unpaid` cases are voided out of it; other branches drift ≤0.02. Meta re-stamped to the shipping
+substrate, discharging the row-28/row-31 refit hazard for this change.
+
+**Scope / gates.** Strikes are vector graphics on text-layer pages; scanned-receipt red-*pixel* strikes
+(OCR is grayscale) are a logged follow-up. `verify_render` 8/8 identical (live re-read reproduces the
+`struck` sets and the ensemble); replay diff moves only the struck cases; suite 48 passed / 1 xfailed
+(three new regression tests: `_void_struck` equality-not-substring, real-PDF detection on 514, and the
+end-to-end fee void). Cache carries `struck` via a `SCHEMA` 1→2 bump (backward compatible: schema-1
+caches rehydrate `struck=[]`); `scripts/backfill_struck.py` augments an existing cache in ~54 s with no
+re-OCR, since strike detection is a pure function of the vector layer.
+

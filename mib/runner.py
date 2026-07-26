@@ -101,6 +101,7 @@ def predict_from_evidence(pages, reads_by_page, stem):
         "registry_status": (pkt.registry.get("registry_status") or "").strip().upper(),
         "n_pages": len(pages),
         "hidden_lines": sum(len(p.hidden_lines) for p in pages),
+        "struck": sorted({s for p in pages for s in p.struck}),
         "n_fields_missing": sum(1 for f in packet.parse.FIELDS if not values.get(f)),
         "n_corrections": len(packet.manual_corrections(pkt)),
     }

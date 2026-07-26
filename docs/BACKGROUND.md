@@ -1,9 +1,11 @@
 # Background: the evidence behind the constants
 
-_Last updated: 2026-07-23. Rewrite in place when a finding changes; do not append._
+_Last updated: 2026-07-25. Rewrite in place when a finding changes; do not append._
 
 Why the policy constants, signals, and restoration cascade are what they are. The code is in
-`mib/`; [ALGORITHM.md](ALGORITHM.md) says what it does; this file says *why those numbers*. Sources
+`mib/`; [ALGORITHM.md](ALGORITHM.md) says what it does; this file says *why those numbers*; for the
+same evidence indexed *by schema field* (sources, shape, decoys, handling, open gaps), see
+[FIELDS.md](FIELDS.md). Sources
 are labelled train-mining (`../mib-doc-challenge/data/train_labels.csv`, 1,000 rows:
 431 DENIED / 289 APPROVED / 280 NEEDS_REVIEW), organizer rulings (authoritative), or competitor
 intel (hypotheses, verified before adoption). Scoring mechanics live in the challenge's own
@@ -57,9 +59,12 @@ Standing consequences:
 | Stale arrival (>180 d before receipt), non-DIP | 36 | DENIED 36/36 |
 
 No receipt date appears in the labels; the data-version date (~2026-07-07) makes staleness fit
-perfectly, but the shipped cutoff is the **max-margin midpoint 2026-01-02** (middle of the empty
-48-day band between latest stale-denied and earliest fresh arrival). Stale + DIP-1 splits
-13 A / 3 NR — the "DIP-1 with a valid diplomatic note" exception, whose visibility lives in the PDF.
+perfectly, but the shipped cutoff is the **max-margin midpoint 2026-01-02** — middle of the empty
+48-day band between the latest stale-denied arrival (2025-12-09) and the earliest fresh **non-DIP**
+arrival (2026-01-26). The lone arrival inside that band, 2026-01-15, is a staleness-exempt DIP-1
+APPROVED — which is why the *label-free* margin check (experiments row 24, all arrivals) reports the
+narrower 37-day gap for train. Stale + DIP-1 splits 13 A / 3 NR — the "DIP-1 with a valid
+diplomatic note" exception, whose visibility lives in the PDF.
 
 ### Revoked sponsors (published + inferred)
 
@@ -195,6 +200,25 @@ are future-impossible under ≤180-day visas, so they snap to 2026; past years (
 always plausible stale dates and must be taken as read, because un-staling a genuine old date
 trades a 0-cost wrong denial for a −4 false approval.
 
+**Red strikethrough voids a printed value** (label mining 2026-07-25, `experiments.md` row 34). The
+corpus crosses out a field value with a thin red line in the PDF *vector* layer; the text layer still
+reads the value, so a text-only pipeline emits it. It is a deterministic negation mark: across 452
+text-layer fee receipts a struck value ⟺ printed value ≠ truth (0 counterexamples); visa 0/29,
+sponsor 0/47 struck values equal truth. 138 train cases carry one (129 intake, 30 fee). **The pairing
+is the tell.** A struck `visa_class`/`sponsor_id`/`applicant_name` is **100% paired** (29/29, 47/47,
+27/27) with a `Manual correction: <field> is <value>` that already supplies the truth at rank-0 — the
+strike is a visual echo of the correction, so voiding those is redundant-but-safe insurance. A struck
+**`fee_status` is only 18% paired** (5/28): the fee is crossed out but *not* corrected, so the true
+value is unrecoverable → the honest answer is `unknown` → NEEDS_REVIEW. That asymmetry is why the
+void (S1 `struck` → `packet._void_struck`) moves only fee on dev (MIB-000514/000614, false denials
+on a struck `unpaid`). Strike-*presence* is a weak adjudication signal alone (struck 48% DENIED vs
+43% base); a struck-but-*uncorrected* value is 12 D / 10 NR / **1 A** — almost never a clean approve
+— but that is already consumed by the void→`fee_unknown` path, and wiring strike-presence in directly
+would risk the `b13_census` generation-artifact trap for marginal gain. Integrity check for the
+private set: on train a struck identity field *always* has its correction, so a struck one *without*
+would be anomalous (an OCR-missed correction). Scope: text-layer vector strikes only; scanned
+red-*pixel* strikes (OCR is grayscale) are unmapped.
+
 ## 4. Scan damage is geometric, not optical
 
 Survey (2026-07-22, every 8th train case: 125 cases, 110 with scans, 259 scan pages). Two earlier
@@ -268,3 +292,45 @@ model is the cleanest injection defense seen. Two competitor negatives worth hee
 **stamp detection is a trap** (colors don't correlate with fee/adjudication — silent stamps are the
 under-determined cases, not a vision problem), and **attestation prose alone must not approve**
 (it caused a false approval over a silent warrant page).
+
+## 6. Signal-space verdicts: which evidence modalities pay, which leak
+
+Condensed from the 2026-07-24 signal-space investigation (the full doc, with the probe tables, is
+`docs/SIGNAL-SPACE.md` in git history; its probes ran on small stratified dev samples — directional
+evidence, not tunable point estimates). Its one ship recommendation — the defer-selection ensemble
+merge — later landed as the row-30 keystone (+0.74 dev), which **supersedes** the doc's original
+"keep the seam closed" bottom line; some probe scripts it cites (`signal_probe.py`,
+`crossdoc_probe.py`) no longer exist in the checkout.
+
+**The discipline, which outlives the investigation.** Every candidate signal is one of two kinds:
+
+- **Evidence-trust** — *how much to trust a read value*: cross-variant agreement, OCR recognition
+  confidence, cross-document consistency, injection presence. Plausibly transfers to the private
+  set — but must be proven to.
+- **Damage-quantity** — *how mangled the page is*: skew angle, shred-band count, `n_scan_pages`,
+  readable-variant count. Correlates with the label only because the generator damages DENIED
+  packets more (48.6% vs 25.1% APPROVED, clean vs scanned), a generator property that will not
+  transfer. **Off-limits as a decision input** — it is the measured cause of death of the
+  `b13_census` prize (experiments rows 24, 27; STATUS hazards).
+
+**The drift check (mandatory, mechanical).** For any signal we'd trust: compare its distribution on
+dev vs a sample of the unlabeled validation PDFs. If its correctness correlation rides on a quantity
+that shifts between the two, reject it — no matter how good its dev OOF looked. Confirmed both ways:
+`agreement` is stable (0.911 dev / 0.932 val) while `readable_variants` drifts +27% and the
+clean-packet rate shifts 0.159 → 0.056.
+
+| signal → use | measured | verdict |
+| --- | --- | --- |
+| Ensemble agreement → per-field merge | +1…+5/field at ensemble level, 0 wrong-value regressions (incl. all three −4-sensitive fields); drift-stable | **shipped** as the row-30 keystone |
+| Per-word Tesseract confidence (TSV) | on-truth tokens sit +15.9 conf above the page mean; no case-level calibration lift | live lever for *value selection*, not calibration — STATUS question 7 |
+| Ensemble agreement → calibration | case-level separation +0.008; even in-sample, Brier 0.187 vs the per-branch table's 0.117 | dead — the branch table already wins |
+| Cross-doc disagreement → demote to NR | lift +0.05 (noise); blanket demotion masks 8 correct denials, rescues 0 | dead as a decision input; residue: candidate-level *name* disagreement recalls 3/3 truth `identity_conflict` vs the shipped check's 1/3 at ~15% precision — a possible recall tweak, still open |
+| Injection presence → adjudication | P(wrong \| injection) +0.02 over base | dead — the quarantine holds; injected cases are misadjudicated at the base rate, not followed |
+| Conf-filter / char-whitelist / binarization OCR retries | +0 over the production variant union (gains vs a single raw pass were already banked by turn/skew/deshred) | dead — the OCR recovery floor is solid; residual misses are genuinely unrecoverable or injection-only |
+| `readable_variants`, `margin`, `snap_ratio` | weak or degenerate; `readable_variants` drifts +27% dev→val | dead — damage-coupled or no discrimination |
+
+Residue worth keeping: the flag legend guard (`signals.py`, `len(found) <= 3`) is the one
+early-exit with adjudication stakes and no measurement behind it; a timed-out Tesseract call enters
+the ensemble as an empty reading, indistinguishable from a blank page (an observability gap for any
+agreement-family signal); and with ~11× runtime headroom (row 19), no early-exit in the pipeline is
+justified by compute scarcity anymore — the ones that stay, stay for correctness or determinism.

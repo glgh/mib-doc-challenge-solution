@@ -1,5 +1,5 @@
-"""S2 — OCR for scan-only pages. Mandatory, not a fallback: ~25% of packets
-carry their visible content only as pixels.
+"""S2 — OCR for scan-only pages. Mandatory, not a fallback: ~47% of train pages
+(85% of packets have at least one) carry their visible content only as pixels.
 
 Recipe validated on train scans (docs/experiments.md): Tesseract PSM 11
 (sparse text) recovers structured Key: Value lines where PSM 4/6 fail; embedded
