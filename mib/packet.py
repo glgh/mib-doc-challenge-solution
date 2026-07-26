@@ -279,15 +279,19 @@ def _edge_strip(normalized):
     return " ".join(t for t in toks if t)
 
 
-def _vote_key(field_name, value):
+def _vote_key(value):
     """Agreement key for the variant vote: edge punctuation is not disagreement
-    (`Zazam_`, `Zazam.` and `Zazam` are one reading with debris), and for the
-    open-vocabulary applicant_name neither is a stroke merge (`Xanzarn` /
-    `Xanzam` are one name read twice, not a 1-1 tie)."""
-    key = _edge_strip(textmatch.normalize(value))
-    if field_name == "applicant_name":
-        for expanded, merged in _NAME_COLLAPSES:
-            key = expanded.sub(merged, key)
+    (`Zazam_`, `Zazam.` and `Zazam` are one reading with debris)."""
+    return _edge_strip(textmatch.normalize(value))
+
+
+def _collapse(key):
+    """Stroke-collapsed form of a name key: `Xanzarn`/`Xanzam` are one name
+    read twice, not a 1-1 tie. Applied AFTER truncation pooling — a truncated
+    `nextar` can only reach its expansion `nextari` pre-collapse (the collapse
+    rewrites `nextari` to `nextan`, which no truncation is a prefix of)."""
+    for expanded, merged in _NAME_COLLAPSES:
+        key = expanded.sub(merged, key)
     return key
 
 
@@ -306,6 +310,15 @@ def _line_conf(kv, value):
         if len(entry) > 3 and want in re.sub(r"[^a-z0-9]", "", entry[3].lower()):
             best = entry[0] if best is None else max(best, entry[0])
     return best
+
+
+# Truncation POOLING (merging `qormora nextar` into `qormora nextari` by
+# token-wise prefix) was measured and REJECTED here (row 47): it recovered
+# MIB-000665 but consolidation strengthens whichever name family FRAGMENTS
+# more — on MIB-000250 the decoy applicant's six reads splintered into four
+# keys, pooled into a bloc, and outvoted the truth's three consistent reads.
+# Cross-family balance is a page-level question; revisit only with a per-page
+# two-level vote.
 
 
 def _variant_vote(field_name, kvs):
@@ -331,12 +344,25 @@ def _variant_vote(field_name, kvs):
         v = kv.get(field_name)
         if not v or not parse.valid_value(field_name, v):
             continue
-        key = _vote_key(field_name, v)
+        # An INNER colon in a voted value means the parse mis-keyed a line —
+        # the value swallowed another field's label (`Home World: Europa
+        # Station` winning the *name* vote on MIB-000027). Real values never
+        # carry one. A trailing colon is mere edge debris (`Solul Qorzarn:`)
+        # — the edge-strip key already absorbs it, and dropping those reads
+        # reshuffled first-seen ties into regressions.
+        if re.search(r":\s*\S", v):
+            continue
+        key = _vote_key(v)
         if not key:
             continue
         norm = textmatch.normalize(v)
         clean = norm == _edge_strip(norm)   # stripping removed nothing: no debris
         groups.setdefault(key, []).append((v, clean, _line_conf(kv, v), seq))
+    if field_name == "applicant_name":
+        collapsed = {}
+        for key, entries in groups.items():
+            collapsed.setdefault(_collapse(key), []).extend(entries)
+        groups = collapsed
     if not groups:
         return None, 0
 
