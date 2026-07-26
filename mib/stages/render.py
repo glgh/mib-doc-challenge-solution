@@ -217,9 +217,19 @@ def _optical_restorations(gray):
     a well-formed-but-wrong binarized read can outscore and displace a correct
     reading on a page that already reads well (dev: 11 fields recovered, 10
     corrupted). Gating on weak geometric evidence keeps the rescues on dead pages
-    and cannot touch healthy ones."""
+    and cannot touch healthy ones.
+
+    A faint AND tilted page defeats both single-axis rungs: deskew alone cannot
+    see ink this faint, and adapt alone binarizes tilted strokes into garble
+    (MIB-000061: `Fee Stan waved`). The composed rung deskews first, then
+    thresholds — binarizing AFTER rotation, because rotating a binary image
+    re-blurs the strokes the threshold just sharpened (adapt-then-skew kept the
+    garble; skew-then-adapt read `Fee Status waved` verbatim)."""
     yield "adapt", imaging.local_threshold(gray)
     yield "autocon", imaging.autocontrast(gray)
+    angle = imaging.skew_angle(gray)
+    if abs(angle) >= imaging.MIN_SKEW:
+        yield "skew+adapt", imaging.local_threshold(imaging.rotate(gray, angle))
 
 
 def _sources(doc, page, tmp):
