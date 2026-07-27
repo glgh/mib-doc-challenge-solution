@@ -91,6 +91,11 @@ def predict_from_evidence(pages, reads_by_page, stem):
     # fee can improve extraction but never flip a decision.
     if (values.get("fee_status") or "unknown") == "unknown":
         values["fee_status"] = packet.fee_fallback(pkt)
+    # Display-only closed-vocab rescue (packet.closed_vocab_fallback): same
+    # contract — a filled species/world/purpose earns extraction points but can
+    # never arm an embargo branch or disarm a missing-field guard.
+    vocab_fills = packet.closed_vocab_fallback(pkt, values)
+    values.update(vocab_fills)
     record = emit.build_record(pkt.case_id, values, sig["emit_flags"], decision, conf)
     debug = {
         "case_id": pkt.case_id,
@@ -109,6 +114,7 @@ def predict_from_evidence(pages, reads_by_page, stem):
         "struck": sorted({s for p in pages for s in p.struck}),
         "n_fields_missing": sum(1 for f in packet.parse.FIELDS if not values.get(f)),
         "n_corrections": len(packet.manual_corrections(pkt)),
+        "vocab_fills": sorted(vocab_fills),
     }
     # The learned decider that used to swap in here (MIB_DECIDER=mlp) was
     # deleted after decision-layer ML was closed: its edge over rules inverted

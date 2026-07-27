@@ -38,9 +38,10 @@ NAME_PARTS = frozenset(p + s for p in _NAME_PREFIXES for s in _NAME_SUFFIXES)
 
 # Manual-published + train-inferred (each 11-14 non-DIP occurrences, zero
 # approvals; independently corroborated). Policy inference, not case memorization.
-# Lives here rather than in mib/policy.py because repair needs it — snapping must
-# never *fabricate* a revoked id — and a vocabulary reaching forward into the
-# rule engine was a circular import dodged by a function-local import.
+# Lives here rather than in mib/policy.py from the era when repair consulted it
+# (the fabrication guard, removed row 69); staying put keeps the import
+# direction — a vocabulary reaching forward into the rule engine was a circular
+# import dodged by a function-local import.
 REVOKED_SPONSORS = {
     "SPN-0007", "SPN-0139", "SPN-4040",   # FIELD_MANUAL.md
     "SPN-2718", "SPN-7331", "SPN-9090",   # inferred from train labels
@@ -56,6 +57,46 @@ _DIGIT_FIXES = str.maketrans({"O": "0", "o": "0", "l": "1", "I": "1", "S": "5", 
 def _closest(value, options, cutoff):
     match = difflib.get_close_matches(value, options, n=1, cutoff=cutoff)
     return match[0] if match else None
+
+
+# Confusion-weighted snap bars (rows 70-71). difflib's subsequence ratio has
+# no indel penalty, so shorter entries steal garbles of longer ones (`naid` ->
+# `unpaid` over `paid`; `translation` garbles -> `transit`) and same-score ties
+# resolve by list order (`XW-L` sat at 0.75 from both XW-1 and XW-2). Weighted
+# levenshtein prices indels 1.0 / glyph confusions 0.3 — the OCR-shaped prior —
+# and the margin is the unique-best guard every other matcher already carries.
+# Fee bar mined on the row-70 440-tail table; the rest carry their old difflib
+# cutoffs onto the new metric, priced by the row-71 replay diff.
+_SNAP_MARGIN = 0.05
+_SNAP_BARS = {"fee_status": 0.72, "visa_class": 0.65,
+              "species_code": 0.70, "home_world": 0.70,
+              "declared_purpose": 0.60}
+
+
+def _norm_vocab(s):
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
+_WEIGHTED_TABLES = {
+    "fee_status": [(_norm_vocab(o), o) for o in FEES],
+    "visa_class": [(_norm_vocab(o), o) for o in VISAS],
+    "species_code": [(_norm_vocab(o), o) for o in SPECIES],
+    "home_world": [(_norm_vocab(o), o) for o in HOME_WORLDS],
+    "declared_purpose": [(_norm_vocab(o), o) for o in PURPOSES],
+}
+
+
+def _weighted_closest(field, value):
+    """Canonical entry for a garbled read, or None without a clear winner."""
+    vn = _norm_vocab(value)
+    if not vn:
+        return None
+    scored = sorted(((_weighted_sim(vn, n), o) for n, o in _WEIGHTED_TABLES[field]),
+                    reverse=True)
+    (s1, best), s2 = scored[0], scored[1][0]
+    if s1 >= _SNAP_BARS[field] and s1 - s2 >= _SNAP_MARGIN:
+        return best
+    return None
 
 
 _NAME_SNAP_BAR = 0.72     # dev sweep plateau 0.70-0.72 (10 recoveries); 0.75 drops to 7
@@ -101,7 +142,7 @@ def repairable_purpose(value):
     `snap("declared_purpose")` passes unmatched values through (free-text
     field), so corroboration checks — is this string really a purpose? — need
     the strict form."""
-    return _closest((value or "").lower(), PURPOSES, 0.6) is not None
+    return _weighted_closest("declared_purpose", value or "") is not None
 
 
 def snap(field, value):
@@ -114,14 +155,13 @@ def snap(field, value):
         # always Capitalized — census; lowercase reads were exact-match misses).
         return _snap_name(v)
     if field == "visa_class":
-        return _closest(v.upper().replace("=", "-"), VISAS, 0.6)
+        return _weighted_closest(field, v)
     if field == "fee_status":
-        best = _closest(v.lower(), FEES, 0.7)
-        # "unpaid" triggers a hard denial, so it must be read verbatim, never
-        # reconstructed by distance (a garbled "paid" is one edit from "unpaid").
-        if best == "unpaid" and re.sub(r"[^a-z]", "", v.lower()) != "unpaid":
-            return "unknown"
-        return best
+        # 688's shred-decapitated `naid` family (row 70): difflib ranked it
+        # closer to `unpaid` than `paid` and the garbles outvoted the repaired
+        # verbatim reads. The verbatim-only unpaid guard was removed on user
+        # call (rows 68-69); the weighted metric is what replaced difflib.
+        return _weighted_closest(field, v)
     # home_world and species_code return None when nothing is close, and
     # packet._repair_ocr_kv then deletes the field. That looks like a bug against
     # this module's own docstring, and it was measured as one: passing the value
@@ -136,23 +176,18 @@ def snap(field, value):
     # fourteenth world would be expected ~77 times. The value universe is closed,
     # so there are no unseen values for passthrough to rescue. Deletion stays.
     if field == "species_code":
-        return _closest(re.sub(r"[^A-Z_]", "", v.upper().replace(" ", "_")), SPECIES, 0.7)
+        return _weighted_closest(field, v)
     if field == "home_world":
-        return _closest(v, HOME_WORLDS, 0.7)
+        return _weighted_closest(field, v)
     if field == "declared_purpose":
-        return _closest(v.lower(), PURPOSES, 0.6) or v
+        return _weighted_closest(field, v) or v
     if field == "sponsor_id":
         m = re.search(r"[S5]PN[-–—:\s]*([0-9OolIB]{4})", v)
         if not m:
             return None
-        raw, fixed = m.group(1), m.group(1).translate(_DIGIT_FIXES)
-        # A revoked sponsor id triggers a hard denial: digit-translation must
-        # never *fabricate* one (it did: SPN-8421 → "revoked" SPN-0139). Exact
-        # digits are required for revoked matches; translated repairs of
-        # non-revoked ids are harmless to policy and keep extraction points.
-        if fixed != raw and f"SPN-{fixed}" in REVOKED_SPONSORS:
-            return None
-        return f"SPN-{fixed}"
+        # Digit-translated repairs may land on revoked ids — the fabrication
+        # guard was removed on user call 2026-07-26 (experiments row 69).
+        return f"SPN-{m.group(1).translate(_DIGIT_FIXES)}"
     if field == "case_id":
         m = re.search(r"M[iI1l]B[-–—:\s]*([0-9OolIB]{6})", v, re.IGNORECASE)
         return f"MIB-{m.group(1).translate(_DIGIT_FIXES)}" if m else None

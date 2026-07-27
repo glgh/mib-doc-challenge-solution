@@ -320,7 +320,7 @@ def _line_conf(kv, value):
 # Truncation POOLING (merging `qormora nextar` into `qormora nextari` by
 # token-wise prefix) was measured and REJECTED here (row 47): it recovered
 # MIB-000665 but consolidation strengthens whichever name family FRAGMENTS
-# more — on MIB-000250 the decoy applicant's six reads splintered into four
+# more — on MIB-000250 the conflicting name's six reads splintered into four
 # keys, pooled into a bloc, and outvoted the truth's three consistent reads.
 # Cross-family balance is a page-level question; revisit only with a per-page
 # two-level vote.
@@ -390,9 +390,9 @@ def _variant_vote(field_name, kvs):
             snappable = (vocab.repairable_purpose(rep)
                          if field_name == "declared_purpose"
                          else vocab.snap(field_name, rep) is not None)
-        # Distinct contributing PAGES outrank raw read count: a decoy page's
-        # fan-out of fragmented reads pooled into one bloc and outvoted the
-        # truth's consistent reads (rows 47/50/52 — one extra read of a decoy
+        # Distinct contributing PAGES outrank raw read count: one conflicting
+        # page's fan-out of fragmented reads pooled into a bloc and outvoted
+        # the truth's consistent reads (rows 47/50/52 — one extra read of that
         # page kept tipping votes, and the grid multiplies per-page variants).
         # Cross-page agreement is what fan-out cannot fake; within a page-count
         # tie, read count still lets a page's plurality beat single junk reads.
@@ -444,17 +444,24 @@ def _name_families(packet):
 def _name_corroboration(packet, incumbent):
     """Multi-document corroboration challenge for applicant_name.
 
-    Multi-applicant packets plant a decoy applicant's intake form (or sponsor
-    letter) with the active case id stamped on every page — the id cannot
-    attribute, so `_preference`'s single-document winner is sometimes the
-    decoy's name while sponsor letter + registry + a near-unanimous OCR vote
-    agree on the true applicant (MIB-000081: two text layers and 13/13 reads
-    lose to one intake text layer). The measured rule (grid counterfactual,
-    FIXED 6 / BROKE 0 dev): a challenger family must be asserted by at least
-    TWO distinct documents and strictly more documents than the incumbent's
-    family. Weaker clauses (OCR read/page breadth, one doc + dominant vote)
-    were measured net-negative (11 fixed / 26 broke naive; 9/11 with a
-    zero-read-incumbent clause) — garble families out-spread clean text.
+    Identity-conflict packets carry one document whose NAME CELL names a
+    different being while its other fields stay true to the active case (row
+    67 falsified the older "planted decoy document" reading: the conflicting
+    names own no other train case, and the conflicting form matches the
+    active truth 6/6 elsewhere — so only the name may be replaced, never the
+    document's other fields). The active case id is stamped on every page, so
+    the id cannot attribute; `_preference`'s single-document winner is
+    sometimes the conflicting name while sponsor letter + registry + a
+    near-unanimous OCR vote agree on the labeled applicant (MIB-000081: two
+    text layers and 13/13 reads lose to one intake text layer). The measured
+    rule (grid counterfactual, FIXED 6 / BROKE 0 dev): a challenger family
+    must be asserted by at least TWO distinct documents and strictly more
+    documents than the incumbent's family. Weaker clauses (OCR read/page
+    breadth, one doc + dominant vote, 1v1 with a zero-ink incumbent) all
+    measured net-negative (rows 63/68) — the generator plants conflicts in
+    BOTH directions (authored digital form vs genuine foreign scan, 930/402),
+    so 1v1 conflicts are structurally ambiguous and the two-doc bar is the
+    decidability frontier.
 
     Returns (value, (doc_type, source)) or None if no challenger qualifies.
     """
@@ -626,3 +633,147 @@ def fee_fallback(packet):
     if unknown_stated:
         return "unknown"
     return "paid"
+
+
+# --- closed-vocab fallback ----------------------------------------------------
+# The per-read arbitration oracle marks species 37 / home_world 50 / purpose 53
+# wrong dev fields ALL 0-reachable: no read's PARSE ever yields a snappable
+# value, because the label is too garbled for key_for while the value sits
+# legible beside it ('Shncies Conte LUNA SFCURIN'), or every value read is
+# individually below the snap bar while the ensemble points one way ('Wie
+# 106te' / 'Wiol-A06%0' / 'Walt-A06te' for Wolf-1061c). Truth is never blank
+# for these three fields (all 1,000 labels), so the value-first scan below
+# (the row-18 flag principle at field grain) fills what the merge left empty,
+# aggregating confusion-weighted similarity across every distinct OCR line the
+# merge already consults. Mined on the 140-case oracle target set
+# (experiments/exceed_probe.py, output/viz/exceed_bound.jsonl): the
+# label-cascade pick recovers 43/140 truths with no floor; the shipped floor
+# (best >= 0.60 or label-corroborated) keeps 40 and silences 36 of 96
+# noise-band wrong fills. A wrong fill scores the same 0 as an emitted
+# 'unknown', so the floor is an honesty bar, not a score guard.
+#
+# DISPLAY-ONLY by the fee_fallback contract: the runner applies fills after
+# `policy.adjudicate`, so a filled home_world can never arm planetary_embargo
+# and a filled field can never disarm a missing-field guard (the MIB-000672
+# hazard class). Autocontrast makes white-text answer keys OCR-visible, so
+# injection-guarded lines never feed the scan; the comma-run tell catches keys
+# whose SYSTEM: prefix itself got garbled (016's key garbles its own case id
+# to 'I8-000016', so the tell keys on digits, not on 'MIB').
+
+_SCAN_FLOOR = 0.5        # record similarities at/above this
+_SCAN_EXCESS_BASE = 0.55  # excess tie-break baseline: debris sims sit 0.50-0.55
+_SCAN_LABEL_BAR = 0.55   # a line whose head also matches the field label
+_SCAN_ACCEPT = 0.60      # fill floor: best >= this, or label-corroborated
+_KEYDUMP_RE = re.compile(r"\d{4}")
+
+_SCAN_ENTRIES = None     # built lazily: field -> {canonical: stripped form}
+
+
+def _vnorm(s):
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+def _scan_tables():
+    global _SCAN_ENTRIES
+    if _SCAN_ENTRIES is None:
+        _SCAN_ENTRIES = {
+            "species_code": {e: _vnorm(e) for e in vocab.SPECIES},
+            "home_world": {e: _vnorm(e) for e in vocab.HOME_WORLDS},
+            "declared_purpose": {e: _vnorm(e) for e in vocab.PURPOSES},
+        }
+    return _SCAN_ENTRIES
+
+
+_SCAN_LABELS = {
+    "species_code": ("speciescode", "speciesmatch", "species"),
+    "home_world": ("homeworld",),
+    "declared_purpose": ("declaredpurpose", "purpose"),
+}
+
+
+def _bag_overlap(a, b):
+    ca, cb = Counter(a), Counter(b)
+    return sum((ca & cb).values()) / max(len(a), len(b))
+
+
+def _gram_sims(tokens, targets):
+    """Best confusion-weighted sim per target over all 1..4-token grams.
+
+    Grams and targets compare space-stripped, so token splits ('Wl 106 te')
+    and fusions ('LUNA_SFCURIN') cost nothing; the length window and char-bag
+    prefilter only skip pairs no OCR confusion could bridge."""
+    best = {}
+    n = len(tokens)
+    for i in range(n):
+        for k in (1, 2, 3, 4):
+            if i + k > n:
+                break
+            g = "".join(tokens[i:i + k])
+            if len(g) < 4:
+                continue
+            for name, t in targets.items():
+                if not len(t) * 0.5 <= len(g) <= len(t) * 1.6:
+                    continue
+                if _bag_overlap(g, t) < 0.4:
+                    continue
+                s = vocab._weighted_sim(g, t)
+                if s >= _SCAN_FLOOR and s > best.get(name, 0.0):
+                    best[name] = s
+    return best
+
+
+def _scan_lines(packet):
+    """Every distinct injection-guarded OCR line the merge consults, tokenized."""
+    seen = set()
+    out = []
+    for kv in ([kv for _dt, kv in packet.variant_docs] +
+               [kv for _dt, src, kv in packet.docs if src == SRC_OCR]):
+        page_no = kv.get("_page_no")
+        for line in kv.get("_raw") or []:
+            if _INJECTION_RE.search(line):
+                continue
+            if line.count(",") >= 3 and _KEYDUMP_RE.search(line):
+                continue     # answer-key dump whose SYSTEM: prefix got garbled
+            key = (page_no, _vnorm(line))
+            if len(key[1]) < 4 or key in seen:
+                continue
+            seen.add(key)
+            out.append(re.findall(r"[a-z0-9]+", line.lower()))
+    return out
+
+
+def closed_vocab_fallback(packet, values):
+    """field -> canonical vocab entry for closed-vocab fields the merge left
+    empty (species/world) or filled with non-vocabulary junk (purpose only —
+    its snap passes free text through; an in-vocabulary value is never
+    challenged here)."""
+    fields = [f for f in ("species_code", "home_world") if not values.get(f)]
+    if not vocab.repairable_purpose(values.get("declared_purpose") or ""):
+        fields.append("declared_purpose")
+    if not fields:
+        return {}
+    lines = _scan_lines(packet)
+    fills = {}
+    for fname in fields:
+        targets = _scan_tables()[fname]
+        labels = {i: l for i, l in enumerate(_SCAN_LABELS[fname])}
+        evidence = {}        # entry -> [best, excess, label_best]
+        for tokens in lines:
+            sims = _gram_sims(tokens, targets)
+            if not sims:
+                continue
+            lab = bool(_gram_sims(tokens, labels))
+            for entry, s in sims.items():
+                e = evidence.setdefault(entry, [0.0, 0.0, 0.0])
+                e[0] = max(e[0], s)
+                e[1] += max(0.0, s - _SCAN_EXCESS_BASE)
+                if lab:
+                    e[2] = max(e[2], s)   # the value's sim on a label line
+        if not evidence:
+            continue
+        pool = ({k: e for k, e in evidence.items() if e[2] >= _SCAN_LABEL_BAR}
+                or evidence)
+        entry, e = max(pool.items(), key=lambda kv: (kv[1][0], kv[1][1]))
+        if e[0] >= _SCAN_ACCEPT or e[2] >= _SCAN_LABEL_BAR:
+            fills[fname] = entry
+    return fills
