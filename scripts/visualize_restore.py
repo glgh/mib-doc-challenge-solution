@@ -148,18 +148,19 @@ def ocr(gray):
         path = Path(tmp) / "p.png"
         path.write_bytes(imaging.to_png_bytes(gray))
         lines = render._tesseract(path)
-    return lines, render.evidence_score(lines)
+    return lines, render.page_score(lines)
 
 
 def restore(gray, damage):
-    """Apply one rung of the ladder, exactly as `render._restorations` would."""
+    """Apply one correction rung, matching the grid's in-frame chains
+    (render._orientation_chains)."""
     if damage == "skew":
         return imaging.rotate(gray, imaging.skew_angle(gray))
     if damage.startswith("turn"):
         turned = imaging.turn(gray, int(damage[-1]))
         return imaging.rotate(turned, imaging.skew_angle(turned))
     if damage == "bands":
-        # Deskew first, then deshred — matches render._restorations.
+        # Deskew first, then deshred — matches render._orientation_chains.
         angle = imaging.skew_angle(gray)
         base = imaging.rotate(gray, angle) if abs(angle) >= imaging.MIN_SKEW else gray
         return imaging.realign_bands(base)
@@ -277,7 +278,7 @@ CENSUS_STRIDE = 4       # every 4th train packet
 def census_page(stem):
     """Score one packet's scan pages at each applicable rung. One row per page.
 
-    Gating mirrors `render._restorations`, so the counts describe the ladder as
+    Gating mirrors the retired `render._restorations`, so the counts describe the ladder as
     it runs rather than an exhaustive sweep: quarter turns are only measured
     where the upright read is already nearly silent, and band realignment only
     where the border gives it something to key off.

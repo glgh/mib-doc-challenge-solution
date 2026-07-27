@@ -33,11 +33,14 @@ def main(cache_path, n_scans=4, n_random=2):
             f"cache was built at restore={stamped!r} but this code only produces "
             f"{config.RESTORE!r}; rebuild it with scripts/dump_text.py before comparing.")
     # The stored `ocr_lines` is the primary the cache's OWN selection metric
-    # picked, so compare under that metric — otherwise a select-default flip
-    # reads as an S2 diff (it did: 1/6 vs 6/6 on identical reads). Caches
-    # stamped before `select` existed were all written under ev.
-    import os
-    os.environ["MIB_SELECT"] = (meta or {}).get("select") or "ev"
+    # picked. Only conf selection exists now (the ev selector was deleted in
+    # the de-special-casing batch), so an ev-stamped cache cannot be reproduced
+    # — refuse it like a foreign restore level.
+    stamped_select = (meta or {}).get("select")
+    if stamped_select and stamped_select != config.SELECT_METRIC:
+        raise SystemExit(
+            f"cache was written under select={stamped_select!r} but this code only "
+            f"selects by {config.SELECT_METRIC!r}; regenerate it with scripts/dump_text.py.")
     from mib import runner
 
     print(f"cache:   {config.describe(meta)}")
@@ -62,9 +65,12 @@ def main(cache_path, n_scans=4, n_random=2):
     def norm_reads(reads):
         # Fixed identity keys only. `cost_ms` (schema 5) is wall clock —
         # nondeterministic by construction, comparing it would fail every run;
-        # a schema-4 cache simply lacks it. Conf tuples JSON-round-trip as
-        # lists; live reads carry tuples.
-        return [{"variant": r.get("variant", ""), "quality": r.get("quality", 0.0),
+        # a schema-4 cache simply lacks it. `quality` is excluded too: the
+        # evidence_score that used to fill it died with the ladder, so fresh
+        # reads carry 0.0 while old caches carry the historical score — it is
+        # display residue, not identity (selection keys on conf). Conf tuples
+        # JSON-round-trip as lists; live reads carry tuples.
+        return [{"variant": r.get("variant", ""),
                  "lines": r["lines"],
                  "conf": None if r.get("conf") is None else
                  [tuple(t) for t in r["conf"]]} for r in reads]

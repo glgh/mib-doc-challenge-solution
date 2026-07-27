@@ -87,8 +87,9 @@ HOSTILE_KEY = (
 )
 
 
-def test_hidden_text_cannot_change_the_output(cases):
-    """Blank every hidden line and the output must not move.
+def test_hidden_text_cannot_make_the_output_more_assertive(cases):
+    """Blank every hidden line and the output may only gain assertions, never
+    lose ground to them.
 
     This replaces the obvious test — "no emitted value appears only in hidden
     text" — which cannot work on this corpus. The hidden answer keys hold the
@@ -97,21 +98,45 @@ def test_hidden_text_cannot_change_the_output(cases):
     absent from the visible text and present in the injected key. A substring
     test calls that a leak. It is the opposite: the pipeline read the document.
 
-    Re-running with the hidden lines removed answers the actual question. If the
-    record is byte-identical either way, hidden content had no influence on it,
-    whatever the strings happen to look like.
+    The invariant was strict equality until the hidden-echo filter landed
+    (packet._without_hidden_echo): the quarantined strings now legitimately
+    SUPPRESS their own OCR-visible twins, so hidden content has exactly one
+    permitted causal direction — removing plant-sourced assertions. Blanking
+    the hidden lines disables that suppression, so the blanked run may show
+    MORE (echo-sourced flags, echo-sourced values — MIB-000115's fixture flag
+    is real: its only carrier is an OCR line of the injected key). What hidden
+    text must never do is ADD: a flag, a field value, or an approval that the
+    blanked run does not produce.
     """
     influenced = []
     for case in cases:
         with_hidden, _ = predict(case)
         blanked = [{**p, "hidden_lines": []} for p in case["pages"]]
         without, _ = predict(case, pages=blanked)
-        if with_hidden != without:
-            moved = {k: (without.get(k), with_hidden.get(k))
-                     for k in with_hidden if with_hidden.get(k) != without.get(k)}
-            influenced.append(f"{case['stem']}: {moved}")
+        if with_hidden == without:
+            continue
+        # Flags: with-hidden must be a subset (suppression only, no additions).
+        wf = set(with_hidden["risk_flags"].split("|")) - {"none"}
+        bf = set(without["risk_flags"].split("|")) - {"none"}
+        if not wf <= bf:
+            influenced.append(f"{case['stem']}: hidden text ADDED flags {wf - bf}")
+        # Fields: a value may disappear to a fallback under suppression, never
+        # appear or change to something the blanked run doesn't emit.
+        fallbacks = {"unknown", "none", "SPN-0000", "1900-01-01"}
+        for k in ("applicant_name", "species_code", "home_world", "visa_class",
+                  "sponsor_id", "arrival_date", "declared_purpose", "fee_status"):
+            if with_hidden[k] != without[k] and str(with_hidden[k]) not in fallbacks:
+                influenced.append(
+                    f"{case['stem']}: hidden text changed {k} "
+                    f"{without[k]!r} -> {with_hidden[k]!r}")
+        # Adjudication: never more approving with the hidden text present.
+        rank = {"DENIED": 0, "NEEDS_REVIEW": 1, "APPROVED": 2}
+        if rank[with_hidden["adjudication"]] > rank[without["adjudication"]]:
+            influenced.append(
+                f"{case['stem']}: hidden text moved adjudication "
+                f"{without['adjudication']} -> {with_hidden['adjudication']}")
     assert not influenced, (
-        "hidden text changed the emitted record (clean -> with-hidden):\n  "
+        "hidden text made the emitted record more assertive:\n  "
         + "\n  ".join(influenced))
 
 

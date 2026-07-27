@@ -54,30 +54,6 @@ def test_geom_set_gates_each_module(monkeypatch):
     assert list(chains) == [("deshred",)]
 
 
-def test_grid_floor_covers_the_ladder_geometry(monkeypatch):
-    """Every image the flat ladder produced has a pixel-identical counterpart
-    in the grid's full enumeration (base + expanded orientations) — the -0.21
-    early-stop lesson as a test: under-bar pages lose nothing."""
-    deskewed, deshredded, turned = object(), object(), object()
-    turned_deskewed = object()
-    monkeypatch.setattr(imaging, "skew_angle", lambda g: 3.0)
-    monkeypatch.setattr(imaging, "rotate",
-                        lambda g, deg: turned_deskewed if g is turned else deskewed)
-    monkeypatch.setattr(imaging, "turn", lambda g, q: turned)
-    monkeypatch.setattr(imaging, "realign_bands",
-                        lambda base: deshredded if base is deskewed else None)
-    monkeypatch.setattr(imaging, "realign_local", lambda base: None)
-
-    gray = object()
-    ladder_images = {img for _n, img in render._restorations(gray)}
-    grid_images = set()
-    for q in (0, 1, 3):
-        for _chain, img in render._orientation_chains(
-                gray, q, 3.0, ("skew", "turn1", "turn3", "deshred", "local")):
-            grid_images.add(img)
-    assert ladder_images <= grid_images
-
-
 # ---------------------------------------------------------------------------
 # determinism
 
@@ -128,10 +104,6 @@ def test_page_score_is_not_saturated_by_boilerplate():
 # plan resolution + stamps
 
 
-def test_ladder_aliases_the_historical_stamp():
-    assert config._restore_for(config.GRID_PRESETS["ladder"]) == "bands+local"
-
-
 def test_grid_stamp_and_override_stamps_are_distinct(monkeypatch):
     base = config._restore_for(config.GRID_PRESETS["grid"])
     assert base == "grid"
@@ -140,18 +112,11 @@ def test_grid_stamp_and_override_stamps_are_distinct(monkeypatch):
     lastr = dict(config.GRID_PRESETS["grid"], last_resort="psm3")
     assert config._restore_for(lastr) == "grid[last_resort=psm3]"
     stamps = {config._restore_for(p) for p in
-              (config.GRID_PRESETS["ladder"], config.GRID_PRESETS["grid"], tweaked, lastr)}
-    assert len(stamps) == 4
-
-
-def test_ladder_ignores_grid_override_envs(monkeypatch):
-    monkeypatch.setenv("MIB_PLAN", "ladder")
-    monkeypatch.setenv("MIB_OPT_BASE", "frames")
-    assert config.grid_plan()["opt_base"] == "raw"
+              (config.GRID_PRESETS["grid"], tweaked, lastr)}
+    assert len(stamps) == 3
 
 
 def test_grid_env_overrides_apply(monkeypatch):
-    monkeypatch.setenv("MIB_PLAN", "grid")
     monkeypatch.setenv("MIB_GEOM_SET", "skew,deshred")
     monkeypatch.setenv("MIB_LAST_RESORT", "psm3")
     plan = config.grid_plan()

@@ -20,41 +20,34 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# S2 enumeration plans. Two enumerators live behind one seam (render.reads_for):
+# The S2 enumeration plan (render.reads_for): the composition grid (docs/TODO.md
+# Track 6) — raw + every orientation's in-frame correction chain unconditionally
+# (turn-gating on page-level weakness was offline-proven unsafe — MIB-000509-class
+# pages clear the bar on raw while the turn read carries the fields); weak pages
+# (frozen page_score) expand with optical modules composed OVER the corrected
+# frames; a still-dead page may get one last-resort PSM-3 pass. Anchors:
+# MIB-000061 (skew+deshred+adapt reads the fee line), MIB-000030 p2 (turn1
+# chains read a six-field intake block).
 #
-# `ladder` — the frozen legacy set (raw + _restorations per source; optical on
-# raw gray gated by evidence_score < GOOD_ENOUGH). Its stamp remains
-# "bands+local" because it IS that pipeline — the refactor that introduced the
-# seam is provable against the live cache only through this alias.
+# The `ladder` legacy enumerator (the pre-grid `bands+local` pipeline, kept
+# behind MIB_PLAN for A/Bs) was deleted in the de-special-casing batch
+# (2026-07-26) after the grid proved itself (rows 59-60); it lives in git
+# history, and its retired caches are replay-only.
 #
-# `grid` — the canonical composition grid (docs/TODO.md Track 6): raw + every
-# orientation's in-frame correction chain unconditionally (turn-gating on
-# page-level weakness was offline-proven unsafe — MIB-000509-class pages clear
-# the bar on raw while the turn read carries the fields); weak pages (frozen
-# page_score) expand with optical modules composed OVER the corrected frames;
-# a still-dead page may get one last-resort PSM-3 pass. Anchors: MIB-000061
-# (skew+deshred+adapt reads the fee line), MIB-000030 p2 (turn1 chains read a
-# six-field intake block).
-#
-# MIB_PLAN selects the preset; the MIB_GEOM_SET / MIB_OPT_SET / MIB_OPT_BASE /
-# MIB_LAST_RESORT env knobs override individual grid fields for A/Bs (the
-# ladder is frozen and ignores them). Plan identity feeds the `restore` stamp,
-# so require_agreement/verify_render refuse cross-plan joins with no new code.
+# The MIB_GEOM_SET / MIB_OPT_SET / MIB_OPT_BASE / MIB_LAST_RESORT env knobs
+# override individual grid fields for A/Bs. Plan identity feeds the `restore`
+# stamp, so require_agreement/verify_render refuse cross-plan joins with no
+# new code.
 GRID_PRESETS = {
-    "ladder": {"name": "ladder", "geom": ("skew", "turn1", "turn3", "deshred", "local"),
-               "opt": ("adapt", "autocon"), "opt_base": "raw", "last_resort": "off"},
     "grid": {"name": "grid", "geom": ("skew", "turn1", "turn3", "deshred", "local"),
              "opt": ("adapt", "autocon"), "opt_base": "frames", "last_resort": "off"},
 }
-DEFAULT_PLAN = "grid"            # flipped 2026-07-27 (Track 6 Phase 3: dev 124.94 -> 125.35, CFA 0, FIXED 25 / BROKE 0); `MIB_PLAN=ladder` remains the frozen legacy for A/Bs
+DEFAULT_PLAN = "grid"            # flipped 2026-07-26 (Track 6 Phase 3: dev 124.94 -> 125.35, CFA 0, FIXED 25 / BROKE 0)
 
 
 def grid_plan():
     """The resolved S2 enumeration plan for this process."""
-    name = os.environ.get("MIB_PLAN", DEFAULT_PLAN).strip().lower()
-    plan = dict(GRID_PRESETS.get(name, GRID_PRESETS[DEFAULT_PLAN]))
-    if plan["name"] == "ladder":
-        return plan
+    plan = dict(GRID_PRESETS[DEFAULT_PLAN])
     if os.environ.get("MIB_GEOM_SET"):
         plan["geom"] = tuple(t.strip() for t in os.environ["MIB_GEOM_SET"].split(",") if t.strip())
     if os.environ.get("MIB_OPT_SET"):
@@ -67,11 +60,10 @@ def grid_plan():
 
 
 def _restore_for(plan):
-    """Plan identity as the `restore` stamp value. The ladder aliases the
-    historical "bands+local" (same pipeline); any grid deviation from its
-    preset is spelled out so no two behaviours share a stamp."""
-    if plan["name"] == "ladder":
-        return "bands+local"
+    """Plan identity as the `restore` stamp value. Any deviation from the grid
+    preset is spelled out so no two behaviours share a stamp. (The retired
+    ladder's caches carry the historical "bands+local" stamp, which nothing
+    produces anymore — they refuse to join current artifacts by construction.)"""
     diffs = []
     base = GRID_PRESETS["grid"]
     for key in ("geom", "opt", "opt_base", "last_resort"):
@@ -111,50 +103,26 @@ CRITICAL_KEYS = ("restore", "early_stop", "ocr_passes", "ocr_optical")
 ADVISORY_KEYS = ("git_rev",)
 
 
-OCR_PASS_MODES = ("psm11", "dual")
-DEFAULT_OCR_PASSES = "psm11"
+# S2 runs a single PSM 11 (sparse text) pass per image. The MIB_OCR_PASSES=dual
+# second PSM 3 pass (+0.87 dev, unshipped for cost — row 20) was deleted in the
+# de-special-casing batch (2026-07-26); the grid's last-resort tier is the
+# designated revival path (one PSM 3 call per still-dead page, not per image).
+# The stamp keeps emitting `ocr_passes` so old caches still join-check.
+OCR_PASSES = "psm11"
 
-
-def ocr_passes():
-    """How many Tesseract page-segmentation passes S2 runs per image.
-
-    `psm11` (default): the single sparse-text pass this corpus was tuned on.
-    `dual`: also run PSM 3 (full auto layout) per image and let `best()` keep the
-    stronger reading — the top competitor's recipe. PSM 3 reads dense/tabular forms
-    that PSM 11 fragments; PSM 11 wins on the scattered fragments a restored scan
-    leaves. Critical + stamped: dual-pass changes which reading wins, so its page
-    text must never be joined with a single-pass cache (exactly like `restore`).
-    Off by default so the change lands score-neutral until measured; opt in with
-    MIB_OCR_PASSES=dual.
-    """
-    mode = os.environ.get("MIB_OCR_PASSES", DEFAULT_OCR_PASSES).lower()
-    return mode if mode in OCR_PASS_MODES else DEFAULT_OCR_PASSES
-
-
-SELECT_METRICS = ("ev", "conf")
-DEFAULT_SELECT = "conf"
-
-
-def select_metric():
-    """Which metric `records.best_read` ranks readings by.
-
-    `conf` (default since row 42's A/B, user-approved): guarded excess
-    confidence mass from the engine's own per-word conf
-    (records.conf_excess_mass). `ev` (evidence_score, the hand-built shape
-    score) remains selectable via MIB_SELECT=ev for A/Bs until Phase E deletes
-    it. Reads without conf (pre-conf caches) always fall back to `quality`, so
-    old caches replay unchanged under either setting. Stamped: selection
-    changes which reading is primary, so it is part of an artifact's identity.
-    """
-    mode = os.environ.get("MIB_SELECT", DEFAULT_SELECT).strip().lower()
-    return mode if mode in SELECT_METRICS else DEFAULT_SELECT
+# `records.best_read` ranks by guarded excess confidence mass (conf, default
+# since row 43); the `MIB_SELECT=ev` legacy selector (evidence_score, the
+# hand-built shape score) was deleted in the same batch. Reads without conf
+# (tesseract tsv failure) fall back to `quality`. The stamp keeps emitting
+# `select` so old caches still join-check.
+SELECT_METRIC = "conf"
 
 
 def ocr_optical():
     """Whether S2 adds optical variants — local-adaptive threshold + autocontrast
     (`mib.imaging`) — to weak pages of the OCR ensemble (render.reads_for gates
-    on the page reading below GOOD_ENOUGH). Recovers faint/unevenly-lit scans a
-    global binarization erases.
+    on the frozen page_score staying below WEAK_BAR). Recovers faint/unevenly-lit
+    scans a global binarization erases.
 
     ON by default since the conf-selection era (row 48): its killer under ev
     was well-formed binarized garbage outscoring correct readings (11 recovered
@@ -208,9 +176,9 @@ def stamp(**extra):
         "schema": SCHEMA,
         "restore": _restore_for(grid_plan()),   # live, not the import-time constant
         "early_stop": EARLY_STOP,
-        "ocr_passes": ocr_passes(),
+        "ocr_passes": OCR_PASSES,
         "ocr_optical": ocr_optical(),
-        "select": select_metric(),
+        "select": SELECT_METRIC,
         "git_rev": rev,
         "git_dirty": dirty,
         "created": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -225,7 +193,7 @@ def describe(meta):
     back = " (backfilled)" if meta.get("backfilled") else ""
     es = " early_stop" if meta.get("early_stop") else ""      # legacy caches only
     passes = meta.get("ocr_passes")
-    ocr = f" ocr={passes}" if passes and passes != DEFAULT_OCR_PASSES else ""
+    ocr = f" ocr={passes}" if passes and passes != OCR_PASSES else ""
     opt = " optical" if meta.get("ocr_optical") else ""
     # Legacy stamps may carry a `decider` key (the learned decider, deleted);
     # shown so an old mlp eval artifact is still identifiable as one.

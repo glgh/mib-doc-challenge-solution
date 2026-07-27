@@ -50,12 +50,12 @@ def _uri(gray, width=THUMB_W, q=60):
 
 
 def _read(gray):
-    """OCR once; return (evidence_score, recovered lines)."""
+    """OCR once; return (page_score, recovered lines)."""
     with tempfile.TemporaryDirectory(prefix="bev") as tmp:
         p = Path(tmp) / "x.png"
         p.write_bytes(imaging.to_png_bytes(gray))
         lines = render._tesseract(p)
-    return render.evidence_score(lines), lines
+    return render.page_score(lines), lines
 
 
 def _cell(gray, label, ocr):

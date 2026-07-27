@@ -118,24 +118,19 @@ def best_read(reads):
     """The highest-ranked reading, or None. Earliest wins ties, because S2
     generates readings cheapest-first, so the earlier read cost less to obtain.
 
-    Ranking metric: `evidence_score` (stored as `quality`) by default;
-    `config.select_metric()=conf` ranks by `conf_excess_mass` instead — reads
-    without conf (pre-conf caches) keep ranking by `quality`, so old caches
-    replay unchanged under either setting.
+    Ranking metric: guarded excess confidence mass (`conf_excess_mass`, the
+    default since row 43's flip; the `MIB_SELECT=ev` legacy selector was
+    deleted in the de-special-casing batch). Reads without conf (tesseract tsv
+    failure) fall back to the stored `quality`.
 
     Lives here (not in stages.render) because it is a pure function of stored
     Reads that both S2 tooling and the S4 merge consult — the selection itself
     crosses the seam now that the whole ensemble does.
     """
-    from . import config
-    use_conf = config.select_metric() == "conf"
     chosen, chosen_key = None, None
     for r in reads:
-        key = r.quality
-        if use_conf:
-            m = conf_excess_mass(r)
-            if m is not None:
-                key = m
+        m = conf_excess_mass(r)
+        key = r.quality if m is None else m
         if chosen is None or key > chosen_key:
             chosen, chosen_key = r, key
     return chosen

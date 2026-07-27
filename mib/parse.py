@@ -3,9 +3,14 @@ import difflib
 import re
 from datetime import date
 
-CASE_ID_RE = re.compile(r"\bMIB-\d{6}\b")
-SPONSOR_RE = re.compile(r"\bSPN-\d{4}\b")
-DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+from . import grammar
+
+# Tier-1 field-token shapes live in `grammar`; these are the \b-anchored "is a
+# well-formed token present in this text?" forms. Kept as module-local aliases so
+# the call sites below read unchanged.
+CASE_ID_RE = grammar.FIND_CASE_ID
+SPONSOR_RE = grammar.FIND_SPONSOR
+DATE_RE = grammar.FIND_DATE
 
 VISA_CLASSES = {"XW-1", "XW-2", "DIP-1", "MED-3", "TRANSIT-7"}
 FEE_STATUSES = {"paid", "waived", "unpaid", "unknown"}
@@ -224,7 +229,7 @@ def parse_kv(lines):
 # purpose in "expected on Earth for reactor / maintenance." straddles a newline,
 # and half of it is not a purpose.
 _PROSE_PATTERNS = [
-    ("sponsor_id", re.compile(r"\bSponsor\s+(SPN-\d{4})\s+attests\b", re.IGNORECASE)),
+    ("sponsor_id", re.compile(rf"\bSponsor\s+({grammar.SPONSOR})\s+attests\b", re.IGNORECASE)),
     ("applicant_name",
      re.compile(r"\battests\s+that\s+(.+?)\s+is\s+expected\s+on\s+Earth\b", re.IGNORECASE)),
     ("declared_purpose",
@@ -334,12 +339,6 @@ _DAMAGE_PHRASES = (
 )
 
 
-# Stamp/watermark furniture vocabulary (mirrors render._WATERMARK_RE): these
-# words appear as page furniture the OCR sometimes fuses into a value line.
-_WATERMARK_TOKENS = {"SAMPLE", "DENIAL", "SPECIMEN", "COPY", "VOID", "DRAFT",
-                     "DUPLICATE"}
-
-
 def _damage_markerish(value):
     v = re.sub(r"[^a-z ]", " ", value.lower())
     v = " ".join(v.split())
@@ -378,20 +377,13 @@ def valid_value(field, value):
         return value.lower() in FEE_STATUSES
     if field == "species_code":
         return bool(re.fullmatch(r"[A-Z][A-Z_]+", value))
-    if field == "applicant_name":
-        # Structural shape, total across all 1000 train truths (census
-        # 2026-07-26): exactly two alphabetic tokens, each >= 4 chars (the
-        # closed 144-part name pool has no shorter part). Kills the junk-vote
-        # winners marker rejection freed (`ciaty`, `oe`, `tix`, `SCANTABS`,
-        # `MAME CUT:`) and single-token truncations (`Zatari` for `Zatari
-        # Lutari`), whose family siblings carry the full form. Watermark
-        # furniture is not a name (`Ixe COPY ARTIFACT`, MIB-000743). Edge
-        # punctuation is OCR debris, not structure — strip per token first.
-        toks = [re.sub(r"^[^A-Za-z]+|[^A-Za-z]+$", "", t) for t in value.split()]
-        toks = [t for t in toks if t]
-        if len(toks) != 2 or any(len(t) < 4 or not t.isalpha() for t in toks):
-            return False
-        return not any(t.upper() in _WATERMARK_TOKENS for t in toks)
+    # The row-64 applicant_name shape guard (exactly two >=4-char alpha tokens,
+    # watermark rejection) was dropped on user call in the de-special-casing
+    # arc: its full ablation priced at −0.02 dev (2 names lost to a watermark
+    # fusion and a single-token truncation, 14 honest-unknowns replaced by
+    # debris, 0 true names blocked, 0 adjudication moves) and the token-count
+    # clause was a pure generator bet doing no work of its own. Damage-marker
+    # rejection above still filters marker debris; the rest rides the vote.
     return True
 
 

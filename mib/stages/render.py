@@ -4,24 +4,22 @@
 Recipe validated on train scans (docs/experiments.md): Tesseract PSM 11
 (sparse text) recovers structured Key: Value lines where PSM 4/6 fail; embedded
 raster is preferred (already the source image, no re-render cost); pages whose
-embedded image is small or yields nothing are re-rendered at ~200 DPI. An
-optional PSM 3 (full-layout) second pass per image is available behind
-config.ocr_passes=dual, kept only when it out-reads PSM 11 (see `best`).
+embedded image is small or yields nothing are re-rendered at ~200 DPI. A PSM 3
+(full-layout) pass exists only as the grid's last-resort tier (one call on the
+best frame of a still-dead page); the per-image `dual` second pass it replaced
+was deleted with the other legacy knobs (de-special-casing batch, 2026-07-26).
 
-Pages that still read badly are usually damaged *geometrically* rather than
-optically (turned, skewed, or shredded into offset bands), so weak pages are
-retried through mib.imaging restorations rather than at higher resolution. The
-transforms compose in the order they undo real damage: the `bands` rung deskews
-first and then deshreds, because band detection reads the page border and a
-skewed border is a moving reference (see `_restorations`).
-
-The ladder is not selectable: every weak page gets deskew, both quarter-turns,
-and shred-band realignment, because that full set is what recovers the pages a
-cheaper subset leaves unreadable. The `local` rung on top is the text-consent
-corrector (imaging.realign_local, graduated 2026-07-26): same walk, but at
-seams that cut through text the cut glyph halves override the border's implied
-shift; it is emitted only when its pixels differ from the plain deshred. The `off`/`skew`/`turn` rungs that used to be
-switchable existed to A/B the ladder (experiments.md rows 11-14) and are gone;
+Pages that read badly are usually damaged *geometrically* rather than
+optically (turned, skewed, or shredded into offset bands), so every page is
+enumerated through mib.imaging corrections rather than at higher resolution.
+The transforms compose in the order they undo real damage: deskew before
+deshred, because band detection reads the page border and a skewed border is a
+moving reference (see `_orientation_chains`). The `local` rung is the
+text-consent corrector (imaging.realign_local, graduated 2026-07-26): same
+walk, but at seams that cut through text the cut glyph halves override the
+border's implied shift; it is emitted only when its pixels differ from the
+plain deshred. The pre-grid `ladder` enumerator and its switchable
+`off`/`skew`/`turn` predecessors are gone (experiments.md rows 11-14, 59-60);
 the record stays in the docs and in git.
 
 OCR is exhaustive: every variant is produced and read, and `best()` keeps the
@@ -48,12 +46,11 @@ import fitz
 import numpy as np
 from PIL import Image
 
+from .. import grammar
 from .. import imaging
 from ..config import ocr_optical as _ocr_optical
-from ..config import ocr_passes as _ocr_passes
-from ..parse import ALL_FLAGS, CASE_ID_RE, DATE_RE, SPONSOR_RE, VISA_CLASSES, key_for
 from ..records import Read, best_read, conf_excess_mass
-from ..vocab import HOME_WORLDS, SPECIES, clean_ocr_line
+from ..vocab import FLAGS, HOME_WORLDS, SPECIES, VISAS, clean_ocr_line
 
 MIN_EMBEDDED_WIDTH = 1000
 RENDER_ZOOM = 2.8       # ~200 DPI floor
@@ -64,15 +61,8 @@ RENDER_ZOOM = 2.8       # ~200 DPI floor
 # ~300 DPI: past that, tesseract gains nothing and render cost grows quadratically.
 MAX_RENDER_ZOOM = 4.2   # ~300 DPI cap
 
-# The evidence score at which a page reads like an intact form. No longer a
-# pipeline gate — S2 reads every variant regardless — but it remains the corpus's
-# definition of "already good enough", which analysis tooling selects on
-# (experiments/mine_hard.py picks hard pages as those scoring below it).
-GOOD_ENOUGH = 6
-
-
-# Page-segmentation modes. PSM 11 (sparse) is the primary the corpus was tuned on;
-# PSM 3 (full auto layout) is the dual-pass secondary — see config.ocr_passes.
+# Page-segmentation modes. PSM 11 (sparse) is the primary the corpus was tuned
+# on; PSM 3 (full auto layout) runs only in the grid's last-resort tier.
 PRIMARY_PSM = 11
 SECONDARY_PSM = 3
 
@@ -152,65 +142,6 @@ def _tesseract(image_path, psm=PRIMARY_PSM, dpi=None):
     return _recognize(image_path, psm, dpi)[0]
 
 
-def recognized_keys(lines):
-    """How many lines carry a recognizable field label."""
-    count = 0
-    for line in lines:
-        head = line.split(":")[0].split(".")[0].split(";")[0]
-        if key_for(head):
-            count += 1
-    return count
-
-
-_VALUE_PATTERNS = (CASE_ID_RE, SPONSOR_RE, DATE_RE)
-_VALUE_WORDS = tuple(VISA_CLASSES | set(SPECIES) | set(HOME_WORLDS) | ALL_FLAGS)
-
-
-def evidence_score(lines):
-    """Recognizable field labels *plus* well-formed values.
-
-    Labels alone underrate a restored page: the shredder tends to clip the left
-    margin, so a rescued line often reads `mnsor ID: SPN-5809` — the label is
-    gone but the value that carries the points is intact and exact.
-    """
-    text = "\n".join(lines)
-    values = sum(len(p.findall(text)) for p in _VALUE_PATTERNS)
-    values += sum(1 for w in _VALUE_WORDS if re.search(r"\b" + re.escape(w) + r"\b", text))
-    return recognized_keys(lines) + values
-
-
-def _restorations(gray):
-    """Geometric variants worth OCR'ing, cheapest and most likely first."""
-    angle = imaging.skew_angle(gray)
-    upright = imaging.rotate(gray, angle) if abs(angle) >= imaging.MIN_SKEW else None
-    if upright is not None:
-        yield "skew", upright
-    for quarter in (1, 3):                         # 90 and 270 clockwise; 180 never wins
-        turned = imaging.turn(gray, quarter)
-        yield f"turn{quarter}", imaging.rotate(turned, imaging.skew_angle(turned))
-    # Deskew first, then deshred. `realign_bands` reads the printed border's
-    # left edge per row; on a skewed page that border is diagonal, so the
-    # per-row offset drifts continuously and the bands are measured against a
-    # moving reference. Deskewing first makes the border vertical, so the
-    # per-row left edge is a clean read of each band's true shift — and the
-    # deskewed base needs no further rotation. Reuses `upright` from the skew
-    # rung above; when the page wasn't meaningfully tilted (`upright is
-    # None`), deshredding `gray` directly is correct.
-    base = upright if upright is not None else gray
-    deshredded = imaging.realign_bands(base)
-    if deshredded is not None:
-        yield "deshred", deshredded
-    # The text-consent corrector (imaging.realign_local): border offsets from
-    # the merged reader, overridden at text-cutting seams by what the cut glyph
-    # halves themselves want. Emitted only when it produces a genuinely new
-    # image — equal to the plain deshred (or a no-op) it would just double the
-    # OCR bill for the same pixels.
-    corrected = imaging.realign_local(base)
-    if corrected is not None and (deshredded is None
-                                  or not np.array_equal(corrected, deshredded)):
-        yield "local", corrected
-
-
 # Optical rendering modules: contrast-domain fixes applied AFTER geometry
 # (binarizing before rotation re-blurs the strokes the threshold just sharpened
 # — measured on MIB-000061: adapt-then-skew kept `Fee Stan waved`, skew-then-
@@ -266,10 +197,11 @@ def _orientation_chains(gray, q, skew_deg, geom):
 # ---------------------------------------------------------------------------
 # page_score: the weak-page gate, decoupled from S3.
 #
-# `evidence_score` imports parse/vocab, so a KEY_MAP edit silently changes
-# which pages the optical rung expands on and invalidates the OCR cache (the
-# documented "S3's vocabulary silently drives S2" hazard). This score is a
-# FROZEN snapshot (2026-07-27) — deliberately NOT imported — plus the two
+# Its predecessor `evidence_score` imported parse/vocab, so a KEY_MAP edit
+# silently changed which pages the optical rung expanded on and invalidated the
+# OCR cache (the documented "S3's vocabulary silently drives S2" hazard; the
+# score itself died with the ladder in the de-special-casing batch). This score
+# is a FROZEN snapshot (2026-07-27) — deliberately NOT imported — plus the two
 # guards the arbitration lab proved necessary (experiments/probe_arbitration
 # m_guards): label credit needs a >=2-token line, and watermark lines
 # (SAMPLE DENIAL / SPECIMEN / COPY / VOID) earn nothing, so a page cannot
@@ -280,27 +212,19 @@ _SCORE_LABELS = (
     "declared purpose", "fee status", "waiver code", "registry status",
     "observed flags", "biometric confidence", "finding",
 )
-_SCORE_VALUE_PATTERNS = (
-    re.compile(r"\bMIB-\d{6}\b"),
-    re.compile(r"\bSPN-\d{4}\b"),
-    re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
-)
-_SCORE_VALUE_WORDS = (
-    "XW-1", "XW-2", "DIP-1", "MED-3", "TRANSIT-7",
-    "ALPHA_DRACONIAN", "ANDROMEDAN", "AQUARIAN_MANTIS", "ARCTURIAN",
-    "CENTAURI_SYNTH", "JOVIAN_GASFORM", "KAIJU_MICRO", "LUNA_SECURID",
-    "ORION_GRAYS", "SIRIUS_AVIAN", "TRIANGULAN", "VENUSIAN_MYCELIAL",
-    "Barnard-c", "Eris Relay", "Europa Station", "Gliese-581g", "Kepler-186f",
-    "Luyten-b", "Mars Dome-7", "Proxima-b", "Sirius Outpost", "TRAPPIST-1e",
-    "Titan Freeport", "Wolf-1061c", "Zeta Reticuli",
-    "memory_tampering", "planetary_embargo", "active_warrant", "biohazard_red",
-    "identity_conflict", "sponsor_mismatch", "illegible_biometrics", "rescinded_denial",
-)
+# \b-anchored field-token shapes (owned by `grammar`): a variant that surfaces
+# more well-formed ids/dates read more of the page's structured content.
+_SCORE_VALUE_PATTERNS = (grammar.FIND_CASE_ID, grammar.FIND_SPONSOR, grammar.FIND_DATE)
+# The controlled vocabularies (owned by `vocab`): a variant that surfaces more
+# known visa/species/world/flag terms has read more of the page's real content.
+# "none" is excluded — it is not a term a scan would legibly print as evidence.
+_SCORE_VALUE_WORDS = tuple(VISAS + SPECIES + HOME_WORLDS +
+                           [f for f in FLAGS if f != "none"])
 _WATERMARK_RE = re.compile(r"\b(sample|denial|specimen|copy|void)\b", re.I)
 
-# Initial bar mirrors GOOD_ENOUGH for continuity; re-derived from the dev
-# score distribution during the grid's probe phase (the ev distribution's
-# valley sits at 5, not the hand-picked 6 — hand-picked bars go stale).
+# Initial bar mirrors the retired GOOD_ENOUGH=6 for continuity; re-derive from
+# the dev score distribution when it moves (the ev distribution's valley sat at
+# 5, not the hand-picked 6 — hand-picked bars go stale).
 WEAK_BAR = 6
 
 
@@ -353,16 +277,10 @@ def _sources(doc, page, tmp):
 def reads_for(doc, page, page_no):
     """Every OCR reading of one page, in generation order (cheapest first).
 
-    Two enumerations behind one seam (config.grid_plan):
-
-    `ladder` — the frozen legacy set: raw + `_restorations` per source, optical
-    modules on raw gray gated by evidence_score < GOOD_ENOUGH. Kept verbatim so
-    the refactor is provable against the live cache.
-
-    `grid` — the canonical composition grid: raw + EVERY orientation's
-    correction chain unconditionally (each turn frame gets its OWN in-frame
-    corrections, hint-ordered; gating turns on page-level weakness was
-    offline-proven unsafe the day it was designed — see the base-tier
+    The canonical composition grid (config.grid_plan): raw + EVERY
+    orientation's correction chain unconditionally (each turn frame gets its
+    OWN in-frame corrections, hint-ordered; gating turns on page-level weakness
+    was offline-proven unsafe the day it was designed — see the base-tier
     comment); when the page still reads weak (frozen `page_score` < WEAK_BAR),
     expand with the optical modules composed over the corrected frames, not
     just raw gray; a still-dead page may get one last-resort PSM-3 pass on its
@@ -377,10 +295,6 @@ def reads_for(doc, page, page_no):
     """
     from .. import config
     plan = config.grid_plan()
-    # Which PSM passes to OCR each image with. `dual` adds PSM 3 per image and
-    # keeps the stronger via best(); an intact page still reads at PSM 11, so the
-    # second pass is pure upside on the dense forms PSM 11 fragments.
-    psms = (PRIMARY_PSM, SECONDARY_PSM) if _ocr_passes() == "dual" else (PRIMARY_PSM,)
     reads = []
     with tempfile.TemporaryDirectory(prefix="mibocr") as tmp:
         written = 0
@@ -391,13 +305,13 @@ def reads_for(doc, page, page_no):
             written += 1
             path = Path(tmp) / f"p{written}.png"
             path.write_bytes(encoded)
-            for psm in ((only_psm,) if only_psm else psms):
-                suffix = "" if psm == PRIMARY_PSM else f"+psm{psm}"
-                t0 = time.time()
-                lines, conf = _recognize(path, psm, dpi)
-                reads.append(Read(page_no=page_no, lines=lines, variant=variant + suffix,
-                                  quality=evidence_score(lines), conf=conf,
-                                  cost_ms=round((time.time() - t0) * 1000)))
+            psm = only_psm or PRIMARY_PSM
+            suffix = "" if psm == PRIMARY_PSM else f"+psm{psm}"
+            t0 = time.time()
+            lines, conf = _recognize(path, psm, dpi)
+            reads.append(Read(page_no=page_no, lines=lines, variant=variant + suffix,
+                              conf=conf,
+                              cost_ms=round((time.time() - t0) * 1000)))
 
         frame_images = {}
 
@@ -412,25 +326,6 @@ def reads_for(doc, page, page_no):
 
         sources = list(_sources(doc, page, tmp))
 
-        if plan["name"] == "ladder":
-            for name, encoded, gray in sources:
-                # The old render PNGs carried pymupdf's default 96-DPI pHYs chunk
-                # and tesseract's segmentation was tuned with that (wrong but
-                # load-bearing) value; PNM has no metadata, so the render base
-                # declares it explicitly (the honest-DPI variant is a deferred
-                # scored experiment, row 40). Restorations and embedded originals
-                # never had DPI metadata — no flag, tesseract estimates as before.
-                read(encoded, name, dpi=96 if name == "render" else None)
-                for variant, image in _restorations(gray):
-                    read(imaging.to_pnm_bytes(image), f"{name}+{variant}")
-            if _ocr_optical() and (not reads or max(r.quality for r in reads) < GOOD_ENOUGH):
-                for name, encoded, gray in sources:
-                    for mod in ("adapt", "autocon"):
-                        read(imaging.to_pnm_bytes(_OPTICAL_MODULES[mod](gray)),
-                             f"{name}+{mod}")
-            return reads
-
-        # --- grid enumeration -------------------------------------------------
         geom, opt = plan["geom"], plan["opt"]
         oprofs = {name: imaging.orientation_profile(gray)
                   for name, _e, gray in sources}
@@ -454,11 +349,11 @@ def reads_for(doc, page, page_no):
         # test) — page-grain weakness cannot license skipping an orientation.
         # The hints still ORDER the turns (sharpest projection first).
         for name, encoded, gray in sources:
-            # Honest DPI, grid-only: the ladder keeps the 96-DPI pHYs accident
-            # its tuning inherited (row 40); the hard-set probe (2026-07-27,
+            # Honest DPI: the retired ladder kept the 96-DPI pHYs accident its
+            # tuning inherited (row 40); the hard-set probe (2026-07-27,
             # experiments/dpi_probe.py) scored honest 37 wins / 19 losses /
             # 296 ties against it, so the grid declares the render's REAL
-            # resolution and the accident dies with the flip.
+            # resolution and the accident died with the flip.
             honest = round(72 * gray.shape[1] / max(1.0, page.rect.width))
             read(encoded, name, dpi=honest if name == "render" else None)
             frame_images[name] = gray

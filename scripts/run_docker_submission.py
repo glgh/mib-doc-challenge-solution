@@ -120,7 +120,7 @@ def stage_input(input_dir, limit):
     return staged, (lambda: shutil.rmtree(staged, ignore_errors=True)), limit
 
 
-def run_container(mount_in, mount_out, ocr_passes):
+def run_container(mount_in, mount_out):
     """The contract flags verbatim, plus a sidecar env for our own timing. Returns
     wall seconds around the container (the figure the contract's 6 s/PDF measures:
     it includes container start, the pool, and the streamed writes)."""
@@ -137,7 +137,6 @@ def run_container(mount_in, mount_out, ocr_passes):
         # Our instrument only: the sidecar rides the writable /output mount so
         # per-case cost_ms survives --rm. The scored submission sets nothing here.
         "-e", "MIB_DEBUG_JSONL=/output/debug.jsonl",
-        "-e", f"MIB_OCR_PASSES={ocr_passes}",
         IMAGE, "/input", "/output/predictions.jsonl",
     ]
     t0 = time.perf_counter()
@@ -190,7 +189,7 @@ def report_runtime(out_dir, n_pdfs, wall):
     return n_rows
 
 
-def check_stamp(out_dir, ocr_passes):
+def check_stamp(out_dir):
     meta_path = out_dir / "meta.json"
     print("\n== provenance ==")
     if not meta_path.exists():
@@ -198,14 +197,11 @@ def check_stamp(out_dir, ocr_passes):
         return
     meta = json.loads(meta_path.read_text())
     print(f"  container ran: restore={meta.get('restore')} "
-          f"ocr_passes={meta.get('ocr_passes')} "
           f"rev={meta.get('git_rev')}{'+dirty' if meta.get('git_dirty') else ''}")
-    want = (RESTORE, ocr_passes)
-    got = (meta.get("restore"), meta.get("ocr_passes"))
-    if got != want:
+    if meta.get("restore") != RESTORE:
         raise SystemExit(
-            f"  MISMATCH: asked for {want} but the container stamped {got} "
-            f"(restore, ocr_passes). The image is probably stale — "
+            f"  MISMATCH: asked for restore={RESTORE!r} but the container stamped "
+            f"{meta.get('restore')!r}. The image is probably stale — "
             f"rebuild (drop --no-build).")
     print("  OK: container config matches the requested config.")
 
@@ -262,8 +258,6 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--input", default=str(DEFAULT_INPUT))
-    ap.add_argument("--ocr-passes", default="psm11", choices=("psm11", "dual"),
-                    help="dual adds a PSM 3 pass per image (config.ocr_passes)")
     ap.add_argument("--limit", type=int, default=None,
                     help="stage only the first N PDFs (fast smoke test)")
     ap.add_argument("--reference", default=None,
@@ -280,20 +274,18 @@ def main():
     if size is not None:
         print(f"image: {size:.2f} GiB (cap 4 GiB)   {'OK' if size <= 4 else 'OVER'}")
 
-    tag = RESTORE if args.ocr_passes == "psm11" else f"{RESTORE}_{args.ocr_passes}"
-    out_dir = Path(args.out) / tag
+    out_dir = Path(args.out) / RESTORE
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
 
     mount_in, cleanup, n_pdfs = stage_input(args.input, args.limit)
     try:
-        wall = run_container(mount_in.resolve(), out_dir.resolve(),
-                             args.ocr_passes)
+        wall = run_container(mount_in.resolve(), out_dir.resolve())
     finally:
         cleanup()
 
-    check_stamp(out_dir, args.ocr_passes)
+    check_stamp(out_dir)
     report_runtime(out_dir, n_pdfs, wall)
     if args.reference:
         check_parity(out_dir, args.reference)

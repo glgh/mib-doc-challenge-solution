@@ -74,7 +74,7 @@ def observed_flags(packet):
     Matched fuzzily and confusion-weighted (mib.vocab.match_flag_token) so the
     flag survives OCR damage to either the label ('Observed flags'->'Chserved
     flags') or the value ('biohazard_red'->'bichaxarc_yed') — the same
-    'values outlast labels' property S2's evidence_score relies on. `_raw` holds
+    'values outlast labels' property S2's page_score relies on. `_raw` holds
     only visible + OCR text (assemble never stores hidden_lines there), so this
     reads trusted evidence by construction; the injection differential tests hold.
 

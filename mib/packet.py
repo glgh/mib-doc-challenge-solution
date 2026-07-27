@@ -123,6 +123,33 @@ def _decoy(lines, case_id, ocr):
     return not ocr or not any(textmatch.plausible_misread(case_id, i) for i in ids)
 
 
+def _without_hidden_echo(lines, hidden_norm):
+    """Drop OCR lines that replicate the packet's own quarantined hidden text.
+
+    S1 separates hidden spans (white ink, off-crop) from visible lines, but an
+    injection printed white-on-white re-enters through PIXELS when an optical
+    variant makes it OCR-readable (MIB-000114 p2: render+autocon reads the full
+    answer key off the page). The quarantine hands us the exact planted
+    strings, so an OCR line matching one is the same plant seen through a
+    different channel — dropped here, before parse, doc typing, and every
+    raw-line scan, instead of trusting the comma-payload shape to defeat
+    parse_kv structurally. Value-first tiers keep their _INJECTION_RE guard
+    for injection shapes this per-packet set cannot know.
+    """
+    if not hidden_norm:
+        return lines
+    kept = []
+    for line in lines:
+        ln = " ".join(line.lower().split())
+        if len(ln) >= 15 and any(
+                ln in h or h in ln
+                or difflib.SequenceMatcher(None, ln, h).ratio() >= 0.85
+                for h in hidden_norm):
+            continue
+        kept.append(line)
+    return kept
+
+
 def assemble(pages, reads_by_page, fallback_case_id):
     """Build a Packet from Page records; pages of other applicants are dropped.
 
@@ -146,6 +173,17 @@ def assemble(pages, reads_by_page, fallback_case_id):
         id_votes.update(parse.page_case_ids(best.lines if best else []))
     case_id = id_votes.most_common(1)[0][0] if id_votes else fallback_case_id
 
+    # Only injection-SHAPED hidden lines poison the echo set. Unconditional
+    # echo-matching would hand injectors a blinding attack: mirror the page's
+    # true visible text in white ink and the filter suppresses the real
+    # evidence. A hidden line that merely duplicates legitimate content
+    # (`Observed flags: ...`) therefore never enters the set; answer keys and
+    # SYSTEM prompts do.
+    hidden_norm = [" ".join(l.lower().split())
+                   for pt in pages for l in pt.hidden_lines
+                   if _INJECTION_RE.search(l)]
+    hidden_norm = [h for h in hidden_norm if len(h) >= 20]
+
     packet = Packet(case_id=case_id)
     for pt in pages:
         lines, source, conf = (pt.visible_lines, SRC_TEXT, None)
@@ -157,11 +195,16 @@ def assemble(pages, reads_by_page, fallback_case_id):
             for r in reads_by_page.get(pt.page_no) or []:
                 if r.lines is lines or not r.lines or _decoy(r.lines, case_id, ocr=True):
                     continue
-                kv = _parse_lines(r.lines, ocr=True)
-                kv["_raw"] = r.lines
+                r_lines = _without_hidden_echo(r.lines, hidden_norm)
+                if not r_lines:
+                    continue
+                kv = _parse_lines(r_lines, ocr=True)
+                kv["_raw"] = r_lines
                 kv["_page_no"] = pt.page_no
                 kv["_conf"] = r.conf
-                packet.variant_docs.append((parse.detect_doc_type(r.lines), kv))
+                packet.variant_docs.append((parse.detect_doc_type(r_lines), kv))
+        if source == SRC_OCR:
+            lines = _without_hidden_echo(lines, hidden_norm)
         if _decoy(lines, case_id, ocr=(source == SRC_OCR)):
             continue  # decoy page for a different applicant
         kv = _parse_lines(lines, ocr=(source == SRC_OCR))
@@ -599,13 +642,24 @@ def _fee_unknown_stated(lines):
     return False
 
 
+# The paid fee amount, printed on receipts: `$809.00` (a GitHub competitor
+# thread surfaced the tell — PR #3's "visible $809"; our fee regexes had never
+# looked for money). Corpus census (row 72): a tight `$NNN.NN` line appears in
+# 297 packets, truth-paid in ALL 297 — a 100%-pure visible paid tell. Ranked
+# ABOVE the explicit-unknown statement: the three dev receipts that both state
+# unknown-ish damage AND print the amount are all truth-paid (row 61's known
+# BROKE class — the amount is the evidence the statement lacks).
+_FEE_AMOUNT_RE = re.compile(r"[\$][ ]?\d{3}\.\d{2}\b")
+
+
 def fee_fallback(packet):
     """Fee inference for packets whose fee never parsed: unpaid-phrase (7/7 dev
-    precision) > DIP-WAIVER value (7/7) > explicit-unknown statement > 'paid',
-    the silence base rate. The waiver code outranks an unknown statement by
-    measurement, not intuition: both dev packets holding the two together
-    (MIB-000219/554) are truth-waived — a visible waiver code is affirmative
-    state, an obscured/unknown receipt only reports damage.
+    precision) > DIP-WAIVER value (7/7) > paid-amount sighting (297/297) >
+    explicit-unknown statement > 'paid', the silence base rate. The waiver code
+    outranks an unknown statement by measurement, not intuition: both dev
+    packets holding the two together (MIB-000219/554) are truth-waived — a
+    visible waiver code is affirmative state, an obscured/unknown receipt only
+    reports damage.
 
     DISPLAY-ONLY by contract: the runner applies this after `policy.adjudicate`
     has seen the merged value, so the fee_unknown -> NEEDS_REVIEW branch and
@@ -614,7 +668,7 @@ def fee_fallback(packet):
     catastrophic false approval (silent-unpaid MIB-000332, whose packet never
     states the fee) — that trade is the user's to take, not a default.
     """
-    unpaid = dip_waiver = unknown_stated = False
+    unpaid = dip_waiver = amount = unknown_stated = False
     for kv in ([kv for _dt, _src, kv in packet.docs]
                + [kv for _dt, kv in packet.variant_docs]):
         lines = kv.get("_raw", [])
@@ -625,11 +679,15 @@ def fee_fallback(packet):
                 unpaid = True
             if _DIP_WAIVER_RE.search(line):
                 dip_waiver = True
+            if _FEE_AMOUNT_RE.search(line):
+                amount = True
         unknown_stated = unknown_stated or _fee_unknown_stated(lines)
     if unpaid:
         return "unpaid"
     if dip_waiver:
         return "waived"
+    if amount:
+        return "paid"
     if unknown_stated:
         return "unknown"
     return "paid"

@@ -4,14 +4,16 @@ The official evaluator hard-fails (exit 2) on invalid enums, confidence, or
 duplicate ids. Nothing upstream is trusted to be well-formed; everything is
 clamped/normalized here so a pipeline bug can never produce an invalid row.
 """
-import re
 import sys
 from datetime import date
 
+from . import grammar
+
 ADJUDICATIONS = {"APPROVED", "DENIED", "NEEDS_REVIEW"}
 FEE_VALUES = {"paid", "waived", "unpaid", "unknown"}
-CASE_ID_RE = re.compile(r"^MIB-\d{6}$")
-DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# ^…$-anchored: is *this* emitted value exactly well-formed? (shape owned by `grammar`)
+CASE_ID_RE = grammar.VALIDATE_CASE_ID
+DATE_RE = grammar.VALIDATE_DATE
 
 # What a case scores when we have nothing: NEEDS_REVIEW is worth 2 raw points
 # against a true APPROVED or DENIED and 8 against a true NEEDS_REVIEW, where a
@@ -93,7 +95,7 @@ def _repair_case_id(value, fallback):
     unmatchable one is strictly better than a fatal one.
     """
     for text in (value, fallback):
-        m = re.search(r"MIB-(\d{6})", str(text or ""))
+        m = grammar.EXTRACT_CASE_ID.search(str(text or ""))
         if m:
             return f"MIB-{m.group(1)}"
     if CASE_ID_RE.match(str(fallback or "")):

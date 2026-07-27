@@ -125,21 +125,14 @@ def test_damage_markers_are_not_values():
                    "[MAME CUT OUT]", "[PURPOSE NLEGIBLE]"):
         assert not parse.valid_value("applicant_name", marker), marker
         assert not parse.valid_value("declared_purpose", marker), marker
-    # A real value that merely contains a bracket is untouched (checked on
-    # declared_purpose: applicant_name now enforces the two-token census shape,
-    # which rejects bracketed forms for a different, structural reason).
+    # A real value that merely contains a bracket is untouched.
     assert parse.valid_value("declared_purpose", "field repair [approved]")
 
 
-def test_name_shape_guard():
-    """Truth names are exactly two alphabetic tokens, each >= 4 chars, across
-    all 1000 train labels — junk vote winners and watermark fusions are not
-    names. Edge punctuation is debris, not structure."""
-    for junk in ("ciaty", "oe", "tix", "SCANTABS", "MAME CUT:", "Zatari",
-                 "Ixe COPY ARTIFACT", "BAA CUT GUT;", "[I", "WAMESO UIT!"):
-        assert not parse.valid_value("applicant_name", junk), junk
-    for ok in ("Zaix Oriix", "Miraul Luvara", "Tekvoss Aritari", "Zazam_ Qorix."):
-        assert parse.valid_value("applicant_name", ok), ok
+# The row-64 name shape guard (and its test) was dropped on user call in the
+# de-special-casing arc — full ablation priced at −0.02 dev, 0 true names
+# blocked, 0 adjudication moves; the token-count clause was a pure generator
+# bet. Damage-marker rejection still applies to names (tested above).
 
 
 def test_name_corroboration_challenge():
@@ -212,12 +205,26 @@ def test_digit_repair_applies_uniformly_including_revoked_ids():
     assert vocab.snap("sponsor_id", "SPN-58O9") == "SPN-5809"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "mib/vocab.py:29 maps S->5 in _DIGIT_FIXES, but the capture class at "
-    "mib/vocab.py:58 is [0-9OolIB]{4} and excludes S, so the mapping is dead and "
-    "a '5' misread as 'S' is unrepairable."))
 def test_digit_repair_handles_s_for_five():
+    # Was xfail: _DIGIT_FIXES mapped S->5 but the old capture class excluded S,
+    # so the mapping was dead. The widened sponsor cell (experiments row 81)
+    # captures the letter-lookalikes and translates them, letting mangled reads
+    # survive to the variant vote instead of being deleted.
     assert vocab.snap("sponsor_id", "SPN-S809") == "SPN-5809"
+
+
+def test_sponsor_cell_recovers_letter_for_digit_misreads():
+    """The row-81 widening: cells reachable one glyph-swap from digits repair,
+    so the variant vote can pool them (MIB-000140 ST73/STT3/S773 -> 5773)."""
+    assert vocab.snap("sponsor_id", "SPN-ST73") == "SPN-5773"   # S->5, T->7
+    assert vocab.snap("sponsor_id", "SPH4530") == "SPN-4530"    # N->H prefix
+    assert vocab.snap("sponsor_id", "SPN-SO5B") == "SPN-5058"   # 383: S,O,B
+    assert vocab.snap("sponsor_id", "SPN4965") == "SPN-4965"    # no separator
+    # A cell that cannot translate to four digits is dropped, not guessed.
+    assert vocab.snap("sponsor_id", "SPN-XYZW") is None
+    # Z->2 is deliberately NOT mapped: it earns no fix and turns noise cells
+    # into wrong votes (MIB-000784 Z283 is a misread of a 2263 truth, not 2283).
+    assert vocab.snap("sponsor_id", "SPN-Z283") is None
 
 
 def test_unpaid_reconstructs_by_edit_distance():

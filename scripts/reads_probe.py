@@ -55,8 +55,10 @@ def _crop_reads(doc, page_no):
                 p = Path(tmp) / "c.png"
                 p.write_bytes(imaging.to_png_bytes(img))
                 lines = render._tesseract(p, 11)
+                # page_score stands in for the deleted evidence_score: these
+                # text-only reads carry no conf, so best() ranks them by quality.
                 reads.append(Read(page_no=page_no, lines=lines, variant=f"{name}+{label}",
-                                  quality=render.evidence_score(lines), cost_ms=0))
+                                  quality=render.page_score(lines), cost_ms=0))
     return reads
 
 

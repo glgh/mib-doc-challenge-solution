@@ -54,7 +54,7 @@ def _ocr(gray):
     with tempfile.TemporaryDirectory(prefix="mine") as tmp:
         p = Path(tmp) / "x.png"
         p.write_bytes(imaging.to_png_bytes(gray))
-        return render.evidence_score(render._tesseract(p))
+        return render.page_score(render._tesseract(p))
 
 
 def census_page(stem):
@@ -154,7 +154,7 @@ def select(rows, n, hard_max):
     by_key = {(r["stem"], r["page"]): r for r in live}
     buckets = defaultdict(list)
     for r in live:
-        if r["base"] < hard_max:                      # "not already good enough" (GOOD_ENOUGH)
+        if r["base"] < hard_max:                      # "not already good enough" (WEAK_BAR)
             buckets[r["class"]].append(r)
     for k in buckets:
         buckets[k].sort(key=lambda r: (r["base"], -r["headroom"]))  # hardest, most recoverable first
@@ -243,8 +243,8 @@ def build_and_render(selected, faint, corpus, procs):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n-select", type=int, default=100)
-    ap.add_argument("--hard-max", type=int, default=render.GOOD_ENOUGH,
-                    help="a page counts as hard if base_ev < this (default GOOD_ENOUGH)")
+    ap.add_argument("--hard-max", type=int, default=render.WEAK_BAR,
+                    help="a page counts as hard if base score < this (default WEAK_BAR)")
     ap.add_argument("--procs", type=int, default=min(8, (multiprocessing.cpu_count() or 4)))
     ap.add_argument("--no-census", action="store_true", help="reuse output/viz/hard_census.jsonl")
     args = ap.parse_args()

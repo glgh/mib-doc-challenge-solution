@@ -4,7 +4,7 @@ known term pass through unchanged, so unseen private-set values survive."""
 import difflib
 import re
 
-from .textmatch import plausible_misread
+from . import grammar
 
 HOME_WORLDS = [
     "Barnard-c", "Eris Relay", "Europa Station", "Gliese-581g", "Kepler-186f",
@@ -50,8 +50,9 @@ FLAGS = ["memory_tampering", "planetary_embargo", "active_warrant", "biohazard_r
          "identity_conflict", "sponsor_mismatch", "illegible_biometrics",
          "rescinded_denial", "none"]
 
-# Common OCR confusions applied before matching id-like tokens.
-_DIGIT_FIXES = str.maketrans({"O": "0", "o": "0", "l": "1", "I": "1", "S": "5", "B": "8"})
+# The id/date OCR-tolerant coercions (case_id / sponsor_id / arrival_date, with
+# their glyph-confusion translate tables) live in `mib.grammar`; `snap` delegates
+# to them below. See grammar.coerce_* for the recovery-anchor evidence.
 
 
 def _closest(value, options, cutoff):
@@ -182,28 +183,11 @@ def snap(field, value):
     if field == "declared_purpose":
         return _weighted_closest(field, v) or v
     if field == "sponsor_id":
-        m = re.search(r"[S5]PN[-–—:\s]*([0-9OolIB]{4})", v)
-        if not m:
-            return None
-        # Digit-translated repairs may land on revoked ids — the fabrication
-        # guard was removed on user call 2026-07-26 (experiments row 69).
-        return f"SPN-{m.group(1).translate(_DIGIT_FIXES)}"
+        return grammar.coerce_sponsor_id(v)
     if field == "case_id":
-        m = re.search(r"M[iI1l]B[-–—:\s]*([0-9OolIB]{6})", v, re.IGNORECASE)
-        return f"MIB-{m.group(1).translate(_DIGIT_FIXES)}" if m else None
+        return grammar.coerce_case_id(v)
     if field == "arrival_date":
-        m = re.search(r"(\d{4})[-–—/.](\d{2})[-–—/.](\d{2})", v)
-        if not m:
-            return None
-        year = m.group(1)
-        # Visas run <=180 days from a 2026-era receipt, so a year >= 2028 is
-        # future-impossible: one glyph off 2026 means the scanner misread the
-        # year (the 6->8 confusion is systematic in the corpus). Past years get
-        # no such repair — 2020 or 2024 is always a *plausible* stale date, and
-        # rewriting a genuine one would un-stale a legitimate denial.
-        if int(year) >= 2028 and plausible_misread(year, "2026"):
-            year = "2026"
-        return f"{year}-{m.group(2)}-{m.group(3)}"
+        return grammar.coerce_arrival_date(v)
     if field == "observed_flags":
         tokens = [t for t in re.split(r"[|,;\s]+", v.lower()) if t]
         # One flag matcher everywhere: the confusion-weighted, margin-guarded
@@ -240,7 +224,7 @@ def clean_ocr_line(line):
 
 # OCR shape confusions: swapping one glyph for a look-alike is cheaper than a
 # full edit, because that is the mistake the scanner actually makes. This is the
-# letter-shape counterpart of _DIGIT_FIXES above, expressed as edit costs so a
+# letter-shape counterpart of grammar's id-cell digit fixes, expressed as edit costs so a
 # corrupted flag word still resolves. Pairs are symmetric; cost < 1 (a real edit).
 _CONFUSION_COST = 0.3
 _OCR_SUB_COST = {}
