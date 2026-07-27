@@ -1,11 +1,17 @@
 """Adjudication rule engine.
 
-Ordered cascade per the MIB field manual + train-validated inferences (see
-docs/BACKGROUND.md sections 2-3; every rule's hit/collateral was measured via
-scripts/mine_signals.py before inclusion). Branches are named so
-confidence is calibrated per-branch and eval residuals attribute to the rule
-that fired.
+Three severity tiers per the MIB field manual + train-validated inferences
+(see docs/BACKGROUND.md sections 2-3; every rule's hit/collateral was measured
+via scripts/mine_signals.py before inclusion): a signed adjudicator finding
+passes through untouched, then ANY deny rule fires DENIED, then ANY review
+rule fires NEEDS_REVIEW, else APPROVED. Severity monotonicity is structural —
+a review rule cannot preempt a deny rule from any position in the lists — and
+order *within* a tier is attribution priority only: it names the branch that
+gets credit (per-branch confidence calibration, eval-residual attribution) and
+is decision-invariant, per the co-fire audit (experiments/cofire_probe.py,
+experiments.md row 39).
 """
+from collections import namedtuple
 from datetime import date
 
 from .parse import DISQUALIFYING_FLAGS, REVIEW_FLAGS
@@ -43,55 +49,61 @@ def _is_stale(arrival):
         return False
 
 
-def adjudicate(values, sig):
-    """Return (decision, branch_name)."""
-    flags = sig["flags"]
-    fee = (values.get("fee_status") or "unknown").lower()
-    visa = values.get("visa_class")
-    sponsor = values.get("sponsor_id")
-    # Deny rules require POSITIVE evidence of their preconditions: an unknown
-    # visa must not arm the non-DIP-only denials (it produced 3 over-denials
-    # of true DIP-1 packets whose visa field failed to extract).
-    known_non_dip = visa is not None and visa != "DIP-1"
-    non_dip_or_unknown = visa != "DIP-1"
+_Ctx = namedtuple("_Ctx", "values sig flags fee visa sponsor known_non_dip non_dip_or_unknown")
 
-    if sig["finding"]:
-        return sig["finding"], "adjudicator_finding"
-    if flags & DISQUALIFYING_FLAGS:
-        return "DENIED", "disqualifying_flag"
-    if values.get("home_world") in FULL_EMBARGO_WORLDS:
-        return "DENIED", "embargo_world"
-    if values.get("home_world") in PARTIAL_EMBARGO_WORLDS and known_non_dip:
-        return "DENIED", "embargo_world_partial"
-    if sponsor in REVOKED_SPONSORS and known_non_dip:
-        return "DENIED", "revoked_sponsor"
-    if visa == "TRANSIT-7":
-        return "DENIED", "transit_visa"
-    if fee == "unpaid":
-        return "DENIED", "fee_unpaid"
-    # Stale outranks fee-unknown (the cascade's one positive-evidence-vs-
-    # ignorance inversion, fixed in row 39): a positively-evidenced stale
-    # arrival is deny-grade regardless of fee state. The truth-side cell
-    # "fee genuinely unknown AND stale AND non-DIP" is empty across all 1,000
-    # train labels (thin — ~1.6 expected under independence), and all 8 train
-    # cases the pipeline lands there carry a polluted fee_unknown, 7 truth
-    # DENIED. NR->DENIED is also the CFA-safe direction to be wrong in.
-    if _is_stale(values.get("arrival_date")) and known_non_dip:
-        return "DENIED", "stale_arrival"
-    if fee == "unknown":
-        return "NEEDS_REVIEW", "fee_unknown"
+
+def _ctx(values, sig):
+    """The per-case evaluation context every rule predicate reads."""
+    visa = values.get("visa_class")
+    return _Ctx(
+        values=values,
+        sig=sig,
+        flags=sig["flags"],
+        fee=(values.get("fee_status") or "unknown").lower(),
+        visa=visa,
+        sponsor=values.get("sponsor_id"),
+        # Deny rules require POSITIVE evidence of their preconditions: an unknown
+        # visa must not arm the non-DIP-only denials (it produced 3 over-denials
+        # of true DIP-1 packets whose visa field failed to extract).
+        known_non_dip=visa is not None and visa != "DIP-1",
+        non_dip_or_unknown=visa != "DIP-1",
+    )
+
+
+# Tier 1 — deny rules: positive-evidence disqualifiers. ANY hit fires DENIED;
+# list order is attribution priority only (the first hit names the branch) and
+# can never change the decision.
+DENY_RULES = (
+    ("disqualifying_flag", lambda c: c.flags & DISQUALIFYING_FLAGS),
+    ("embargo_world", lambda c: c.values.get("home_world") in FULL_EMBARGO_WORLDS),
+    ("embargo_world_partial",
+     lambda c: c.values.get("home_world") in PARTIAL_EMBARGO_WORLDS and c.known_non_dip),
+    ("revoked_sponsor", lambda c: c.sponsor in REVOKED_SPONSORS and c.known_non_dip),
+    ("transit_visa", lambda c: c.visa == "TRANSIT-7"),
+    ("fee_unpaid", lambda c: c.fee == "unpaid"),
+    # Stale is deny-tier while fee-unknown is review-tier (the cascade's one
+    # positive-evidence-vs-ignorance inversion, fixed in row 39 — and now
+    # structural: a positively-evidenced stale arrival is deny-grade regardless
+    # of fee state, and no review rule can preempt it from any position). The
+    # truth-side cell "fee genuinely unknown AND stale AND non-DIP" is empty
+    # across all 1,000 train labels (thin — ~1.6 expected under independence),
+    # and all 8 train cases the pipeline lands there carry a polluted
+    # fee_unknown, 7 truth DENIED. NR->DENIED is also the CFA-safe direction
+    # to be wrong in.
+    ("stale_arrival", lambda c: _is_stale(c.values.get("arrival_date")) and c.known_non_dip),
+)
+
+# Tier 2 — review rules: ignorance / uncertainty shapes. ANY hit (when no deny
+# rule fired) fires NEEDS_REVIEW; list order is attribution priority only.
+REVIEW_RULES = (
+    ("fee_unknown", lambda c: c.fee == "unknown"),
     # Waiver-code presence is NOT approval evidence: the only code in the corpus
     # is DIP-WAIVER, and on non-DIP packets those cases are 46% denied.
-    if fee == "waived" and non_dip_or_unknown:
-        return "NEEDS_REVIEW", "waived_non_dip"
-    if not values.get("arrival_date"):
-        return "NEEDS_REVIEW", "missing_arrival"
-    if flags & REVIEW_FLAGS:
-        return "NEEDS_REVIEW", "review_flag"
-    if not sponsor and non_dip_or_unknown:
-        return "NEEDS_REVIEW", "missing_sponsor"
-    if not visa:
-        return "NEEDS_REVIEW", "missing_visa"
+    ("waived_non_dip", lambda c: c.fee == "waived" and c.non_dip_or_unknown),
+    ("missing_arrival", lambda c: not c.values.get("arrival_date")),
+    ("review_flag", lambda c: c.flags & REVIEW_FLAGS),
+    ("missing_sponsor", lambda c: not c.sponsor and c.non_dip_or_unknown),
+    ("missing_visa", lambda c: not c.visa),
     # Risk-concealment census (docs/organizer-guidance.md): a would-be approval
     # with no readable B-13 is the under-determined shape — the incriminating
     # evidence may simply be absent. Organizer ruling: NEEDS_REVIEW, never
@@ -103,6 +115,44 @@ def adjudicate(values, sig):
     # only a presence check the packet looked complete and was approved against a
     # truth of DENIED. A detected slip we cannot read the flags from is exactly
     # the concealment shape this rule exists for.
-    if not sig["has_biometric"] or not sig["has_flag_evidence"]:
-        return "NEEDS_REVIEW", "b13_census"
+    ("b13_census", lambda c: not c.sig["has_biometric"] or not c.sig["has_flag_evidence"]),
+)
+
+DENY_BRANCHES = tuple(name for name, _ in DENY_RULES)
+REVIEW_BRANCHES = tuple(name for name, _ in REVIEW_RULES)
+
+
+def adjudicate(values, sig):
+    """Return (decision, branch_name).
+
+    Tier 0: a signed adjudicator finding passes through (its decision is
+    variable, which is why it sits above the tiers rather than inside one).
+    Tier 1: any deny rule -> DENIED. Tier 2: any review rule -> NEEDS_REVIEW.
+    Else APPROVED via clean_approve.
+    """
+    if sig["finding"]:
+        return sig["finding"], "adjudicator_finding"
+    c = _ctx(values, sig)
+    for name, fires in DENY_RULES:
+        if fires(c):
+            return "DENIED", name
+    for name, fires in REVIEW_RULES:
+        if fires(c):
+            return "NEEDS_REVIEW", name
     return "APPROVED", "clean_approve"
+
+
+def fired(values, sig):
+    """Every fired predicate per tier: (deny_hits, review_hits) name tuples.
+
+    The per-case co-fire matrix for the debug sidecar: adjudicate() reports the
+    first hit of the highest non-empty tier; this reports everything that
+    fired, which is what residual mining and any future multi-signal rule (the
+    field manual's "multiple review-only flags may combine" hint) would read.
+    Note: experiments/probe_arbitration.py monkeypatches only adjudicate(), so
+    under that probe fired() sees the unpatched inputs — harmless today (the
+    probe discards debug sidecars) but worth knowing.
+    """
+    c = _ctx(values, sig)
+    return (tuple(name for name, fires in DENY_RULES if fires(c)),
+            tuple(name for name, fires in REVIEW_RULES if fires(c)))

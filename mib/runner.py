@@ -86,6 +86,10 @@ def predict_from_evidence(pages, reads_by_page, stem):
     sig = signals.derive(pkt, values)
     decision, branch = policy.adjudicate(values, sig)
     conf = confidence.for_branch(branch)
+    # Every fired predicate per tier — the per-case co-fire matrix. Sidecar
+    # only: adjudicate() above already decided from the first hit of the
+    # highest non-empty tier.
+    deny_hits, review_hits = policy.fired(values, sig)
     # Display-only fee inference (packet.fee_fallback): adjudication and branch
     # confidence were decided above on the merged evidence value, so an imputed
     # fee can improve extraction but never flip a decision.
@@ -100,6 +104,8 @@ def predict_from_evidence(pages, reads_by_page, stem):
     debug = {
         "case_id": pkt.case_id,
         "branch": branch,
+        "deny_hits": list(deny_hits),
+        "review_hits": list(review_hits),
         "provenance": {k: list(v) for k, v in provenance.items()},
         "doc_types": sorted({d for d, _, _ in pkt.docs}),
         "scan_only_pages": pkt.scan_only_pages,

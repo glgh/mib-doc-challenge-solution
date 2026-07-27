@@ -42,24 +42,15 @@ SCORE = {
     "NEEDS_REVIEW": {"APPROVED": 1, "DENIED": 1, "NEEDS_REVIEW": 8},
 }
 
-DECISION = {
-    "disqualifying_flag": "DENIED", "embargo_world": "DENIED",
-    "embargo_world_partial": "DENIED", "revoked_sponsor": "DENIED",
-    "transit_visa": "DENIED", "fee_unpaid": "DENIED", "stale_arrival": "DENIED",
-    "fee_unknown": "NEEDS_REVIEW", "waived_non_dip": "NEEDS_REVIEW",
-    "missing_arrival": "NEEDS_REVIEW", "review_flag": "NEEDS_REVIEW",
-    "missing_sponsor": "NEEDS_REVIEW", "missing_visa": "NEEDS_REVIEW",
-    "b13_census": "NEEDS_REVIEW", "clean_approve": "APPROVED",
-}
+DECISION = {name: "DENIED" for name in policy.DENY_BRANCHES}
+DECISION.update({name: "NEEDS_REVIEW" for name in policy.REVIEW_BRANCHES})
+DECISION["clean_approve"] = "APPROVED"
 
-ORDER = [  # cascade order, minus clean_approve (the complement); row 39 put
-    # stale_arrival above fee_unknown — keep in sync with policy.adjudicate
-    # (the probe asserts first_match against it and reports mismatches).
-    "adjudicator_finding", "disqualifying_flag", "embargo_world",
-    "embargo_world_partial", "revoked_sponsor", "transit_visa", "fee_unpaid",
-    "stale_arrival", "fee_unknown", "waived_non_dip", "missing_arrival",
-    "review_flag", "missing_sponsor", "missing_visa", "b13_census",
-]
+# Attribution order, minus clean_approve (the complement) — derived from the
+# policy tier lists since the tier refactor, so it cannot drift. The probe's
+# independence now lives entirely in the hand-mirrored predicates() below,
+# which first_match runs against policy.adjudicate (mismatches must be 0).
+ORDER = ["adjudicator_finding", *policy.DENY_BRANCHES, *policy.REVIEW_BRANCHES]
 
 
 def predicates(values, sig):

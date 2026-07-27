@@ -34,14 +34,16 @@ abstains and the hardcoded list stands alone.
 """
 import collections
 
-from . import confidence, vocab
+from . import confidence, policy, vocab
 
 # Branches that outrank `revoked_sponsor` in policy.adjudicate. A case already
 # settled by one of them keeps its decision, exactly as it would have if the id
 # had been in REVOKED_SPONSORS from the start — the revision reproduces the
-# cascade's precedence rather than overriding it.
-OUTRANKS_REVOKED = ("adjudicator_finding", "disqualifying_flag",
-                    "embargo_world", "embargo_world_partial")
+# cascade's precedence rather than overriding it. Derived from the policy tier
+# lists (tier 0 + every deny rule with higher attribution priority than
+# revoked_sponsor) so it cannot drift.
+OUTRANKS_REVOKED = ("adjudicator_finding",) + policy.DENY_BRANCHES[
+    :policy.DENY_BRANCHES.index("revoked_sponsor")]
 NON_DIP_VISAS = frozenset(vocab.VISAS) - {"DIP-1"}
 
 # A sponsor id must clear the gap by this factor before the spectrum counts as

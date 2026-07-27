@@ -43,8 +43,9 @@ TRUTH = {r["case_id"]: r for r in csv.DictReader(open(CH / "data/train_labels.cs
 
 # Deny branch -> the merged fields whose values arm it (co-arming visa included
 # wherever known_non_dip is part of the predicate). Kept in sync with
-# policy.adjudicate by test assertion? No — by eyeball; the cascade is 16
-# branches and this lists its deny side minus the two out-of-scope ones above.
+# policy.DENY_RULES by eyeball — the branch NAMES are checkable against
+# policy.DENY_BRANCHES, but the arming-field mapping is not derivable from the
+# predicates; this lists the deny side minus the two out-of-scope ones above.
 ARMING = {
     "embargo_world": ["home_world"],
     "embargo_world_partial": ["home_world", "visa_class"],

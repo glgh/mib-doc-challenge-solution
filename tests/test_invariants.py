@@ -242,3 +242,20 @@ def test_every_confidence_branch_is_reachable():
         reached.add(policy.adjudicate(values, sig)[1])
     missing = sorted(set(confidence.FALLBACK) - reached)
     assert not missing, f"branch(es) in the confidence table no case can reach: {missing}"
+
+
+def test_policy_tier_names_are_complete_and_disjoint():
+    """The tier lists cover exactly the confidence table's 16 branches.
+
+    A typo'd branch name in DENY_RULES/REVIEW_RULES would silently draw 0.5
+    from confidence.for_branch and could hide behind a branch that never fires
+    on train — this closes that gap structurally, complementing the
+    reachability test above."""
+    from mib import confidence, policy
+
+    deny = set(policy.DENY_BRANCHES)
+    review = set(policy.REVIEW_BRANCHES)
+    assert not deny & review, f"branches in both tiers: {sorted(deny & review)}"
+    special = {"adjudicator_finding", "clean_approve"}
+    assert not (deny | review) & special
+    assert deny | review | special == set(confidence.FALLBACK)
