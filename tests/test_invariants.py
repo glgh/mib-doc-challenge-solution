@@ -68,6 +68,22 @@ def test_validate_repairs_case_id():
     assert CASE_ID_RE.match(repaired(None))
 
 
+def test_validate_repairs_or_defaults_sponsor_id():
+    """sponsor_id gets the same emit-stage schema net as case_id/arrival_date:
+    a malformed read is repaired if it can be, else defaulted — never emitted
+    off-schema. VALIDATE_SPONSOR was defined but wired nowhere before this."""
+    def sponsor(v):
+        return emit.validate({
+            "case_id": "MIB-000001", "sponsor_id": v, "adjudication": "DENIED",
+            "fee_status": "paid", "arrival_date": "2026-01-01", "confidence": 0.5,
+        })["sponsor_id"]
+
+    assert sponsor("SPN-ST73") == "SPN-5773"        # recovered via the shared map
+    assert sponsor("SPN-0139") == "SPN-0139"        # already well-formed, untouched
+    assert sponsor("total garbage") == "SPN-0000"   # unrecoverable -> schema-valid default
+    assert SPONSOR_RE.match(sponsor("SPN-XY"))      # whatever the input, output is on-schema
+
+
 def test_a_failed_case_still_emits_a_scoreable_row():
     """Dropping a case forfeits its extraction points and takes the missing-case
     penalty; a NEEDS_REVIEW row cannot score worse than that."""

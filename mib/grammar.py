@@ -48,60 +48,70 @@ EXTRACT_CASE_ID = re.compile(rf"MIB-({_CASE_NUM})")
 
 
 # ── Tier 2 — OCR-tolerant coercion ──────────────────────────────────────────
-# Rebuild a well-formed value from a mangled read, or None. Each entity accepts
-# the lookalike glyphs the scanner actually produces in its prefix/cell, then
-# normalizes through a translate table and re-checks the shape. Callers pass an
-# already-trimmed read; these strip defensively so they also stand alone.
-
-# Common OCR confusions applied before matching a case-id cell.
-_CASE_DIGIT_FIXES = str.maketrans({"O": "0", "o": "0", "l": "1", "I": "1", "S": "5", "B": "8"})
-_CASE_TOLERANT = re.compile(r"M[iI1l]B[-–—:\s]*([0-9OolIB]{6})", re.IGNORECASE)
-
-# Inside an SPN-#### cell every character is a digit, so an alpha there is a
-# digit misread — the distress maps 5->S, 7->T, 2->Z, 6->G, 1->I/l/i/|, 0->O/Q,
-# 8->B (train ensemble, 2026-07-27 key-oracle worklist). Translating the four
-# cell chars glyph-locally lets a mangled read survive `snap` deletion and reach
-# the cross-variant plurality vote, which recovers the id no single read holds
-# (MIB-000140: ST73/STT3/SIT3/S773 -> 5773; MIB-000190: SPH4530 -> 4530). This is
-# position-local and never steers toward the revoked list: a garble becomes a
-# revoked id only when a page genuinely prints one. Only confusions carried by a
-# measured recovery (train replay 2026-07-27) plus standard-safe case variants:
-# S->5 (743), T->7 (543 `OOOT`), B->8 (383 `SO5B`), O/Q->0, l/I/i/|->1, G->6.
-# Z->2 was tried and dropped: it earns no fix and manufactures wrong votes from
-# noise cells (MIB-000784's `Z283`/`Z253` are misreads of a `2263` truth). The
-# one accepted casualty is MIB-000427 (`T687`->`7687`), the T->7 tradeoff that
-# also earns 543; regression-guarded.
-_SPN_CELL_FIXES = str.maketrans({
+# Rebuild a well-formed value from a mangled read, or None. The scanner misreads
+# a digit as a lookalike LETTER, and does so the same way whichever field the
+# cell sits in — so the letter->digit confusion is modelled ONCE, and both the
+# case-id and sponsor-id cells repair through the one shared table. Each coerce
+# matches its field-specific prefix, translates the captured cell, then
+# RE-VALIDATES to the exact digit count (\d{6} / \d{4}): a glyph the map does not
+# repair yields None, never a malformed value. Callers pass an already-trimmed
+# read; these strip defensively so they also stand alone.
+#
+# The map is MAXIMAL — every observed letter->digit confusion, including the weak
+# Z->2 (user call 2026-07-27, reversing the row-81 rejection). Pooling misread
+# evidence across both fields recovers more ids; the accepted price is that a
+# noise cell can vote a wrong digit (Z->2 re-breaks MIB-000784's `2263` read, as
+# experiments row 81 records). Re-validation still blocks any malformed emit, and
+# the upstream cross-variant vote / filename anchor absorb single wrong reads.
+# Translation is position-local and never steers toward the revoked list: a
+# garble becomes a revoked id only when a page genuinely prints one (the
+# fabrication guard was removed on user call 2026-07-26).
+_DIGIT_CELL_FIXES = {
     "O": "0", "o": "0", "Q": "0",
     "l": "1", "I": "1", "i": "1", "|": "1",
-    "S": "5", "T": "7", "B": "8", "G": "6",
-})
-# Prefix tolerates the N->H/M and P->F confusions (`SPH4530`, `sPN`); the cell
-# class is deliberately loose (letters that look like digits) because the SPN
-# prefix already anchors the match.
-_SPONSOR_TOLERANT = re.compile(r"[Ss5][PpFf][NnHhMm][-–—:.\s]*([0-9OoQlIi|STBG]{4})")
+    "S": "5", "T": "7", "Z": "2", "B": "8", "G": "6",
+}
+_DIGIT_CELL_TABLE = str.maketrans(_DIGIT_CELL_FIXES)
+# One alphabet, spelled once: the capture classes are DERIVED from the map keys,
+# so a cell class can never drift from the glyphs the table actually repairs.
+_CELL = "0-9" + re.escape("".join(_DIGIT_CELL_FIXES))
+
+# Only the numeric cell is shared. The prefixes anchor their fields differently:
+# the MIB prefix tolerates its I/1/l middle glyph (and case, via re.IGNORECASE);
+# the SPN prefix tolerates N->H/M and P->F (`SPH4530`, `sPN`).
+_CASE_TOLERANT = re.compile(rf"M[iI1l]B[-–—:\s]*([{_CELL}]{{6}})", re.IGNORECASE)
+_SPONSOR_TOLERANT = re.compile(rf"[Ss5][PpFf][NnHhMm][-–—:.\s]*([{_CELL}]{{4}})")
+_SIX_DIGITS = re.compile(_CASE_NUM)
 _FOUR_DIGITS = re.compile(_SPN_NUM)
 
 _DATE_TOLERANT = re.compile(r"(\d{4})[-–—/.](\d{2})[-–—/.](\d{2})")
 
 
 def coerce_case_id(value):
-    """A well-formed case id rebuilt from an OCR-mangled read, or None. Accepts
-    the MIB prefix's lookalike glyphs, then digit-translates the 6-char cell."""
+    """A well-formed case id rebuilt from an OCR-mangled read, or None.
+
+    Accepts the MIB prefix's lookalike glyphs, translates the 6-char cell through
+    the shared digit-cell table, then re-checks the shape — the return matches
+    ``^MIB-\\d{6}$`` or is None, never a partially-repaired value."""
     m = _CASE_TOLERANT.search((value or "").strip())
-    return f"MIB-{m.group(1).translate(_CASE_DIGIT_FIXES)}" if m else None
+    if not m:
+        return None
+    cell = m.group(1).translate(_DIGIT_CELL_TABLE)
+    if not _SIX_DIGITS.fullmatch(cell):
+        return None
+    return f"MIB-{cell}"
 
 
 def coerce_sponsor_id(value):
     """A well-formed sponsor id rebuilt from a mangled read, or None.
 
-    Every survivor of the loose match is required to translate to exactly four
-    digits. (The row-69 fabrication guard that used to reject repairs landing on
-    revoked ids was removed on user call 2026-07-26.)"""
+    Every survivor of the loose match must translate to exactly four digits. (The
+    row-69 fabrication guard that used to reject repairs landing on revoked ids
+    was removed on user call 2026-07-26.)"""
     m = _SPONSOR_TOLERANT.search((value or "").strip())
     if not m:
         return None
-    cell = m.group(1).translate(_SPN_CELL_FIXES)
+    cell = m.group(1).translate(_DIGIT_CELL_TABLE)
     if not _FOUR_DIGITS.fullmatch(cell):
         return None
     return f"SPN-{cell}"

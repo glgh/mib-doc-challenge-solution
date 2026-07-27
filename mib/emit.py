@@ -13,6 +13,7 @@ ADJUDICATIONS = {"APPROVED", "DENIED", "NEEDS_REVIEW"}
 FEE_VALUES = {"paid", "waived", "unpaid", "unknown"}
 # ^…$-anchored: is *this* emitted value exactly well-formed? (shape owned by `grammar`)
 CASE_ID_RE = grammar.VALIDATE_CASE_ID
+SPONSOR_RE = grammar.VALIDATE_SPONSOR
 DATE_RE = grammar.VALIDATE_DATE
 
 # What a case scores when we have nothing: NEEDS_REVIEW is worth 2 raw points
@@ -60,7 +61,9 @@ def validate(record, fallback_case_id=None):
 
     case_id is coerced too. The evaluator treats an unexpected id as an extra
     case *and* counts the real one as missing, so a single malformed id costs
-    twice — and CASE_ID_RE sat here unused while that was true.
+    twice — and CASE_ID_RE sat here unused while that was true. sponsor_id gets
+    the same last-line net: a malformed read is repaired if it can be, else
+    defaulted — never emitted off-schema.
     """
     if not CASE_ID_RE.match(str(record.get("case_id", ""))):
         repaired = _repair_case_id(record.get("case_id"), fallback_case_id)
@@ -68,6 +71,8 @@ def validate(record, fallback_case_id=None):
             print(f"emit: case_id {record.get('case_id')!r} -> {repaired!r}",
                   file=sys.stderr)
         record["case_id"] = repaired
+    if not SPONSOR_RE.match(str(record.get("sponsor_id", ""))):
+        record["sponsor_id"] = grammar.coerce_sponsor_id(record.get("sponsor_id")) or "SPN-0000"
     if record["adjudication"] not in ADJUDICATIONS:
         record["adjudication"] = "NEEDS_REVIEW"
     if record["fee_status"] not in FEE_VALUES:

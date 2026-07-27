@@ -222,9 +222,20 @@ def test_sponsor_cell_recovers_letter_for_digit_misreads():
     assert vocab.snap("sponsor_id", "SPN4965") == "SPN-4965"    # no separator
     # A cell that cannot translate to four digits is dropped, not guessed.
     assert vocab.snap("sponsor_id", "SPN-XYZW") is None
-    # Z->2 is deliberately NOT mapped: it earns no fix and turns noise cells
-    # into wrong votes (MIB-000784 Z283 is a misread of a 2263 truth, not 2283).
-    assert vocab.snap("sponsor_id", "SPN-Z283") is None
+    # Z->2 IS now mapped (maximal digit-cell set, user call 2026-07-27): every
+    # observed letter->digit confusion repairs, pooled across case_id and
+    # sponsor_id. This reverses the row-81 rejection and re-breaks MIB-000784's
+    # 2263 read (Z283 -> 2283) — the accepted price of maximal recovery.
+    assert vocab.snap("sponsor_id", "SPN-Z283") == "SPN-2283"
+
+
+def test_case_id_and_sponsor_share_one_digit_cell_map():
+    """The letter->digit confusion is field-agnostic: the same glyph repairs in a
+    MIB- cell and an SPN- cell through the one shared table (grammar._DIGIT_CELL_FIXES),
+    whose capture classes are derived from its keys."""
+    assert vocab.snap("case_id", "MIB-ST0000") == "MIB-570000"   # S->5, T->7
+    assert vocab.snap("sponsor_id", "SPN-ST00") == "SPN-5700"    # same glyphs, other field
+    assert vocab.snap("case_id", "MIB-G0000Z") == "MIB-600002"   # G->6, Z->2
 
 
 def test_unpaid_reconstructs_by_edit_distance():

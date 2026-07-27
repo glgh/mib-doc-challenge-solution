@@ -40,6 +40,7 @@ import re
 import subprocess
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import fitz
@@ -48,9 +49,11 @@ from PIL import Image
 
 from .. import grammar
 from .. import imaging
+from ..adversarial import INJECTION_RE
 from ..config import ocr_optical as _ocr_optical
 from ..records import Read, best_read, conf_excess_mass
 from ..vocab import FLAGS, HOME_WORLDS, SPECIES, VISAS, clean_ocr_line
+from ..vocab import _weighted_sim
 
 MIN_EMBEDDED_WIDTH = 1000
 RENDER_ZOOM = 2.8       # ~200 DPI floor
@@ -247,6 +250,100 @@ def page_score(lines):
     score += sum(1 for w in _SCORE_VALUE_WORDS
                  if re.search(r"\b" + re.escape(w) + r"\b", text))
     return score
+
+
+# ---------------------------------------------------------------------------
+# extraction_gaps: one injection-immune weakness assessment shared by every
+# escalation rung (the optical rung reads `.weak`; the full-layout rung reads
+# `.has_gap`). Injected text is never evidence at any rung — the row-79
+# containment principle applied at S2 — so every arm reads INJECTION_RE-filtered
+# lines. `weak` rides the frozen page_score (a shared instrument, left
+# untouched); the label-tell matches heads with the house confusion-weighted
+# metric (vocab._weighted_sim), not difflib.
+
+# Labels whose true values are structurally >=4 chars, so a short/absent value
+# tail is a genuinely missed field rather than a legitimately short value.
+# Deliberately EXCLUDES the short-value labels (registry status `NG`, biometric
+# confidence `0.9`, species match, finding, waiver code, fee status) that would
+# false-fire the tell — cost-only, but avoidable.
+_TELL_LABELS = (
+    "case id", "applicant", "purpose", "declared purpose", "species code",
+    "home world", "visa class", "sponsor id", "arrival date", "registry name",
+    "observed flags",
+)
+TELL_LABEL_SIM = 0.80   # weighted-sim bar for a line head to name a label
+TELL_TAIL_MIN = 3       # non-space value-tail chars; <= this reads as truncated/absent
+
+# Furniture of the large graphic boxes that defeat PSM-11 sparse-text grouping
+# (row 67): they OCR at high confidence while the real field block truncates;
+# PSM-3 layout analysis reads around them.
+_IMAGE_BOX_WORDS = ("passport image", "registry image")
+
+
+@dataclass(frozen=True)
+class Gaps:
+    """What a page's readings still fail to deliver, injection-filtered.
+
+    weak      -- the whole page reads faint (frozen page_score under WEAK_BAR).
+    truncated -- labels present in some read whose value reached no read (best
+                 tail across all reads is short/absent).
+    furniture -- an image-box furniture word is present (PSM-11's mis-seg tell).
+    """
+    weak: bool
+    truncated: frozenset
+    furniture: bool
+
+    @property
+    def has_gap(self):
+        return self.weak or bool(self.truncated) or self.furniture
+
+
+def _injection_free(lines):
+    """Drop injected/adversarial lines so they never count as evidence."""
+    return [ln for ln in lines if not INJECTION_RE.search(ln)]
+
+
+def _label_tail(line):
+    """(head_lower, tail) split on the first :/./; separator; tail is None when
+    the line carries no separator (not a `Label: value` shape)."""
+    parts = re.split(r"[:.;]", line, maxsplit=1)
+    if len(parts) < 2:
+        return parts[0].strip().lower(), None
+    return parts[0].strip().lower(), parts[1].strip()
+
+
+def extraction_gaps(reads):
+    """Injection-immune assessment of what these readings fail to extract.
+
+    A pure function of the current read set, so any escalation rung can ask
+    "what is still missing" on the readings produced so far (see block comment).
+    The tell aggregates ACROSS reads — a label is only truncated when NO read
+    recovered a value for it (value-matching is saturated; if any read has it,
+    the ensemble already does).
+    """
+    if not reads:
+        return Gaps(weak=True, truncated=frozenset(), furniture=False)
+    filtered = [_injection_free(r.lines) for r in reads]
+    weak = max(page_score(lines) for lines in filtered) < WEAK_BAR
+    best_tail = {}
+    furniture = False
+    for lines in filtered:
+        for line in lines:
+            if not furniture and any(w in line.lower() for w in _IMAGE_BOX_WORDS):
+                furniture = True
+            if len(line.split()) < 2:          # mirror page_score's label rule
+                continue
+            head, tail = _label_tail(line)
+            if tail is None:                    # need a `Label: value` shape
+                continue
+            for label in _TELL_LABELS:
+                if _weighted_sim(head, label) >= TELL_LABEL_SIM:
+                    sig = len(tail.replace(" ", ""))
+                    best_tail[label] = max(best_tail.get(label, -1), sig)
+                    break
+    truncated = frozenset(lbl for lbl, sig in best_tail.items()
+                          if sig <= TELL_TAIL_MIN)
+    return Gaps(weak=weak, truncated=truncated, furniture=furniture)
 
 
 def _sources(doc, page, tmp):
