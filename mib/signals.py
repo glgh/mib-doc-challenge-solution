@@ -27,6 +27,11 @@ _STRIP = " .,;:|/()[]'\"-"
 VALUE_SINGLE_SCORE, VALUE_SINGLE_MARGIN = 0.55, 0.15
 VALUE_QUORUM_SCORE, VALUE_QUORUM_MARGIN, VALUE_QUORUM_N = 0.44, 0.10, 2
 
+# List separators inside a multi-flag `Observed flags:` value. Comma/semicolon/
+# pipe only — not '/', which is an OCR glyph artifact *inside* a word far more
+# often than a list separator (splitting on it fragments single flags).
+_FLAG_LIST_SPLIT = re.compile(r"[,;|]")
+
 _KV_LINE_RE = re.compile(r"^([A-Za-z0-9][A-Za-z _0-9]{1,28}?)\s*[:.;]\s*(.+)$")
 
 
@@ -68,6 +73,33 @@ def _flags_in_line(line):
     return found if len(found) <= 3 else set()   # >3 on one line reads as a legend
 
 
+def _resolve_flag_value(value):
+    """Flags a single `Observed flags:` value asserts -> {flag: 'single'|'quorum'}.
+
+    `vocab.match_flag_value` scores a value WHOLE, so a two-flag list value
+    (`biohazard_red, illegible_biometrics`, OCR-shattered to `bichaxarc_yed,
+    Regie. biometics`) dilutes the second flag below its bar and the token path
+    can't reach it either (a whole missing `illegible` prefix is not an OCR
+    confusion). We score the whole value AND each delimiter-separated part at the
+    same mined bars, taking the union: a stray OCR comma inside a single flag is
+    harmless because the whole-value match still fires and the fragments just
+    miss the bars. 'single' (strong) always wins over 'quorum' for a given flag.
+    """
+    out = {}
+    for part in (value, *_FLAG_LIST_SPLIT.split(value)):
+        part = part.strip()
+        if len(part) < 4:
+            continue
+        flag, score, margin = vocab.match_flag_value(part)
+        if not flag:
+            continue
+        if score >= VALUE_SINGLE_SCORE and margin >= VALUE_SINGLE_MARGIN:
+            out[flag] = "single"
+        elif score >= VALUE_QUORUM_SCORE and margin >= VALUE_QUORUM_MARGIN:
+            out.setdefault(flag, "quorum")
+    return out
+
+
 def observed_flags(packet):
     """Risk flags stated on the flag-bearing documents, read value-first. (§5)
 
@@ -107,18 +139,26 @@ def observed_flags(packet):
     for src, kv in readings:
         rescued = set()
         for line in kv.get("_raw", []):
-            hits = _flags_in_line(line)
-            flags |= hits
-            if hits or src != SRC_OCR:
+            flags |= _flags_in_line(line)
+            if src != SRC_OCR:
                 continue
+            # Run the value path even when the token path already fired on this
+            # line: on a multi-flag value the token path resolves the legible
+            # flag and the whole-value rescue used to be skipped (`if hits:
+            # continue`), stranding the shattered second flag (MIB-000414's
+            # `bichaxarc_yed, Regie. biometics` -> biohazard_red only). Splitting
+            # per part recovers it; the union with the token hits is idempotent.
             value = _labelled_flag_value(line)
             if value is None:
                 continue
-            flag, score, margin = vocab.match_flag_value(value)
-            if flag and score >= VALUE_SINGLE_SCORE and margin >= VALUE_SINGLE_MARGIN:
-                flags.add(flag)
-            elif flag and score >= VALUE_QUORUM_SCORE and margin >= VALUE_QUORUM_MARGIN:
-                rescued.add(flag)
+            resolved = _resolve_flag_value(value)
+            if len(resolved) > 3:   # a value resolving to >3 flags reads as a legend
+                continue
+            for flag, tier in resolved.items():
+                if tier == "single":
+                    flags.add(flag)
+                else:
+                    rescued.add(flag)
         for flag in rescued:
             quorum[(kv.get("_page_no"), flag)] += 1
     flags |= {f for (_pg, f), n in quorum.items() if n >= VALUE_QUORUM_N}

@@ -313,6 +313,33 @@ def test_flag_extraction_survives_label_damage_and_trailing_punctuation():
     assert signals.observed_flags(note) == {"planetary_embargo"}
 
 
+def test_multi_flag_value_recovers_a_shattered_second_flag():
+    """A two-flag `Observed flags:` value where the token path resolves the
+    legible flag and the second is OCR-shattered past any token. The whole-value
+    rescue used to be skipped on those lines (`if hits: continue`), stranding the
+    second flag; splitting the value per delimiter recovers it. Values are the
+    mined reads for MIB-000414 (biohazard + illegible) and MIB-000552 (identity +
+    illegible) — the token path alone gets only the first of each."""
+    from mib import signals
+    from mib.packet import SRC_OCR, Packet
+
+    def emit(value):
+        p = Packet()
+        p.docs = [(parse.DOC_BIOMETRIC, SRC_OCR, {"_raw": [value]})]
+        return signals.observed_flags(p)
+
+    assert emit("Observed flags: bichaxarc_yed, Regie. biometics") == \
+        {"biohazard_red", "illegible_biometrics"}
+    assert emit("Observed flags: Mertay_confict, Singha bematncs") == \
+        {"identity_conflict", "illegible_biometrics"}
+    # a stray OCR comma inside ONE flag must not fragment it below the bars:
+    # the whole-value match still fires, the fragments miss, union is the flag.
+    assert emit("Observed flags: biohaz,ard_red") == {"biohazard_red"}
+    # a value resolving to >3 flags reads as a legend, not an assertion.
+    assert emit("Observed flags: biohazard_red | active_warrant | "
+                "memory_tampering | planetary_embargo") == set()
+
+
 def test_flag_extraction_does_not_fabricate_from_legend_or_negation():
     """The guards that keep the fuzzy scan from manufacturing a flag: an explicit
     none/clear, a legend that lists the options, and a sentence that negates the

@@ -24,6 +24,35 @@ Score lineage, all dev-700, CFA 0 at every step (one row per change in experimen
 
 ---
 
+## Headroom decomposition — where the remaining ~24 points are
+
+The gap to 150, split by scoring section and then by the structure that holds the loss. Numbers are the **full-1000 grid replay** (`experiments/headroom.py`, reproducing 126.26 total; the canonical dev-700 read is 125.96, same proportions). Reproduce with `scripts/replay.py output/cache/train_grid.jsonl <out>`, evaluate with `--case-scores-jsonl`, then `experiments/headroom.py --scores <case_scores> --debug <out>/debug.jsonl`.
+
+| Section | now | max | headroom |
+| --- | ---: | ---: | ---: |
+| Classification | 64.98 | 80 | **15.02** |
+| Extraction | 45.16 | 50 | **4.84** |
+| Calibration | 16.12 | 20 | **3.88** |
+| Missing penalty | 0 | 0 | 0 |
+
+**Classification is ~63% of the gap and almost all of it is one confusion cell: conservative NEEDS_REVIEW routing.** 242 cases the pipeline sent to NEEDS_REVIEW were truly decidable (each earns 2 of 8 raw; recovering one is worth +6 raw ≈ +0.06 pt): APPROVED→NR is 10.86 pt, DENIED→NR is 3.66 pt. The other five cells (the two NR-misses, the lone A→D) total 0.5 pt and are noise. By branch, three review pools carry **13.3 of the 15.0**:
+
+| branch | n | pts/80 | conserv reviews |
+| --- | ---: | ---: | ---: |
+| `b13_census` | 132 | 6.18 | 103 |
+| `fee_unknown` | 171 | 5.16 | 86 |
+| `waived_non_dip` | 53 | 1.92 | 32 |
+
+None is blanket-convertible — each pool hides a truth-DENIED minority (the co-fire EV pass, row 39; the migration matrix), so a wholesale flip manufactures false approvals. The only convertible slice is **peeling the truth-DENIED cases out via missed-evidence extraction** (upstream reading, esp. the mixed-page ink S2 doesn't read — TODO 5.2/6.12), not any S5 relabel. This is simultaneously the largest lever and the most information-limited part of the board.
+
+**Extraction (4.84) is a spread, `risk_flags` dominant** — heaviest weight (8) × hardest field: 1.57 pt, and it double-counts because a recovered flag can also flip a conservative review. The rest is a long tail on damaged pages (`sponsor_id` 0.56, `fee_status` 0.56, `visa_class` 0.51, `applicant_name` 0.51, `arrival_date` 0.44, `home_world` 0.30, `species_code` 0.25, `declared_purpose` 0.15). Much of this tail is the private-label "unrecoverable" gradient, so the *effective* extraction ceiling on the real test set sits below 4.84.
+
+**Calibration (3.88) is near-saturated and mostly not an independent lever** (Brier 0.097). The cheap gains come from being confidently-correct — i.e. from fixing the conservative reviews above — so it is largely coupled to classification, not a separate workstream.
+
+**The headroom map transfers to the 5,000-case validation set, slightly attenuated — there is no meaningful distribution split.** Validation is scored on the same normalized 150 scale (both sections are means, so headroom does not multiply by 5; only the *rates* matter), and train and validation look like two draws from one generator: page counts 4.16 vs 4.28, predicted NR 55.7→54.1%, DENIED 34.8→34.3%, APPROVED 9.5→11.5%, same 6 revoked sponsors with zero new ids. Projecting train per-branch classification loss onto val branch occupancy (`experiments/headroom.py --val-debug`, grid substrate, val cache `val_text_latest.jsonl`) gives **projected val class headroom 13.96 / 80 vs train's 15.02** — the ~1-point attenuation is almost entirely one branch: `b13_census` shrinks 13.2→8.9% (proj 4.19 vs 6.18). That is the render-damage axis (no-scan-page packets halve, 14.9→7.3%), the exact shift that retroactively justified rejecting the `b13_census` ML prize as a generator artifact — so it confirms rather than complicates the board. The one branch that *grows* is `fee_unknown` (17.1→19.7%, proj 5.93 vs 5.16) — the biggest information-limited pool. Separately, `STALE_CUTOFF`'s train margin collapses 37 d→2 d on val (branch still fires at ~1.3%) — a latent risk to guard before submission, not a ratio difference. Net: prioritize by the train decomposition; it *is* the test decomposition, with `b13_census` worth marginally less and `fee_unknown` marginally more on the private set.
+
+---
+
 ## What we tried and kept
 
 Mechanism, not just the delta — this list curates the *arcs*, one bullet per mechanism, not one per shipped row; [experiments.md](experiments.md) is the complete per-row record.
