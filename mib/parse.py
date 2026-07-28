@@ -79,20 +79,26 @@ _FUZZY_HEADERS = [
 # region and out of a body that merely names another document.
 HEADER_WINDOW = 6
 
-# OCR-tolerant title match, reached only after the substring fast paths miss. The
-# short code is the least reliable token ("FORM I-8090" -> "FORM |-8080" /
-# "1-8090" / "7-8090"), but the full marker survives OCR well enough that a fuzzy
-# edit-distance match recovers it — and unlike a glyph-confusion map it also
-# absorbs digit corruption, dropped letters ("Attestaton"), and wholesale word
-# damage ("Biometric Scan Slip" -> "Berets Ger Se") with one rule. Calibrated on
-# the 837 train OTHER pages: best-marker partial ratio separates real mangled
-# titles from furniture, whose ratio floors at <=0.6. The cutoff sits above that
-# floor, not on the score: every OTHER page it recovers (~170, mostly intake)
-# eyeballs as a real header, and re-typing only ever moves OTHER -> known (a
-# confidently-typed page returns before this stage), never one known type to
-# another.
-HEADER_FUZZY_CUTOFF = 0.80
-_MARKERS_LOW = [(m.lower(), dt) for m, dt in DOC_HEADERS]
+# OCR-tolerant title match, reached only after the substring fast paths miss.
+# Match the DISTINCTIVE FULL title, not the short header code: "FORM B-13" /
+# "FORM I-8090" are the OCR-fragile part (the digit code garbles first, e.g.
+# "FORM B-13: Biometric Scan Slip" -> "r age Sean Slip"), while the descriptive
+# tail survives OCR far better and carries the match. Full titles are also more
+# discriminative than the short codes, so this is higher precision AND higher
+# recall, and — measured across the train OTHER pages — 0 cross-type confusion
+# (no form's garble ever out-scores a different form's title), so re-typing only
+# ever moves OTHER -> known, never one known type to another. Real mangled titles
+# separate from furniture, whose partial ratio floors at <=0.6; the cutoff sits
+# above that floor.
+HEADER_FUZZY_CUTOFF = 0.66
+_FUZZY_TITLES = [
+    ("manual adjudicator note", DOC_ADJUDICATOR),
+    ("form i-8090 extraterrestrial work authorization intake", DOC_INTAKE),
+    ("form b-13 biometric scan slip", DOC_BIOMETRIC),
+    ("sponsor attestation letter", DOC_SPONSOR),
+    ("planetary registry extract", DOC_REGISTRY),
+    ("mib fee receipt", DOC_FEE),
+]
 
 
 def _title_ratio(marker_low, line_low):
@@ -127,15 +133,17 @@ def detect_doc_type(lines):
     for token, dtype in _FUZZY_HEADERS:
         if token in low:
             return dtype
-    # OCR-mangled title the substring paths cannot see: fuzzy-match the markers.
+    # OCR-mangled title the substring paths cannot see: fuzzy-match the full
+    # titles. `>` (not `>=`) breaks ties toward the more-trusted, lower-numbered
+    # type — immaterial today (0 measured ties) but correct.
     best_r, best_dt = HEADER_FUZZY_CUTOFF, DOC_OTHER
     for ln in window:
         low_ln = ln.strip().lower()
         if len(low_ln) < 5:
             continue
-        for marker_low, dtype in _MARKERS_LOW:
-            r = _title_ratio(marker_low, low_ln)
-            if r >= best_r:
+        for title_low, dtype in _FUZZY_TITLES:
+            r = _title_ratio(title_low, low_ln)
+            if r > best_r:
                 best_r, best_dt = r, dtype
     return best_dt
 

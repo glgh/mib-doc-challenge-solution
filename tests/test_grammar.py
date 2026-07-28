@@ -10,7 +10,7 @@ import re
 
 import pytest
 
-from mib import grammar, vocab
+from mib import grammar, parse, vocab
 
 CASE_ID = [
     ("MIB-000123", "MIB-000123"),          # clean read passes through
@@ -62,3 +62,29 @@ def test_coerce_case_id_never_returns_a_malformed_value(raw):
     a cell yields None rather than a partially-repaired `MIB-00i456`-style value."""
     out = grammar.coerce_case_id(raw)
     assert out is None or WELL_FORMED_CASE.match(out), (raw, out)
+
+
+# Fuzzy doc-typing (row 90): an OCR-mangled title recovers its type via the
+# full-title match — including the biometric/registry cases the short header
+# codes miss ("FORM B-13" is gone but "Scan Slip" survives). Furniture, footers
+# and decoy markers must stay DOC_OTHER: re-typing only ever moves OTHER -> known.
+DOC_TYPING = [
+    ("Manual Adjudicater Neto", parse.DOC_ADJUDICATOR),        # note title, cell garble
+    ("OFM HG, Biometric Scan Sip", parse.DOC_BIOMETRIC),       # B-13 code gone, tail carries it
+    ("Bicmetric Scan Slip", parse.DOC_BIOMETRIC),
+    ("Planetary Registry Extract saree", parse.DOC_REGISTRY),  # trailing OCR noise
+    ("Sponsor Attestaton Letter", parse.DOC_SPONSOR),          # dropped letter
+    ("MB Fee Recept", parse.DOC_FEE),
+    ("form i-8090 extraterresirial work authorizaton intake", parse.DOC_INTAKE),
+    ("Packet MIB-000008 / page 3", parse.DOC_OTHER),           # page footer
+    ("Synthetic hiring challenge document", parse.DOC_OTHER),
+    ("Applicant: [NAME CUT OUT]", parse.DOC_OTHER),            # damage marker, not a title
+    ("garbage nonsense here", parse.DOC_OTHER),
+]
+
+
+@pytest.mark.parametrize("title,expected", DOC_TYPING)
+def test_detect_doc_type_recovers_mangled_titles_and_rejects_furniture(title, expected):
+    """The fuzzy full-title fallback types an OCR-mangled header by its
+    distinctive tail, while page furniture and decoy markers stay DOC_OTHER."""
+    assert parse.detect_doc_type([title]) == expected, title
