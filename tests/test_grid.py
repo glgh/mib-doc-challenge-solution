@@ -164,19 +164,20 @@ def test_grid_stamp_and_override_stamps_are_distinct(monkeypatch):
     assert base == "grid"
     tweaked = dict(config.GRID_PRESETS["grid"], opt_base="raw")
     assert config._restore_for(tweaked) == "grid[opt_base=raw]"
-    lastr = dict(config.GRID_PRESETS["grid"], last_resort="psm3")
-    assert config._restore_for(lastr) == "grid[last_resort=psm3]"
+    # layout_pass is default-on, so `off` is the deviation that earns a stamp.
+    lyp = dict(config.GRID_PRESETS["grid"], layout_pass="off")
+    assert config._restore_for(lyp) == "grid[layout_pass=off]"
     stamps = {config._restore_for(p) for p in
-              (config.GRID_PRESETS["grid"], tweaked, lastr)}
+              (config.GRID_PRESETS["grid"], tweaked, lyp)}
     assert len(stamps) == 3
 
 
 def test_grid_env_overrides_apply(monkeypatch):
     monkeypatch.setenv("MIB_GEOM_SET", "skew,deshred")
-    monkeypatch.setenv("MIB_LAST_RESORT", "psm3")
+    monkeypatch.setenv("MIB_LAYOUT_PASS", "off")
     plan = config.grid_plan()
     assert plan["geom"] == ("skew", "deshred")
-    assert plan["last_resort"] == "psm3"
+    assert plan["layout_pass"] == "off"
 
 
 # ---------------------------------------------------------------------------
@@ -199,3 +200,44 @@ def test_mangled_damage_markers_are_not_values(mangle):
 def test_legit_values_survive_the_marker_check(legit):
     from mib.parse import _damage_markerish
     assert not _damage_markerish(legit)
+
+
+# ---------------------------------------------------------------------------
+# layout-pass firing path: reads_for arms the PSM-3 re-read on truncation only
+
+
+def test_layout_pass_fires_only_on_truncation(monkeypatch):
+    """When armed, reads_for adds one PSM-3 read on a page whose field label is
+    present but its value truncated, and none on a healthy page. Source + OCR are
+    faked, so this needs neither fitz nor tesseract."""
+    import numpy as np
+    gray = np.zeros((4, 4), dtype=np.uint8)
+    monkeypatch.setattr(render, "_sources",
+                        lambda doc, page, tmp: [("render", b"enc", gray)])
+    monkeypatch.setattr(render, "_orientation_chains", lambda *a, **k: [])
+    monkeypatch.setattr(render, "_ocr_optical", lambda: False)   # isolate the layout path
+    monkeypatch.setattr(render.imaging, "orientation_profile",
+                        lambda g: {q: {"skew_deg": 0.0} for q in (0, 1, 3)})
+    monkeypatch.setattr(render.imaging, "to_pnm_bytes", lambda img: b"enc")
+    monkeypatch.setenv("MIB_LAYOUT_PASS", "psm3")
+
+    class FakePage:
+        class rect:
+            width = 100.0
+
+    def run(primary_lines, psm3_lines):
+        def fake_recognize(path, psm, dpi):
+            lines = psm3_lines if psm == render.SECONDARY_PSM else primary_lines
+            return lines, None
+        monkeypatch.setattr(render, "_recognize", fake_recognize)
+        return render.reads_for(object(), FakePage(), 0)
+
+    fired = run(["Home World: Tit"], ["Home World: Titan Freeport"])
+    psm3 = [r for r in fired if r.variant.endswith("+psm3")]
+    assert len(psm3) == 1 and psm3[0].lines == ["Home World: Titan Freeport"]
+
+    healthy = run(["Home World: Titan Freeport", "Species Code: ORION_GRAYS",
+                   "Visa Class: XW-1", "Sponsor ID: SPN-1234",
+                   "Arrival Date: 2026-01-01", "Case ID: MIB-000123"],
+                  ["MUST NOT RUN"])
+    assert not [r for r in healthy if r.variant.endswith("+psm3")]

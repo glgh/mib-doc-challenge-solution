@@ -34,13 +34,16 @@ ROOT = Path(__file__).resolve().parent.parent
 # (2026-07-26) after the grid proved itself (rows 59-60); it lives in git
 # history, and its retired caches are replay-only.
 #
-# The MIB_GEOM_SET / MIB_OPT_SET / MIB_OPT_BASE / MIB_LAST_RESORT env knobs
+# The MIB_GEOM_SET / MIB_OPT_SET / MIB_OPT_BASE / MIB_LAYOUT_PASS env knobs
 # override individual grid fields for A/Bs. Plan identity feeds the `restore`
 # stamp, so require_agreement/verify_render refuse cross-plan joins with no
 # new code.
 GRID_PRESETS = {
+    # layout_pass default-on 2026-07-27 (TODO 6.7): one PSM-3 re-read on a page
+    # whose field label is present but its value truncated. Subset A/B FIXED 3 /
+    # BROKE 0 / CFA 0 + one correct adjudication (362 NR->DENIED); `off` reverts.
     "grid": {"name": "grid", "geom": ("skew", "turn1", "turn3", "deshred", "local"),
-             "opt": ("adapt", "autocon"), "opt_base": "frames", "last_resort": "off"},
+             "opt": ("adapt", "autocon"), "opt_base": "frames", "layout_pass": "psm3"},
 }
 DEFAULT_PLAN = "grid"            # flipped 2026-07-26 (Track 6 Phase 3: dev 124.94 -> 125.35, CFA 0, FIXED 25 / BROKE 0)
 
@@ -54,8 +57,8 @@ def grid_plan():
         plan["opt"] = tuple(t.strip() for t in os.environ["MIB_OPT_SET"].split(",") if t.strip())
     if os.environ.get("MIB_OPT_BASE") in ("raw", "frames"):
         plan["opt_base"] = os.environ["MIB_OPT_BASE"]
-    if os.environ.get("MIB_LAST_RESORT") in ("off", "psm3"):
-        plan["last_resort"] = os.environ["MIB_LAST_RESORT"]
+    if os.environ.get("MIB_LAYOUT_PASS") in ("off", "psm3"):
+        plan["layout_pass"] = os.environ["MIB_LAYOUT_PASS"]
     return plan
 
 
@@ -66,7 +69,7 @@ def _restore_for(plan):
     produces anymore — they refuse to join current artifacts by construction.)"""
     diffs = []
     base = GRID_PRESETS["grid"]
-    for key in ("geom", "opt", "opt_base", "last_resort"):
+    for key in ("geom", "opt", "opt_base", "layout_pass"):
         if plan[key] != base[key]:
             val = ",".join(plan[key]) if isinstance(plan[key], tuple) else plan[key]
             diffs.append(f"{key}={val}")

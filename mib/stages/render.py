@@ -5,9 +5,10 @@ Recipe validated on train scans (docs/experiments.md): Tesseract PSM 11
 (sparse text) recovers structured Key: Value lines where PSM 4/6 fail; embedded
 raster is preferred (already the source image, no re-render cost); pages whose
 embedded image is small or yields nothing are re-rendered at ~200 DPI. A PSM 3
-(full-layout) pass exists only as the grid's last-resort tier (one call on the
-best frame of a still-dead page); the per-image `dual` second pass it replaced
-was deleted with the other legacy knobs (de-special-casing batch, 2026-07-26).
+(full-layout) pass exists only as the grid's layout-pass tier (one call on the
+best frame of a page whose field label is present but its value truncated); the
+per-image `dual` second pass it replaced was deleted with the other legacy knobs
+(de-special-casing batch, 2026-07-26).
 
 Pages that read badly are usually damaged *geometrically* rather than
 optically (turned, skewed, or shredded into offset bands), so every page is
@@ -65,7 +66,7 @@ RENDER_ZOOM = 2.8       # ~200 DPI floor
 MAX_RENDER_ZOOM = 4.2   # ~300 DPI cap
 
 # Page-segmentation modes. PSM 11 (sparse) is the primary the corpus was tuned
-# on; PSM 3 (full auto layout) runs only in the grid's last-resort tier.
+# on; PSM 3 (full auto layout) runs only in the grid's layout-pass tier.
 PRIMARY_PSM = 11
 SECONDARY_PSM = 3
 
@@ -378,10 +379,11 @@ def reads_for(doc, page, page_no):
     orientation's correction chain unconditionally (each turn frame gets its
     OWN in-frame corrections, hint-ordered; gating turns on page-level weakness
     was offline-proven unsafe the day it was designed — see the base-tier
-    comment); when the page still reads weak (frozen `page_score` < WEAK_BAR),
-    expand with the optical modules composed over the corrected frames, not
-    just raw gray; a still-dead page may get one last-resort PSM-3 pass on its
-    best frame. Expansion only ever ADDS beyond the unconditional base — the
+    comment); when the page still reads weak (extraction_gaps.weak), expand with
+    the optical modules composed over the corrected frames, not just raw gray; a
+    page whose field label is present but its value truncated (extraction_gaps.
+    truncated) gets one layout-pass PSM-3 read on its best frame. Expansion only
+    ever ADDS beyond the unconditional base — the
     early stop that truncated coverage measured −0.21 (row 16) and stays
     impossible by construction. Pixel-hash dedupe keeps no-op compositions
     from paying an OCR pass.
@@ -465,14 +467,12 @@ def reads_for(doc, page, page_no):
             for q in (0, 1, 3):
                 emit_orientation(name, gray, q)
 
-        def weak():
-            if not reads:
-                return True
-            return max(page_score(r.lines) for r in reads) < WEAK_BAR
-
         # Expansion tier: optical composition over the corrected frames, only
-        # while the page still reads weak.
-        if weak():
+        # while the page still reads weak. `weak` is the injection-immune
+        # assessment (extraction_gaps) — bait never counts as evidence; the
+        # census proved this moves the optical gate on zero pages vs the raw
+        # page_score it replaced (TODO 6.7 slice B).
+        if extraction_gaps(reads).weak:
             if _ocr_optical() and opt:
                 for name, encoded, gray in sources:
                     if plan["opt_base"] == "frames":
@@ -485,16 +485,19 @@ def reads_for(doc, page, page_no):
                         for mod in opt:
                             read_image(_OPTICAL_MODULES[mod](image),
                                        "+".join((name,) + chain + (mod,)))
-        # Last-resort tier: one full-layout pass on the best frame of a page
-        # nothing else could read (row 20's +0.87 recipe, affordable only
-        # because it is one call per still-dead page, never per image).
-        if plan["last_resort"] == "psm3" and weak():
+        # Full-layout re-read: one PSM-3 pass on the best frame when a field's
+        # label is present but its value reached no read (the truncation tell —
+        # row 67's image-box class, e.g. `Home World: Tit`). One call per
+        # triggered page. Weak/faint pages are deliberately NOT a trigger: PSM-3
+        # is null on the distress class (row 76), and the census priced the
+        # weak/furniture arms as pure over-fire (TODO 6.7 slice B).
+        if plan["layout_pass"] == "psm3" and extraction_gaps(reads).truncated:
             candidates = [r for r in reads if r.variant in frame_images]
             if candidates:
                 top = max(candidates,
                           key=lambda r: (conf_excess_mass(r) or 0.0, r.variant))
                 read(imaging.to_pnm_bytes(frame_images[top.variant]),
-                     top.variant + "+psm3", only_psm=SECONDARY_PSM)
+                     top.variant, only_psm=SECONDARY_PSM)
     return reads
 
 
