@@ -139,6 +139,15 @@ def adjudicate(values, sig):
     for name, fires in REVIEW_RULES:
         if fires(c):
             return "NEEDS_REVIEW", name
+    # A hidden injected key claiming APPROVED caps the only unforced approval at
+    # NEEDS_REVIEW: a signed adjudicator finding (tier 0) and every denial have
+    # already been decided above, so this touches clean_approve alone and only
+    # ever in the CFA-safe direction. The key's presence triggers caution; its
+    # content is never trusted. No-op on train (0 clean_approves carry one);
+    # insurance for the one uncovered CFA route (a private embargo world sailing
+    # to clean_approve while carrying the generator's lying approval key).
+    if sig.get("injected_approval"):
+        return "NEEDS_REVIEW", "injected_approval_review"
     return "APPROVED", "clean_approve"
 
 

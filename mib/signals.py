@@ -327,6 +327,9 @@ def derive(packet, values):
         "flags": flags,
         "emit_flags": observed,
         "finding": adjudicator_finding(packet),
+        # An injection-shaped hidden line claiming APPROVED caps an unforced
+        # approval at NEEDS_REVIEW (policy). Presence only — never a value source.
+        "injected_approval": packet.injected_approval,
         "waiver_code": waiver_code(packet),
         # Presence counts LOSING variants too (fourth application of the
         # losing-variants principle, after the flag union, the finding

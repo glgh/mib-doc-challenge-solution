@@ -12,6 +12,13 @@ from .records import Candidate, best_read
 SRC_TEXT = 0  # clean digital text layer
 SRC_OCR = 1   # OCR of scan pixels — same doc type ranks below its text-layer peer
 
+# An injection-shaped hidden line whose decision payload claims APPROVED (the
+# `answer key ... ,APPROVED,0.99` shape). Its PRESENCE caps an unforced approval
+# at NEEDS_REVIEW (policy.adjudicate); its content is never trusted or sourced.
+# Matched on the already-lowercased, INJECTION_RE-gated `hidden_norm` set, so it
+# inherits the blinding-attack guard (only injection-shaped lines qualify).
+_INJECTED_APPROVAL_RE = re.compile(r"\bapproved\b\W{0,3}0\.\d\d")
+
 
 @dataclass
 class Packet:
@@ -19,6 +26,7 @@ class Packet:
     docs: list = field(default_factory=list)  # [(doc_type, source, kv)] sorted by trust
     variant_docs: list = field(default_factory=list)  # [(doc_type, kv)] from losing OCR variants
     scan_only_pages: int = 0                  # pages with an image but ~no visible text
+    injected_approval: bool = False           # an injection-shaped hidden line claims APPROVED
 
     def doc(self, dtype):
         return next((kv for d, _, kv in self.docs if d == dtype), {})
@@ -186,6 +194,7 @@ def assemble(pages, reads_by_page, fallback_case_id):
     hidden_norm = [h for h in hidden_norm if len(h) >= 20]
 
     packet = Packet(case_id=case_id)
+    packet.injected_approval = any(_INJECTED_APPROVAL_RE.search(h) for h in hidden_norm)
     for pt in pages:
         lines, source, conf = (pt.visible_lines, SRC_TEXT, None)
         if pt.is_scan_only:

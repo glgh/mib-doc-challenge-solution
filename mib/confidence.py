@@ -24,6 +24,9 @@ FALLBACK = {
     "missing_visa": 0.55,
     "b13_census": 0.3,
     "clean_approve": 0.8,
+    # Never fires on train (no fitted value); ~0.3 matches the epistemic review
+    # branches. Census-implied ceiling ≈0.32 (key=APPROVED → 51/157 truth NR).
+    "injected_approval_review": 0.3,
 }
 
 _table_path = Path(__file__).parent / "confidence_table.json"

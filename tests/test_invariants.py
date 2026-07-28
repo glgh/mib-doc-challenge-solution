@@ -156,27 +156,71 @@ def test_hidden_text_cannot_make_the_output_more_assertive(cases):
         + "\n  ".join(influenced))
 
 
-def test_an_injected_answer_key_is_ignored(cases):
+def test_an_injected_answer_key_is_never_followed(cases):
     """The same property against an injection the corpus never showed us.
 
     The blanking test proves the pipeline ignores the hidden text that is there;
     this proves it ignores hidden text that is not, so a future parser change
     that starts reading hidden lines fails here even on cases whose real injected
     key happens to agree with the visible evidence.
+
+    Refined from strict equality when the injected-approval cap landed
+    (policy.injected_approval_review): a hidden key claiming APPROVED now caps an
+    unforced approval at NEEDS_REVIEW, so the poisoned run may become LESS
+    approving. What it must never do is *follow* the key — adopt a planted value,
+    add a flag, or make the adjudication more approving. Same one-permitted-
+    direction shape as test_hidden_text_cannot_make_the_output_more_assertive.
     """
+    rank = {"DENIED": 0, "NEEDS_REVIEW": 1, "APPROVED": 2}
+    fallbacks = {"unknown", "none", "SPN-0000", "1900-01-01"}
     influenced = []
     for case in cases[:25]:
         clean, _ = predict(case)
         poisoned_pages = [{**p, "hidden_lines": list(p["hidden_lines"]) + [HOSTILE_KEY]}
                           for p in case["pages"]]
         poisoned, _ = predict(case, pages=poisoned_pages)
-        if clean != poisoned:
-            moved = {k: (clean.get(k), poisoned.get(k))
-                     for k in clean if clean.get(k) != poisoned.get(k)}
-            influenced.append(f"{case['stem']}: {moved}")
+        for k in ("applicant_name", "species_code", "home_world", "visa_class",
+                  "sponsor_id", "arrival_date", "declared_purpose", "fee_status"):
+            if poisoned[k] != clean[k] and str(poisoned[k]) not in fallbacks:
+                influenced.append(
+                    f"{case['stem']}: key changed {k} {clean[k]!r} -> {poisoned[k]!r}")
+        cf = set(clean["risk_flags"].split("|")) - {"none"}
+        pf = set(poisoned["risk_flags"].split("|")) - {"none"}
+        if not pf <= cf:
+            influenced.append(f"{case['stem']}: key ADDED flags {pf - cf}")
+        if rank[poisoned["adjudication"]] > rank[clean["adjudication"]]:
+            influenced.append(
+                f"{case['stem']}: key moved adjudication "
+                f"{clean['adjudication']} -> {poisoned['adjudication']}")
     assert not influenced, (
-        "an injected answer key changed the emitted record:\n  "
-        + "\n  ".join(influenced))
+        "an injected answer key was followed:\n  " + "\n  ".join(influenced))
+
+
+def test_injected_approval_caps_a_clean_approve(cases):
+    """The defensive cap fires exactly where it should: a hidden key claiming
+    APPROVED demotes a clean approval to NEEDS_REVIEW (via injected_approval_
+    review), and touches nothing else — a signed finding still approves, a denial
+    still denies. This is the positive counterpart to the never-followed test.
+    """
+    seen = {"clean_approve": 0, "adjudicator_finding_APPROVED": 0, "DENIED": 0}
+    for case in cases:
+        clean, dbg = predict(case)
+        poisoned_pages = [{**p, "hidden_lines": list(p["hidden_lines"]) + [HOSTILE_KEY]}
+                          for p in case["pages"]]
+        poisoned, pdbg = predict(case, pages=poisoned_pages)
+        if dbg["branch"] == "clean_approve":
+            seen["clean_approve"] += 1
+            assert poisoned["adjudication"] == "NEEDS_REVIEW", case["stem"]
+            assert pdbg["branch"] == "injected_approval_review", case["stem"]
+        elif dbg["branch"] == "adjudicator_finding" and clean["adjudication"] == "APPROVED":
+            seen["adjudicator_finding_APPROVED"] += 1
+            assert poisoned["adjudication"] == "APPROVED", (
+                f"{case['stem']}: a signed approval finding must survive the cap")
+        elif clean["adjudication"] == "DENIED":
+            seen["DENIED"] += 1
+            assert poisoned["adjudication"] == "DENIED", case["stem"]
+    # the fixture must actually exercise the cap, or this test proves nothing
+    assert seen["clean_approve"] > 0, "no clean_approve case in the fixture to cap"
 
 
 def test_emitted_flags_exclude_policy_only_inferences(cases, actual):
@@ -231,6 +275,7 @@ def _branch_probes():
         ({"sponsor_id": None}, {}),
         ({"visa_class": None}, {}),
         ({}, {"has_flag_evidence": False}),
+        ({}, {"injected_approval": True}),            # injected_approval_review
         ({}, {}),                                     # clean_approve
     ]
     for value_over, sig_over in overrides:
@@ -297,7 +342,7 @@ def test_policy_tier_names_are_complete_and_disjoint():
     deny = set(policy.DENY_BRANCHES)
     review = set(policy.REVIEW_BRANCHES)
     assert not deny & review, f"branches in both tiers: {sorted(deny & review)}"
-    special = {"adjudicator_finding", "clean_approve"}
+    special = {"adjudicator_finding", "clean_approve", "injected_approval_review"}
     assert not (deny | review) & special
     assert deny | review | special == set(confidence.FALLBACK)
 
