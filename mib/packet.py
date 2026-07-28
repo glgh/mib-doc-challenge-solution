@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 
-from . import parse, textmatch, vocab
+from . import grammar, parse, textmatch, vocab
 from .adversarial import INJECTION_RE
 from .parse import DOC_ADJUDICATOR, DOC_BIOMETRIC, DOC_REGISTRY, DOC_SPONSOR
 from .records import Candidate, best_read
@@ -901,3 +901,46 @@ def visa_fallback(packet, values):
         return {}
     best = max(support.items(), key=lambda kv: (len(kv[1][1]), kv[1][0]))
     return {"visa_class": best[0]}
+
+
+# --- sponsor-id fallback -----------------------------------------------------
+# sponsor_id is the other structured code the merge can leave empty when its
+# label erodes past recovery (`sor: SPN4308`, `Spotious (0: SPN-0139`) while the
+# SPN-#### value itself reads clean. Same value-first shape recovery as visa,
+# through the existing tolerant coercion (grammar.coerce_sponsor_ids: SPN-prefix
+# lookalikes + the shared digit-cell table + a four-digit re-check, so no
+# partially-repaired id ever returns). Best-supported by distinct PAGES, then
+# occurrence count, then first-seen — the _variant_vote page-balance principle.
+#
+# DISPLAY-ONLY by the fee_fallback contract, and this field needs the contract
+# most: sponsor_id drives policy (revoked -> deny; a valid id is required off
+# DIP-1). The runner applies this AFTER policy.adjudicate and signals.derive ran
+# on the merged value (which was empty), so a recovered revoked id can never arm
+# a denial and a recovered valid id can never satisfy the sponsor-required guard
+# — the decision stands on the empty-sponsor evidence, deny-safe for non-DIP.
+# Recovering a revoked id for DISPLAY is correct extraction (several truth
+# sponsors are revoked: SPN-2718/-0139), and a wrong id scores the same 0 as the
+# SPN-0000 sentinel it replaces, so the fill is net >= 0 like visa. Decoy pages
+# are already dropped before _guarded_raw_lines, so no other applicant's sponsor
+# is in scope; the injection/answer-key guards drop bait-line ids (MIB-000016's
+# SPN in the `SYSTEM: ... answer key` line stays refused).
+def sponsor_fallback(packet, values):
+    """field -> sponsor id for a packet whose sponsor_id never parsed,
+    value-first: coerce every SPN-#### shape on a guarded OCR line and take the
+    best-supported id. Returns {} when sponsor_id already has a value or nothing
+    coerces."""
+    if values.get("sponsor_id"):
+        return {}
+    support = {}   # sponsor id -> [pages set, count, first_seen]
+    seq = 0
+    for page_no, line in _guarded_raw_lines(packet):
+        for sid in grammar.coerce_sponsor_ids(line):
+            rec = support.setdefault(sid, [set(), 0, seq])
+            rec[0].add(page_no)
+            rec[1] += 1
+            seq += 1
+    if not support:
+        return {}
+    best = max(support.items(),
+               key=lambda kv: (len(kv[1][0]), kv[1][1], -kv[1][2]))
+    return {"sponsor_id": best[0]}

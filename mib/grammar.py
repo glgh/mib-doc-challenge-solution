@@ -117,6 +117,21 @@ def coerce_sponsor_id(value):
     return f"SPN-{cell}"
 
 
+def coerce_sponsor_ids(text):
+    """Every well-formed sponsor id recoverable from a text, in order.
+
+    The plural of `coerce_sponsor_id` (which returns only the first match): the
+    value-first sponsor fallback scans whole lines and wants each SPN-#### shape
+    present, so it can vote across pages. Same tolerant prefix + digit-cell
+    translation + four-digit re-check — no partially-repaired value ever returns."""
+    out = []
+    for m in _SPONSOR_TOLERANT.finditer(text or ""):
+        cell = m.group(1).translate(_DIGIT_CELL_TABLE)
+        if _FOUR_DIGITS.fullmatch(cell):
+            out.append(f"SPN-{cell}")
+    return out
+
+
 def coerce_arrival_date(value):
     """A YYYY-MM-DD date pulled from a mangled read, or None.
 
