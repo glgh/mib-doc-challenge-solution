@@ -400,24 +400,38 @@ def realign_local(gray):
             start = None
     pitch = float(np.median(np.diff(centers))) if len(centers) >= 3 else 20.0
     w = max(int(round(pitch / 2)), 4)
+    # One physical cut can smear across a few rows — the border offset ramps over
+    # 2-3 steps (e.g. -2 -> 26 -> 68) instead of one clean jump, so `diff` reports
+    # several seams within a line-pitch. The glyph-half correlation below reads a
+    # half-pitch window each side, so it always sees the FULL ramp displacement;
+    # scoring that against a single sub-step's jump double-counts and re-shears a
+    # title the border already reassembled (900 p2 "Manual Adjudicator Note"). So
+    # coalesce seams within `w` into one run and correct each run ONCE, against its
+    # total drop. A lone seam is a run of one (a == b) — identical to before.
+    runs = []
+    for s in seams:
+        if runs and s - runs[-1][1] <= w:
+            runs[-1] = (runs[-1][0], s)
+        else:
+            runs.append((s, s))
     p2 = profile.copy()
-    for i, s in enumerate(seams):
-        above_mass = float(prof[max(0, s - SEAM_WIN + 1):s + 1].sum())
-        below_mass = float(prof[s + 1:s + 1 + SEAM_WIN].sum())
+    for i, (a, b) in enumerate(runs):
+        above_mass = float(prof[max(0, a - SEAM_WIN + 1):a + 1].sum())
+        below_mass = float(prof[b + 1:b + 1 + SEAM_WIN].sum())
         if above_mass < TEXT_MASS_MIN or below_mass < TEXT_MASS_MIN:
             continue                   # not a text-cutting seam
-        above = ink[max(0, s - w + 1):s + 1].sum(axis=0)
-        below = ink[s + 1:s + 1 + w].sum(axis=0)
+        above = ink[max(0, a - w + 1):a + 1].sum(axis=0)
+        below = ink[b + 1:b + 1 + w].sum(axis=0)
         if above.sum() < TEXT_MASS_MIN or below.sum() < TEXT_MASS_MIN:
             continue
         local, corr = _best_shift_corr(below, above)
         if corr < LOCAL_MIN_CORR or abs(local) >= LOCAL_MAX_SHIFT:
             continue
-        delta = float(profile[s] - profile[s + 1]) - local
+        delta = float(profile[a] - profile[b + 1]) - local
         if not delta:
             continue
-        nxt = seams[i + 1] if i + 1 < len(seams) else len(profile) - 1
-        p2[s + 1:nxt + 1] += delta
+        nxt = runs[i + 1][0] if i + 1 < len(runs) else len(profile) - 1
+        p2[b + 1:nxt + 1] += delta
     reference = np.nanmedian(p2)
     out = gray.copy()
     moved = False

@@ -259,7 +259,18 @@ def identity_conflict(packet, values):
     return True
 
 
-_FINDING_RE = re.compile(r"Finding:\s*(APPROVED|DENIED|NEEDS_REVIEW)")
+# A scanned note's Finding line survives shred/deskew but not verbatim: OCR reads
+# the `NEEDS_REVIEW` underscore as a space and sometimes drops the label colon
+# (MIB-000900 p2: `Manual Adjudicator Note` reunited by the deshred fix, but its
+# finding OCR'd `Finding NEEDS REVIEW`). Tolerate both — the three decision tokens
+# stay distinct, so a loosened separator can never turn a DENIED into an APPROVED
+# — and normalize the space back to the underscore the enum expects.
+_FINDING_RE = re.compile(r"Finding[:.]?\s*(APPROVED|DENIED|NEEDS[ _]REVIEW)")
+
+
+def _finding_in(lines):
+    m = _FINDING_RE.search(" ".join(lines))
+    return m.group(1).replace(" ", "_") if m else None
 
 
 def adjudicator_finding(packet):
@@ -272,19 +283,35 @@ def adjudicator_finding(packet):
     differently, so they answer — but only unanimously: two variants reading
     different findings is a misread by construction (one page, one stamp), and
     fabricating a winner from that is worse than letting the cascade decide.
+
+    The finding line is not gated on the page typing as an adjudicator note. A
+    skewed+shredded note has its TITLE destroyed while the `Finding:` line reads
+    clean (964 p1: +5° skew doubles `Manual Adjudicator Note` into `MARHeaeF
+    Note` — typed OTHER — yet every variant reads `Finding: NEEDS_REVIEW`, the
+    truth). The finding line is its own fingerprint: over all 1,000 train cases
+    every `Finding:` line is unanimous across reads AND matches the label
+    (333/333, experiments/finding_census.py), and 9 cases carry a correct finding
+    the title gate was discarding (105/141/142/390/608/615/900/964/986 — 141 a
+    live false NEEDS_REVIEW on a truth-DENIED). Trust rests on three guards: the
+    tokens are distinct so a loosened read can't cross DENIED↔APPROVED; `_raw` is
+    visible+OCR only, so hidden/injected findings never reach here and assemble
+    has already dropped cross-applicant decoy pages; and unanimity means a lone
+    misread inventing a second value declines to a null, never a fabricated one.
     """
     adjudicator = packet.adjudicator
     if adjudicator:
-        m = _FINDING_RE.search(" ".join(adjudicator.get("_raw", [])))
-        if m:
-            return m.group(1)
+        found = _finding_in(adjudicator.get("_raw", []))
+        if found:
+            return found
     seen = set()
-    for dtype, kv in packet.variant_docs:
-        if dtype != parse.DOC_ADJUDICATOR:
-            continue
-        m = _FINDING_RE.search(" ".join(kv.get("_raw", [])))
-        if m:
-            seen.add(m.group(1))
+    for _dtype, _src, kv in packet.docs:
+        found = _finding_in(kv.get("_raw", []))
+        if found:
+            seen.add(found)
+    for _dtype, kv in packet.variant_docs:
+        found = _finding_in(kv.get("_raw", []))
+        if found:
+            seen.add(found)
     if len(seen) == 1:
         return seen.pop()
     return None
