@@ -33,3 +33,10 @@ Barnard-c (NOT an embargo world), MED-3, Planetary Registry `Registry Status: CL
 2. **`b13_census` damage-marker gap** — a damage-marker `observed_flags` value must not count as flag evidence in `has_flag_evidence`.
 
 The injected-approval cap remains a valid CFA-safe backstop, but these two rules are the stronger, injection-independent fix and should be evaluated on train (both are visible-evidence, so they can score and be verified against labels there).
+
+## Resolution (2026-07-28)
+
+Self-review for overfitting (user-requested) split the two proposed fixes:
+
+- **Fix 1 (registry `EMBARGO REVIEW` → NR): DROPPED — confounded / overfit-prone.** All 33 train `EMBARGO REVIEW` cases are decided by an independent signal (adjudicator_finding 12, disqualifying_flag 11, embargo_world 7, embargo_world_partial 2, b13_census 1); 32/33 sit on an embargo world. The status does **zero independent work**, so "0/33 approved" is a confounded correlation, and its active cell (an `EMBARGO REVIEW` case reaching `clean_approve`) is empty on train. A rule keyed on it would exist only to demote the single val case 101247, inventing an unstated "EMBARGO REVIEW overrides the DIP exemption" policy the field manual does not state. Corollary: 101247 (and clean-MED-3 101982) may in fact be approvable, so the cap's demotion of them rests on the anti-diagonal extrapolated into a cell train never populates — hold those cap firings with an asterisk.
+- **Fix 2 (b13 damage-marker): SHIPPED as a correctness fix (experiments row 91).** `has_flag_evidence` counting a `[RISK PANEL MISSING]` value as evidence is a logic error independent of any case; the fix makes existing code honor its contract. 0 train decision changes (the 1 case, MIB-000980, is already denied); CFA-safe; generalizes to no-key packets.

@@ -313,6 +313,28 @@ def test_flag_extraction_survives_label_damage_and_trailing_punctuation():
     assert signals.observed_flags(note) == {"planetary_embargo"}
 
 
+def test_damage_marker_risk_panel_is_not_flag_evidence():
+    """A B-13 whose `Observed flags` value is a damage marker ('[RISK PANEL
+    MISSING]') means the risk panel was NOT read, not that it read clean. It must
+    not count as flag evidence, so b13_census can catch the concealed-risk shape
+    (MIB-103477: parsed value non-None slipped past has_flag_evidence's `is not
+    None` check, clean-approving a case with no readable panel). A real 'none'
+    still counts."""
+    from mib import signals
+    from mib.packet import SRC_OCR, Packet
+
+    missing = Packet(case_id="MIB-000000")
+    missing.docs = [(parse.DOC_BIOMETRIC, SRC_OCR,
+                     {"observed_flags": "[RISK PANEL MISSING]",
+                      "_raw": ["Observed flags: [RISK PANEL MISSING]"]})]
+    assert signals.has_flag_evidence(missing) is False
+
+    clear = Packet(case_id="MIB-000001")
+    clear.docs = [(parse.DOC_BIOMETRIC, SRC_OCR,
+                   {"observed_flags": "none", "_raw": ["Observed flags: none"]})]
+    assert signals.has_flag_evidence(clear) is True
+
+
 def test_multi_flag_value_recovers_a_shattered_second_flag():
     """A two-flag `Observed flags:` value where the token path resolves the
     legible flag and the second is OCR-shattered past any token. The whole-value

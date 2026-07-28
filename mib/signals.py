@@ -186,7 +186,13 @@ def has_flag_evidence(packet, observed=None):
     bios = [packet.biometric] + [kv for d, kv in packet.variant_docs
                                  if d == parse.DOC_BIOMETRIC]
     for bio in bios:
-        if bio.get("observed_flags") is not None:   # parsed key present (incl. 'none')
+        ov = bio.get("observed_flags")
+        # A parsed value (incl. 'none') is a read risk line — UNLESS it is a
+        # damage marker ('[RISK PANEL MISSING]'), which says the panel is missing,
+        # not read. Counting it as evidence contradicts this function's contract
+        # and lets `b13_census` clean_approve a concealed-risk packet (the CFA
+        # direction the rule exists to block).
+        if ov is not None and not parse._damage_markerish(str(ov)):
             return True
         for line in bio.get("_raw", []):
             low = line.lower()
