@@ -85,11 +85,15 @@ def predict_from_evidence(pages, reads_by_page, stem):
     values = packet.merge_fields(pkt, provenance)
     sig = signals.derive(pkt, values)
     decision, branch = policy.adjudicate(values, sig)
-    conf = confidence.for_branch(branch)
-    # Every fired predicate per tier — the per-case co-fire matrix. Sidecar
-    # only: adjudicate() above already decided from the first hit of the
-    # highest non-empty tier.
+    # Every fired predicate per tier — the per-case co-fire matrix, used by the
+    # debug sidecar and the cell-keyed confidence bit below. adjudicate() above
+    # already decided from the first hit of the highest non-empty tier.
     deny_hits, review_hits = policy.fired(values, sig)
+    # Cell-keyed confidence (TODO 5.7): a would-be-review decision corroborated
+    # by a second, independent review_flag is empirically more often correct.
+    # Confidence only — the decision and branch are already fixed above.
+    review_cofire = "review_flag" in review_hits and branch != "review_flag"
+    conf = confidence.for_case(branch, review_cofire)
     # Display-only fee inference (packet.fee_fallback): adjudication and branch
     # confidence were decided above on the merged evidence value, so an imputed
     # fee can improve extraction but never flip a decision.

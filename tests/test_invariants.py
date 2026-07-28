@@ -300,3 +300,27 @@ def test_policy_tier_names_are_complete_and_disjoint():
     special = {"adjudicator_finding", "clean_approve"}
     assert not (deny | review) & special
     assert deny | review | special == set(confidence.FALLBACK)
+
+
+def test_cell_keyed_confidence_refines_review_pools_and_backs_off():
+    """TODO 5.7: a co-firing review_flag inside a would-be-review branch lifts
+    confidence (two independent review reasons agreeing is more often correct);
+    every fitted cell round-trips its stored value, no fitted cell is a no-op
+    split, and a branch with no cell backs off to the per-branch value exactly.
+    Confidence-only — no decision or branch is a function of this bit."""
+    from mib import confidence
+
+    assert confidence._CELLS, "cell table missing — refit with fit_confidence.py"
+    for branch, bits in confidence._CELLS.items():
+        assert confidence.for_case(branch, True) == bits["1"]
+        assert confidence.for_case(branch, False) == bits["0"]
+        assert bits["1"] != bits["0"], f"{branch} shipped a no-op cell split"
+    # the fitted pools are review-tier and lift on co-fire
+    for branch in ("fee_unknown", "waived_non_dip"):
+        assert branch in confidence._CELLS
+        assert confidence.for_case(branch, True) > confidence.for_case(branch, False)
+    # an unsplit branch is bit-independent and equals the per-branch value
+    assert "clean_approve" not in confidence._CELLS
+    assert (confidence.for_case("clean_approve", True)
+            == confidence.for_case("clean_approve", False)
+            == confidence.for_branch("clean_approve"))
