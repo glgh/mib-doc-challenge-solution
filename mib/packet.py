@@ -789,10 +789,15 @@ def _gram_sims(tokens, targets):
     return best
 
 
-def _scan_lines(packet):
-    """Every distinct injection-guarded OCR line the merge consults, tokenized."""
+def _guarded_raw_lines(packet):
+    """(page_no, raw line) for every distinct injection-guarded OCR line the
+    merge consults — the shared substrate under both value-first fallbacks.
+
+    Dedup is per (page, normalized text); the answer-key and injection guards are
+    the same ones the closed-vocab scan has always applied. `_scan_lines` keeps
+    the tokenized form the gram scan wants; `visa_fallback` needs the raw line so
+    the letter-digit code shape (and its separator) survives."""
     seen = set()
-    out = []
     for kv in ([kv for _dt, kv in packet.variant_docs] +
                [kv for _dt, src, kv in packet.docs if src == SRC_OCR]):
         page_no = kv.get("_page_no")
@@ -805,8 +810,13 @@ def _scan_lines(packet):
             if len(key[1]) < 4 or key in seen:
                 continue
             seen.add(key)
-            out.append(re.findall(r"[a-z0-9]+", line.lower()))
-    return out
+            yield page_no, line
+
+
+def _scan_lines(packet):
+    """Every distinct injection-guarded OCR line the merge consults, tokenized."""
+    return [re.findall(r"[a-z0-9]+", line.lower())
+            for _page_no, line in _guarded_raw_lines(packet)]
 
 
 def closed_vocab_fallback(packet, values):
@@ -844,3 +854,50 @@ def closed_vocab_fallback(packet, values):
         if e[0] >= _SCAN_ACCEPT or e[2] >= _SCAN_LABEL_BAR:
             fills[fname] = entry
     return fills
+
+
+# --- visa-class fallback -----------------------------------------------------
+# visa_class is the fifth closed vocabulary, but it is a short STRUCTURED code
+# (2-7 letters + a digit: XW-1, DIP-1, TRANSIT-7), not a word-like entry, so the
+# gram scan closed_vocab_fallback runs cannot recover it: XW-1/XW-2/DIP-1/MED-3
+# normalize to 3-4 chars and never clear that scan's `len(gram) >= 4` gate, and a
+# 3-char confusion-weighted match is one glyph from noise anyway. It is recovered
+# the way the other structured codes (sponsor_id, case_id, arrival_date) are —
+# find the code SHAPE on a guarded line and snap it through the same margin-
+# guarded weighted matcher (vocab.snap, bar 0.65 / margin 0.05). A trailing digit
+# is the precision gate: ordinary words carry none, so none can masquerade as a
+# visa; an OCR digit->letter garble (`XW-I`) is missed rather than guessed — the
+# deny-safe miss, since an emitted wrong visa and an emitted 'unknown' both score
+# the same 0.
+#
+# DISPLAY-ONLY by the fee_fallback contract: the runner applies this after
+# policy.adjudicate, so a recovered TRANSIT-7 can never arm a denial and a
+# recovered DIP-1 can never waive a fee or exempt a sponsor (policy already
+# treats a missing visa as deny-safe — corpus.py). The same injection/answer-key
+# guards as the closed-vocab scan apply (shared `_guarded_raw_lines`).
+_VISA_SHAPE_RE = re.compile(r"[A-Za-z]{2,8}[-\s._~]{0,2}\d")
+
+
+def visa_fallback(packet, values):
+    """field -> canonical visa for a packet whose visa_class never parsed,
+    value-first: snap every visa-shaped token on a guarded OCR line and take the
+    best-supported vocabulary hit — distinct contributing PAGES first (fan-out of
+    one page's variants cannot fake cross-page agreement, the _variant_vote
+    principle), then snap similarity. Returns {} when visa_class already has a
+    value or nothing snaps."""
+    if values.get("visa_class"):
+        return {}
+    support = {}   # canonical visa -> [best_sim, {pages}]
+    for page_no, line in _guarded_raw_lines(packet):
+        for m in _VISA_SHAPE_RE.finditer(line):
+            snapped = vocab.snap("visa_class", m.group(0))
+            if not snapped:
+                continue
+            sim = vocab._weighted_sim(_vnorm(m.group(0)), _vnorm(snapped))
+            rec = support.setdefault(snapped, [0.0, set()])
+            rec[0] = max(rec[0], sim)
+            rec[1].add(page_no)
+    if not support:
+        return {}
+    best = max(support.items(), key=lambda kv: (len(kv[1][1]), kv[1][0]))
+    return {"visa_class": best[0]}

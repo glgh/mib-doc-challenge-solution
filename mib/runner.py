@@ -103,10 +103,12 @@ def predict_from_evidence(pages, reads_by_page, stem):
     review_cofire = "review_flag" in review_hits and branch != "review_flag"
     conf = confidence.for_case(branch, review_cofire,
                                values.get("fee_status") == "paid")
-    # Display-only closed-vocab rescue (packet.closed_vocab_fallback): same
-    # contract — a filled species/world/purpose earns extraction points but can
-    # never arm an embargo branch or disarm a missing-field guard.
+    # Display-only closed-vocab rescue: a filled species/world/purpose (gram
+    # scan) or visa_class (code-shape snap) earns extraction points but can never
+    # arm a branch (embargo, TRANSIT-7 denial) or disarm a missing-field guard —
+    # both run after the decision above on the same contract.
     vocab_fills = packet.closed_vocab_fallback(pkt, values)
+    vocab_fills.update(packet.visa_fallback(pkt, values))
     values.update(vocab_fills)
     record = emit.build_record(pkt.case_id, values, sig["emit_flags"], decision, conf)
     debug = {
