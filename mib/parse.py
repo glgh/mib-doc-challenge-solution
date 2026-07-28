@@ -71,9 +71,55 @@ _FUZZY_HEADERS = [
     ("fee receipt", DOC_FEE),
 ]
 
+# How far down to look for a title, counted in NON-EMPTY lines. Deskew and crop
+# leave blank or single-glyph debris above the header ("", "TT", "3", "Fe"),
+# pushing an otherwise-clean title onto line 5+ where a raw lines[:4] window never
+# looks (train OTHER census: registry/adjudicator/fee titles landing below it).
+# Counting non-empty lines skips the debris; the bound keeps typing in the header
+# region and out of a body that merely names another document.
+HEADER_WINDOW = 6
+
+# OCR-tolerant title match, reached only after the substring fast paths miss. The
+# short code is the least reliable token ("FORM I-8090" -> "FORM |-8080" /
+# "1-8090" / "7-8090"), but the full marker survives OCR well enough that a fuzzy
+# edit-distance match recovers it — and unlike a glyph-confusion map it also
+# absorbs digit corruption, dropped letters ("Attestaton"), and wholesale word
+# damage ("Biometric Scan Slip" -> "Berets Ger Se") with one rule. Calibrated on
+# the 837 train OTHER pages: best-marker partial ratio separates real mangled
+# titles from furniture, whose ratio floors at <=0.6. The cutoff sits above that
+# floor, not on the score: every OTHER page it recovers (~170, mostly intake)
+# eyeballs as a real header, and re-typing only ever moves OTHER -> known (a
+# confidently-typed page returns before this stage), never one known type to
+# another.
+HEADER_FUZZY_CUTOFF = 0.80
+_MARKERS_LOW = [(m.lower(), dt) for m, dt in DOC_HEADERS]
+
+
+def _title_ratio(marker_low, line_low):
+    """Best difflib ratio of `marker_low` against any equal-length window of the
+    line. Partial (windowed) so leading/trailing debris on the header line
+    ("nsor Attestation Letter", "... Intake _") does not dilute the score."""
+    w = len(marker_low)
+    if len(line_low) <= w:
+        return difflib.SequenceMatcher(None, marker_low, line_low).ratio()
+    sm = difflib.SequenceMatcher()
+    sm.set_seq1(marker_low)
+    best = 0.0
+    for i in range(len(line_low) - w + 1):
+        sm.set_seq2(line_low[i:i + w])
+        if sm.quick_ratio() <= best:      # cheap upper bound prunes most windows
+            continue
+        r = sm.ratio()
+        if r > best:
+            best = r
+            if best == 1.0:
+                break
+    return best
+
 
 def detect_doc_type(lines):
-    head = " ".join(lines[:4])
+    window = [ln for ln in lines if ln.strip()][:HEADER_WINDOW]
+    head = " ".join(window)
     for marker, dtype in DOC_HEADERS:
         if marker in head:
             return dtype
@@ -81,7 +127,17 @@ def detect_doc_type(lines):
     for token, dtype in _FUZZY_HEADERS:
         if token in low:
             return dtype
-    return DOC_OTHER
+    # OCR-mangled title the substring paths cannot see: fuzzy-match the markers.
+    best_r, best_dt = HEADER_FUZZY_CUTOFF, DOC_OTHER
+    for ln in window:
+        low_ln = ln.strip().lower()
+        if len(low_ln) < 5:
+            continue
+        for marker_low, dtype in _MARKERS_LOW:
+            r = _title_ratio(marker_low, low_ln)
+            if r >= best_r:
+                best_r, best_dt = r, dtype
+    return best_dt
 
 
 def key_for(text):
