@@ -43,8 +43,9 @@ def main(eval_dir=None):
     dev_ids = set(json.loads((ROOT / "data_splits.json").read_text())["dev"])
     truth = {r["case_id"]: r["adjudication"]
              for r in csv.DictReader(open(CH / "data/train_labels.csv"))}
-    preds = {r["case_id"]: r["adjudication"]
-             for r in map(json.loads, open(eval_dir / "predictions.jsonl"))}
+    pred_rows = {r["case_id"]: r
+                 for r in map(json.loads, open(eval_dir / "predictions.jsonl"))}
+    preds = {cid: r["adjudication"] for cid, r in pred_rows.items()}
     debug = {r["case_id"]: r
              for r in map(json.loads, open(eval_dir / "debug.jsonl"))}
     branches = {cid: r["branch"] for cid, r in debug.items()}
@@ -83,33 +84,35 @@ def main(eval_dir=None):
         print(f"{branch:24s} n={n:3d} raw={hits / n if n else 0:.3f} "
               f"prior={prior:.3f} -> {table[branch]}{mixed}")
 
-    # Cell-keyed refinement (TODO 5.7): within a branch, split by whether an
-    # independent review_flag co-fired, and shrink that cell toward the branch
-    # value (a would-be-review call corroborated by a second review reason is
-    # more often correct — dev OOF +0.159 cal). Keep only branches that actually
-    # split (both bits seen); the rest back off to the identical branch value.
-    def review_cofire(cid):
+    # Cell-keyed refinement (TODO 5.7): within a branch, refine confidence by two
+    # bits, each shrunk toward the branch value — (1) whether an independent
+    # review_flag co-fired, (2) whether the imputed fee is merely 'paid' (a silent
+    # fee_unknown NR we usually over-reviewed, row 54). Key "<rf><fee>". Keep only
+    # cells with real support that MOVE off the branch value; anything else backs
+    # off identically via for_case. Both raise Brier honesty, decision untouched.
+    def cell_key(cid):
         d = debug[cid]
-        return "review_flag" in d.get("review_hits", []) and d["branch"] != "review_flag"
+        rf = "review_flag" in d.get("review_hits", []) and d["branch"] != "review_flag"
+        fee_paid = pred_rows[cid].get("fee_status") == "paid"
+        return f"{int(rf)}{int(fee_paid)}"
 
-    by_cell = defaultdict(lambda: [0, 0])       # (branch, bit) -> [hits, n]
+    by_cell = defaultdict(lambda: [0, 0])       # (branch, "<rf><fee>") -> [hits, n]
     for cid in dev_ids:
-        if cid not in preds or cid not in debug:
+        if cid not in pred_rows or cid not in debug:
             continue
-        bit = "1" if review_cofire(cid) else "0"
-        by_cell[(branches[cid], bit)][0] += preds[cid] == truth[cid]
-        by_cell[(branches[cid], bit)][1] += 1
+        by_cell[(branches[cid], cell_key(cid))][0] += preds[cid] == truth[cid]
+        by_cell[(branches[cid], cell_key(cid))][1] += 1
     cells = {}
-    for (branch, bit), (hits, n) in sorted(by_cell.items()):
+    for (branch, key), (hits, n) in sorted(by_cell.items()):
+        if n < MIN_CELL_YES:
+            continue                            # thin cell: back off to the branch
         bc = branch_shrunk.get(branch, 0.5)
-        shrunk = (hits + SHRINK_K * bc) / (n + SHRINK_K)
-        cells.setdefault(branch, {})[bit] = round(min(CLAMP[1], max(CLAMP[0], shrunk)), 3)
-    cells = {b: v for b, v in cells.items()
-             if len(v) == 2 and v["0"] != v["1"]
-             and by_cell[(b, "1")][1] >= MIN_CELL_YES}
+        val = round(min(CLAMP[1], max(CLAMP[0], (hits + SHRINK_K * bc) / (n + SHRINK_K))), 3)
+        if val != table.get(branch):            # a cell equal to the branch is a no-op
+            cells.setdefault(branch, {})[key] = val
     for branch, v in sorted(cells.items()):
-        n1 = by_cell[(branch, "1")][1]
-        print(f"  cell {branch:20s} review_flag: no={v['0']} yes={v['1']} (n_yes={n1})")
+        detail = " ".join(f"{k}={v[k]}(n{by_cell[(branch, k)][1]})" for k in sorted(v))
+        print(f"  cell {branch:20s} <rf><fee>: {detail}")
 
     out = ROOT / "mib/confidence_table.json"
     out.write_text(json.dumps(table, indent=2, sort_keys=True) + "\n")
@@ -121,7 +124,8 @@ def main(eval_dir=None):
         config.stamp(artifact="confidence_table", fitted_on=str(eval_dir),
                      fitted_on_meta=eval_meta, split="dev", shrink_k=SHRINK_K,
                      clamp=list(CLAMP), n_branches=len(table),
-                     n_cell_branches=len(cells), cell_key="review_flag_cofire"),
+                     n_cell_branches=len(cells),
+                     cell_key="review_flag_cofire+fee_paid"),
         indent=2, sort_keys=True) + "\n")
     print(f"wrote {out} + {cells_out.name} ({len(cells)} split branches)")
 

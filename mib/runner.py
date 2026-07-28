@@ -86,19 +86,23 @@ def predict_from_evidence(pages, reads_by_page, stem):
     sig = signals.derive(pkt, values)
     decision, branch = policy.adjudicate(values, sig)
     # Every fired predicate per tier — the per-case co-fire matrix, used by the
-    # debug sidecar and the cell-keyed confidence bit below. adjudicate() above
+    # debug sidecar and the cell-keyed confidence below. adjudicate() above
     # already decided from the first hit of the highest non-empty tier.
     deny_hits, review_hits = policy.fired(values, sig)
-    # Cell-keyed confidence (TODO 5.7): a would-be-review decision corroborated
-    # by a second, independent review_flag is empirically more often correct.
-    # Confidence only — the decision and branch are already fixed above.
-    review_cofire = "review_flag" in review_hits and branch != "review_flag"
-    conf = confidence.for_case(branch, review_cofire)
-    # Display-only fee inference (packet.fee_fallback): adjudication and branch
-    # confidence were decided above on the merged evidence value, so an imputed
-    # fee can improve extraction but never flip a decision.
+    # Display-only fee inference (packet.fee_fallback): the adjudication and
+    # branch were decided above on the merged evidence value, so an imputed fee
+    # never flips a decision. Computed here — ahead of confidence — because the
+    # imputed value also keys the confidence cell below.
     if (values.get("fee_status") or "unknown") == "unknown":
         values["fee_status"] = packet.fee_fallback(pkt)
+    # Cell-keyed confidence (TODO 5.7), confidence-only: a would-be-review call
+    # corroborated by an independent review_flag is more often correct; a
+    # fee_unknown NR whose fee is merely silent ('paid' base rate) is usually a
+    # case we over-reviewed and is more often WRONG (row 54). Both refine Brier
+    # without moving the decision or branch fixed above.
+    review_cofire = "review_flag" in review_hits and branch != "review_flag"
+    conf = confidence.for_case(branch, review_cofire,
+                               values.get("fee_status") == "paid")
     # Display-only closed-vocab rescue (packet.closed_vocab_fallback): same
     # contract — a filled species/world/purpose earns extraction points but can
     # never arm an embargo branch or disarm a missing-field guard.

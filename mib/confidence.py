@@ -29,13 +29,21 @@ FALLBACK = {
 _table_path = Path(__file__).parent / "confidence_table.json"
 _FITTED = json.loads(_table_path.read_text()) if _table_path.exists() else {}
 
-# Cell-keyed refinement (TODO 5.7): within a branch, a would-be-review decision
-# that ALSO independently trips a `review_flag` is empirically more often
-# correct than one standing alone (dev OOF +0.159 cal, review_flag co-fire lifts
-# fee_unknown/waived_non_dip accuracy ~0.4 -> ~0.77). Only branches that observed
-# both bits on the fit split are present; everything else backs off to the
-# per-branch value, which backs off to FALLBACK. Keyed "1"/"0" = review_flag
-# co-fires or not. Fitted alongside confidence_table.json by fit_confidence.py.
+# Cell-keyed refinement (TODO 5.7): within a branch, two independent bits refine
+# the per-branch confidence, both raising Brier honesty on the epistemic review
+# pools without touching any decision (dev OOF +0.159 then +0.190 cal):
+#   1. review_flag co-fires — a would-be-review call corroborated by a second,
+#      independent review reason is more often correct (fee_unknown/waived_non_dip
+#      accuracy ~0.4 -> ~0.77).
+#   2. fee imputed 'paid' — a fee_unknown NR whose fee is merely SILENT (base-rate
+#      'paid', not an ambiguous unpaid/waived) is usually a case truth left
+#      decidable and we over-reviewed: accuracy 0.29 vs 0.81 (row 54's known
+#      false-review pool, which we cannot safely flip at 1 CFA but CAN be honest
+#      about here). Content-vs-label, not a render artifact.
+# Cell key = "<review_flag><fee_paid>" (each 0/1). Only cells the fit found with
+# support and a real move from the branch value are stored; anything else backs
+# off to the per-branch value, which backs off to FALLBACK. Fitted alongside
+# confidence_table.json by fit_confidence.py.
 _cells_path = Path(__file__).parent / "confidence_cells.json"
 _CELLS = json.loads(_cells_path.read_text()) if _cells_path.exists() else {}
 
@@ -46,14 +54,14 @@ def for_branch(branch):
     return FALLBACK.get(branch, 0.5)
 
 
-def for_case(branch, review_cofire):
-    """Per-case confidence: the branch value refined by whether a second,
-    independent review reason co-fired. Confidence-only — never changes a
-    decision (the adjudication and branch are already fixed upstream). Backs off
-    to for_branch when the branch did not split on this bit."""
+def for_case(branch, review_cofire, fee_paid):
+    """Per-case confidence: the branch value refined by (review_flag co-fires,
+    fee imputed 'paid'). Confidence-only — never changes a decision (the
+    adjudication and branch are already fixed upstream). Backs off to for_branch
+    for any cell the fit did not store."""
     cell = _CELLS.get(branch)
     if cell is not None:
-        v = cell.get("1" if review_cofire else "0")
+        v = cell.get(f"{int(bool(review_cofire))}{int(bool(fee_paid))}")
         if v is not None:
             return v
     return for_branch(branch)

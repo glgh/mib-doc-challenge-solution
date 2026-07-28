@@ -302,25 +302,29 @@ def test_policy_tier_names_are_complete_and_disjoint():
     assert deny | review | special == set(confidence.FALLBACK)
 
 
-def test_cell_keyed_confidence_refines_review_pools_and_backs_off():
-    """TODO 5.7: a co-firing review_flag inside a would-be-review branch lifts
-    confidence (two independent review reasons agreeing is more often correct);
-    every fitted cell round-trips its stored value, no fitted cell is a no-op
-    split, and a branch with no cell backs off to the per-branch value exactly.
-    Confidence-only — no decision or branch is a function of this bit."""
+def test_cell_keyed_confidence_refines_pools_and_backs_off():
+    """TODO 5.7: two bits — (review_flag co-fires, fee imputed 'paid') — refine
+    per-branch confidence. Every stored cell round-trips its value and is a real
+    move off the branch value; the headline fee_unknown pool lowers confidence
+    on a merely-silent fee (the row-54 over-review class) and lifts it when a
+    review_flag corroborates; an unsplit branch backs off to the per-branch
+    value for every bit combination. Confidence-only — no decision reads this."""
     from mib import confidence
 
     assert confidence._CELLS, "cell table missing — refit with fit_confidence.py"
-    for branch, bits in confidence._CELLS.items():
-        assert confidence.for_case(branch, True) == bits["1"]
-        assert confidence.for_case(branch, False) == bits["0"]
-        assert bits["1"] != bits["0"], f"{branch} shipped a no-op cell split"
-    # the fitted pools are review-tier and lift on co-fire
-    for branch in ("fee_unknown", "waived_non_dip"):
-        assert branch in confidence._CELLS
-        assert confidence.for_case(branch, True) > confidence.for_case(branch, False)
+    for branch, cells in confidence._CELLS.items():
+        for key, v in cells.items():
+            rf, fee = bool(int(key[0])), bool(int(key[1]))
+            assert confidence.for_case(branch, rf, fee) == v
+            assert v != confidence.for_branch(branch), f"{branch} {key} is a no-op"
+    # a fee_unknown NR whose fee is merely silent ('paid') is usually a case we
+    # over-reviewed -> lower confidence; an independent review_flag lifts it back
+    assert (confidence.for_case("fee_unknown", False, True)
+            < confidence.for_case("fee_unknown", False, False))
+    assert (confidence.for_case("fee_unknown", True, True)
+            > confidence.for_case("fee_unknown", False, True))
     # an unsplit branch is bit-independent and equals the per-branch value
     assert "clean_approve" not in confidence._CELLS
-    assert (confidence.for_case("clean_approve", True)
-            == confidence.for_case("clean_approve", False)
-            == confidence.for_branch("clean_approve"))
+    b = confidence.for_branch("clean_approve")
+    assert all(confidence.for_case("clean_approve", rf, fee) == b
+               for rf in (True, False) for fee in (True, False))
