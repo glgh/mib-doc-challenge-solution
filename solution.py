@@ -69,7 +69,17 @@ def main(input_dir, output_path):
     records, debugs = [], []
     debug_file = open(debug_path, "w") if debug_path else None
     try:
-        with open(output, "w") as f, multiprocessing.Pool(WORKERS) as pool:
+        # maxtasksperchild recycles each worker after K cases so the glibc heap
+        # high-water cannot accumulate across the whole run: a heavy OCR page
+        # ratchets a worker to ~2.2 GiB resident and never releases it (measured,
+        # experiments/_rss_probe.py), and 4 such workers sum past the 8 GiB
+        # cgroup and thrash. K=64 => ~20 respawns/worker over ~1250 cases (~20s of
+        # re-import against a 30,000s budget). Output is unaffected: a case is a
+        # pure function of its PDF with no cross-case worker state (the only
+        # corpus-level pass, corpus.revise, runs in the parent below). Paired with
+        # the allocator env tuning in the Dockerfile.
+        with open(output, "w") as f, \
+                multiprocessing.Pool(WORKERS, maxtasksperchild=64) as pool:
             for pdf, (record, dbg) in zip(pdfs, pool.imap(_safe_predict, pdfs)):
                 if record is None:
                     record = emit.fallback_record(pdf.stem)
