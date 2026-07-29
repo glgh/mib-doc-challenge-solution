@@ -357,6 +357,10 @@ def adjudicator_finding(packet):
     visible+OCR only, so hidden/injected findings never reach here and assemble
     has already dropped cross-applicant decoy pages; and unanimity means a lone
     misread inventing a second value declines to a null, never a fabricated one.
+
+    When the Finding value is torn from every read, `_reason_decision` recovers
+    the verdict from the note's Reason template as a strict fallback — reached
+    only here, so it never overrides a legible finding.
     """
     adjudicator = packet.adjudicator
     if adjudicator:
