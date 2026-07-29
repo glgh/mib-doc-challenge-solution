@@ -4,7 +4,7 @@ import re
 from collections import Counter, namedtuple
 from dataclasses import dataclass, field
 
-from . import grammar, parse, textmatch, vocab
+from . import parse, textmatch, vocab
 from .adversarial import INJECTION_RE
 from .parse import DOC_ADJUDICATOR, DOC_BIOMETRIC, DOC_REGISTRY, DOC_SPONSOR
 from .records import Candidate, best_read

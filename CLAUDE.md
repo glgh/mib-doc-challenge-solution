@@ -128,7 +128,7 @@ Working solution, not a stub. `solution.py` is a thin CLI over the `mib/` packag
 
 **Durable knowledge lives in this file and `docs/`, not assistant memory** (user directive 2026-07-26). Standing directives, lessons, workflow rules, and project state go in CLAUDE.md or the docs, where every session and collaborator sees them; keep auto-memory empty except a pointer here. Terminal tip while working this repo: the Bash tool runs zsh — a bare `=` token (`echo ===` as a separator) fails via `=cmd` glob expansion; use `---`.
 
-**Repair-quality judgment is the user's, not yours.** When assessing PDF scan-repair or render quality (deskew / turn / deshred / faint), render the before/after comparison table (`experiments/repair_bench.py` / the hard-case gallery) and let the user evaluate it — do not pronounce on repair quality yourself. Their eyes beat the model's vision and the evidence-score proxy.
+**Repair-quality judgment is the user's, not yours.** When assessing PDF scan-repair or render quality (deskew / turn / deshred / faint), render the before/after comparison table (`experiments/repair_bench.py` / the hard-case gallery) and let the user evaluate it — do not pronounce on repair quality yourself. Their eyes beat the model's vision and any readability proxy (`page_score`).
 
 **No manual line breaks in markdown prose** (user directive 2026-07-25). Write each paragraph (and each list item) as one line and let the display soft-wrap — never hard-wrap at a column width. Hard wraps make Edit-tool insertions mangle paragraphs into ragged joins and bloat diffs. All repo `.md` files were unwrapped on 2026-07-25 (verified token-identical); keep them that way. Code and code comments keep their language's column conventions.
 

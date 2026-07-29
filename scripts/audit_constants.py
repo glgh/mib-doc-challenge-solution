@@ -64,7 +64,8 @@ def _parse(d):
 def mine_stale_cutoff(rows, ids, default):
     """Largest gap in the in-fold arrival-date distribution -> its midpoint.
 
-    Mirrors the max-margin choice in policy.py:19-23. The boundary is visible as
+    Mirrors the max-margin band-midpoint choice for `STALE_CUTOFF` in policy.py
+    (the "Max-margin choice: the band midpoint" note). The boundary is visible as
     an empty band in the arrival dates themselves, so no label is consulted
     beyond taking the dates from the labelled column.
     """
