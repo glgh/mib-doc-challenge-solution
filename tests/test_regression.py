@@ -664,7 +664,8 @@ def test_fee_fallback_reads_visible_tiers_but_not_injections():
     beats explicit-unknown beats DIP-WAIVER beats the paid base rate — and an
     injection-shaped line (white-text answer keys become OCR-visible under
     autocontrast, MIB-000114) feeds no tier at all."""
-    from mib.packet import Packet, fee_fallback
+    from mib.packet import Packet
+    from mib.fallbacks import fee_fallback
 
     def pkt(lines):
         p = Packet(case_id="MIB-000000")
@@ -689,7 +690,8 @@ def test_fee_fallback_explicit_unknown_statements():
     OCR mangles of key and value (all shapes from the grid census 2026-07-26).
     A legible non-unknown receipt value stays out: those are planted traps
     (MIB-000514's `unpaid` receipt on a truth-APPROVED paid case)."""
-    from mib.packet import Packet, fee_fallback
+    from mib.packet import Packet
+    from mib.fallbacks import fee_fallback
 
     def pkt(lines):
         p = Packet(case_id="MIB-000000")
@@ -729,7 +731,8 @@ def test_closed_vocab_fill_aggregates_garbled_reads():
     'Wiol-A06%0' / 'Walt-A06te' for Wolf-1061c). The fallback scans the same
     OCR lines the merge consults, value-first (the row-18 flag principle),
     and fills what the merge left empty."""
-    from mib.packet import Packet, closed_vocab_fallback
+    from mib.packet import Packet
+    from mib.fallbacks import closed_vocab_fallback
 
     def pkt(*variant_lines):
         p = Packet(case_id="MIB-000000")
@@ -760,7 +763,8 @@ def test_closed_vocab_fill_never_reads_injections_or_touches_policy_values():
     garbled to 'I8-000016'), so injection lines and comma-run key dumps feed
     no fill — and a merge value that already exists is never challenged: an
     in-vocabulary purpose stays, only non-vocabulary junk is replaced."""
-    from mib.packet import Packet, closed_vocab_fallback
+    from mib.packet import Packet
+    from mib.fallbacks import closed_vocab_fallback
 
     def pkt(*variant_lines):
         p = Packet(case_id="MIB-000000")

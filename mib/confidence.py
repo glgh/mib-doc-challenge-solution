@@ -2,7 +2,8 @@
 
 Primary source: mib/confidence_table.json, fitted by scripts/fit_confidence.py
 from dev-split empirical accuracy (Laplace-shrunk, clamped — see that script).
-The hand-set table below is the fallback when no fitted table exists.
+The hand-set table below is the per-branch fallback: `for_branch` uses it for
+any branch missing from the fitted table, not only when the whole table is absent.
 """
 import json
 from pathlib import Path

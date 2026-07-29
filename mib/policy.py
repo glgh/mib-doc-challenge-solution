@@ -15,7 +15,7 @@ from collections import namedtuple
 from datetime import date
 
 from .parse import DISQUALIFYING_FLAGS, REVIEW_FLAGS
-from .vocab import REVOKED_SPONSORS  # noqa: F401  (re-exported: policy owns the rule)
+from .vocab import REVOKED_SPONSORS  # re-exported: policy owns the revoked-sponsor rule
 
 # TRAPPIST-1e / Eris Relay: 50/50 denied incl. DIP-1 (embargo pierces immunity).
 FULL_EMBARGO_WORLDS = {"TRAPPIST-1e", "Eris Relay"}

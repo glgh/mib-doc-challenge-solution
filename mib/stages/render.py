@@ -256,7 +256,7 @@ def page_score(lines):
 # ---------------------------------------------------------------------------
 # extraction_gaps: one injection-immune weakness assessment shared by every
 # escalation rung (the optical rung reads `.weak`; the full-layout rung reads
-# `.has_gap`). Injected text is never evidence at any rung — the row-79
+# `.truncated`). Injected text is never evidence at any rung — the row-79
 # containment principle applied at S2 — so every arm reads INJECTION_RE-filtered
 # lines. `weak` rides the frozen page_score (a shared instrument, left
 # untouched); the label-tell matches heads with the house confusion-weighted
@@ -406,11 +406,11 @@ def reads_for(doc, page, page_no):
             path.write_bytes(encoded)
             psm = only_psm or PRIMARY_PSM
             suffix = "" if psm == PRIMARY_PSM else f"+psm{psm}"
-            t0 = time.time()
+            t0 = time.perf_counter()          # monotonic, like solution.py's cost_ms
             lines, conf = _recognize(path, psm, dpi)
             reads.append(Read(page_no=page_no, lines=lines, variant=variant + suffix,
                               conf=conf,
-                              cost_ms=round((time.time() - t0) * 1000)))
+                              cost_ms=round((time.perf_counter() - t0) * 1000)))
 
         frame_images = {}
 

@@ -87,15 +87,27 @@ _WEIGHTED_TABLES = {
 }
 
 
+def _best_scored(pairs):
+    """Top candidate over (score, label) pairs, and its margin over the runner-up.
+
+    Returns (label, score, score - runner_up_score) — the shared top-2 step of
+    every confusion-weighted matcher. The accept bar/margin gate stays at each
+    call site because they differ (the flag-value matcher returns raw scores;
+    the others gate). Ties break by label (the sort's second key), as always.
+    """
+    scored = sorted(pairs, reverse=True)
+    (best_s, best_l), (second_s, _) = scored[0], scored[1]
+    return best_l, best_s, best_s - second_s
+
+
 def _weighted_closest(field, value):
     """Canonical entry for a garbled read, or None without a clear winner."""
     vn = _norm_vocab(value)
     if not vn:
         return None
-    scored = sorted(((_weighted_sim(vn, n), o) for n, o in _WEIGHTED_TABLES[field]),
-                    reverse=True)
-    (s1, best), s2 = scored[0], scored[1][0]
-    if s1 >= _SNAP_BARS[field] and s1 - s2 >= _SNAP_MARGIN:
+    best, best_s, margin = _best_scored(
+        (_weighted_sim(vn, n), o) for n, o in _WEIGHTED_TABLES[field])
+    if best_s >= _SNAP_BARS[field] and margin >= _SNAP_MARGIN:
         return best
     return None
 
@@ -287,10 +299,7 @@ def match_flag_value(value):
     v = _VALUE_NORM_RE.sub("", (value or "").lower()).strip()
     if len(v) < 4:
         return None, 0.0, 0.0
-    scored = sorted(((_weighted_sim(v, f.replace("_", " ")), f) for f in _REAL_FLAGS),
-                    reverse=True)
-    (best_s, best_f), (second_s, _) = scored[0], scored[1]
-    return best_f, best_s, best_s - second_s
+    return _best_scored((_weighted_sim(v, f.replace("_", " ")), f) for f in _REAL_FLAGS)
 
 
 def match_flag_token(token, cutoff=0.7, margin=0.15):
@@ -306,8 +315,7 @@ def match_flag_token(token, cutoff=0.7, margin=0.15):
     t = (token or "").strip().lower()
     if len(t) < 4:
         return None
-    scored = sorted(((_weighted_sim(t, f), f) for f in _REAL_FLAGS), reverse=True)
-    (best_s, best_f), (second_s, _) = scored[0], scored[1]
-    if best_s >= cutoff and best_s - second_s >= margin:
+    best_f, best_s, gap = _best_scored((_weighted_sim(t, f), f) for f in _REAL_FLAGS)
+    if best_s >= cutoff and gap >= margin:
         return best_f
     return None

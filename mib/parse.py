@@ -422,9 +422,9 @@ def valid_value(field, value):
     if field == "visa_class":
         return value in VISA_CLASSES
     if field == "sponsor_id":
-        return bool(SPONSOR_RE.fullmatch(value))
+        return bool(grammar.VALIDATE_SPONSOR.fullmatch(value))
     if field == "arrival_date":
-        if not DATE_RE.fullmatch(value):
+        if not grammar.VALIDATE_DATE.fullmatch(value):
             return False
         try:                        # reject well-shaped but impossible dates (2026-03-41)
             parsed = date.fromisoformat(value)

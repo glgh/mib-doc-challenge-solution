@@ -21,6 +21,8 @@ def open_document(pdf_path):
 
 
 def _is_whiteish(color_int):
+    # The "white" arm of the docstring's white/tiny/off-crop hidden-span taxonomy:
+    # white-on-white injection text, all channels within ~15/255 of full white.
     r, g, b = (color_int >> 16) & 255, (color_int >> 8) & 255, color_int & 255
     return r > 240 and g > 240 and b > 240
 
@@ -36,6 +38,8 @@ def _red_strikes(page):
     rects = []
     for dr in page.get_drawings():
         color = dr.get("color")
+        # Reddish vector stroke in float RGB (R dominant, G/B suppressed) — the
+        # red-strikethrough void mechanism catalogued in docs/BACKGROUND.md §3.
         if not color or not (color[0] > 0.5 and color[1] < 0.45 and color[2] < 0.45):
             continue
         if not any(item[0] == "l" for item in dr.get("items", [])):
@@ -51,6 +55,8 @@ def _span_struck(strikes, span_bbox):
     b = fitz.Rect(span_bbox)
     for s in strikes:
         smid = (s.y0 + s.y1) / 2
+        # horizontal overlap, and the strike's midline within the span's y-band
+        # (±2pt slack for stroke thickness / baseline jitter).
         if s.x0 <= b.x1 and s.x1 >= b.x0 and (b.y0 - 2) <= smid <= (b.y1 + 2):
             return True
     return False
@@ -71,9 +77,9 @@ def page_text(page, page_no):
                 text = span.get("text", "")
                 if not text.strip():
                     continue
-                is_hidden = (
+                is_hidden = (                              # white / tiny / off-crop
                     _is_whiteish(span.get("color", 0))
-                    or span.get("size", 12.0) < 2.0
+                    or span.get("size", 12.0) < 2.0        # sub-2pt: unreadable "tiny" tell
                     or not crop.intersects(fitz.Rect(span["bbox"]))
                 )
                 if is_hidden:

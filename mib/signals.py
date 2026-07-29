@@ -217,6 +217,15 @@ def sponsor_mismatch(packet, values):
     return False
 
 
+_NAME_AGREE_RATIO = 0.75  # row-33 max-margin cutoff; see identity_conflict's docstring
+
+
+def _name_agrees(a, b):
+    """OCR-tolerant name agreement: normalized similarity at/above the row-33 cutoff."""
+    return difflib.SequenceMatcher(
+        None, norm_name(a), norm_name(b)).ratio() >= _NAME_AGREE_RATIO
+
+
 def identity_conflict(packet, values):
     """Registry name disagrees with the applicant name we actually emit. (§2, partial)
 
@@ -240,8 +249,7 @@ def identity_conflict(packet, values):
         return False
     source = next((src for dtype, src, _kv in packet.docs
                    if dtype == parse.DOC_REGISTRY), None)
-    if source == SRC_OCR and difflib.SequenceMatcher(
-            None, norm_name(reg_name), norm_name(name)).ratio() >= 0.75:
+    if source == SRC_OCR and _name_agrees(reg_name, name):
         return False
     # A losing variant that read the registry name within tolerance is evidence
     # of AGREEMENT — the same principle as has_flag_evidence's losing-variant
@@ -253,8 +261,7 @@ def identity_conflict(packet, values):
     for dtype, kv in packet.variant_docs:
         if dtype == parse.DOC_REGISTRY:
             alt = kv.get("registry_name")
-            if alt and difflib.SequenceMatcher(
-                    None, norm_name(alt), norm_name(name)).ratio() >= 0.75:
+            if alt and _name_agrees(alt, name):
                 return False
     return True
 
@@ -331,8 +338,9 @@ def derive(packet, values):
     observed evidence plus policy-level inferences. `emit_flags` is only the
     observed subset — the flags with a visible-evidence source. organizer
     guidance §1 forbids emitting an inferred flag, so the inference
-    (planetary_embargo from an embargo world, sponsor_mismatch, identity_conflict)
-    still drives the decision but is never written to risk_flags.
+    (sponsor_mismatch, identity_conflict) still drives the decision but is
+    never written to risk_flags. (planetary_embargo is no longer inferred here
+    — see the note below; policy.embargo_world now owns that rule.)
     """
     observed = set(observed_flags(packet))
     flags = set(observed)

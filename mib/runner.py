@@ -13,7 +13,7 @@ without paying for OCR again.
 import sys
 import time
 
-from . import confidence, emit, packet, policy, signals
+from . import confidence, emit, fallbacks, packet, policy, signals
 from .stages import extract, render
 
 # Per-case OCR budget: a bound on the pathological case, not a tuning knob.
@@ -89,12 +89,12 @@ def predict_from_evidence(pages, reads_by_page, stem):
     # debug sidecar and the cell-keyed confidence below. adjudicate() above
     # already decided from the first hit of the highest non-empty tier.
     deny_hits, review_hits = policy.fired(values, sig)
-    # Display-only fee inference (packet.fee_fallback): the adjudication and
+    # Display-only fee inference (fallbacks.fee_fallback): the adjudication and
     # branch were decided above on the merged evidence value, so an imputed fee
     # never flips a decision. Computed here — ahead of confidence — because the
     # imputed value also keys the confidence cell below.
     if (values.get("fee_status") or "unknown") == "unknown":
-        values["fee_status"] = packet.fee_fallback(pkt)
+        values["fee_status"] = fallbacks.fee_fallback(pkt)
     # Cell-keyed confidence (TODO 5.7), confidence-only: a would-be-review call
     # corroborated by an independent review_flag is more often correct; a
     # fee_unknown NR whose fee is merely silent ('paid' base rate) is usually a
@@ -108,9 +108,9 @@ def predict_from_evidence(pages, reads_by_page, stem):
     # earns extraction points but can never arm a branch (embargo, TRANSIT-7
     # denial, revoked-sponsor deny) or disarm a missing-field guard — all run
     # after the decision above on the same contract.
-    vocab_fills = packet.closed_vocab_fallback(pkt, values)
-    vocab_fills.update(packet.visa_fallback(pkt, values))
-    vocab_fills.update(packet.sponsor_fallback(pkt, values))
+    vocab_fills = fallbacks.closed_vocab_fallback(pkt, values)
+    vocab_fills.update(fallbacks.visa_fallback(pkt, values))
+    vocab_fills.update(fallbacks.sponsor_fallback(pkt, values))
     values.update(vocab_fills)
     record = emit.build_record(pkt.case_id, values, sig["emit_flags"], decision, conf)
     debug = {

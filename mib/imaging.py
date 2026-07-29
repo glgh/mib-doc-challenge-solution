@@ -57,8 +57,9 @@ def faintness(gray, thresh=INK):
     'otsu'}. `faint` is True exactly when `ink_mask` would adapt its threshold
     (mask starved AND ink gray-not-sparse-black AND enough sub-paper pixels for
     an honest Otsu); `otsu` is the adapted threshold when it would, else None.
-    Exported so the S2 damage profile and the optical-rung policy read the SAME
-    decision `ink_mask` acts on — one implementation of "this page is faint".
+    Split from `ink_mask` (its actor and only caller) so the faint-page
+    decision has one implementation and can be inspected as measurements
+    rather than re-derived at each use.
     """
     base = gray < thresh
     frac = float(base.mean())
@@ -181,6 +182,30 @@ def turn(gray, quarter_turns_cw):
         -90 * quarter_turns_cw, expand=True))
 
 
+# Border-geometry gates shared by both realign detectors (`_band_offsets` reads
+# the printed page-border rectangle; `line_offsets` reads per-row text edges):
+# trust a realign only with at least this many rows of border evidence, and
+# treat two widths within this many pixels as the same border.
+MIN_BORDER_ROWS = 20
+BORDER_WIDTH_TOL = 6
+
+
+def _apply_row_shifts(gray, shifts):
+    """Roll each row left/right by its rounded shift; None if nothing moved.
+
+    The shared final step of both realigners — they differ only in how the
+    per-row `shifts` array is derived (border forward-fill vs. text-seam profile).
+    """
+    out = gray.copy()
+    moved = False
+    for y in range(gray.shape[0]):
+        s = int(round(shifts[y]))
+        if s:
+            out[y] = np.roll(gray[y], s)
+            moved = True
+    return out if moved else None
+
+
 def _band_offsets(gray):
     """Per-row horizontal shift, read off the printed page-border rectangle.
 
@@ -197,16 +222,16 @@ def _band_offsets(gray):
         else:
             spans.append((-1, -1))
     widths = [w for _, w in spans if w > 0]
-    if len(widths) < 20:
+    if len(widths) < MIN_BORDER_ROWS:
         return None
     border_width = int(np.median(widths))
     if border_width < gray.shape[1] // 2:
         return None            # no full-width border to key off
     offsets = np.full(len(spans), np.nan)
     for y, (left, width) in enumerate(spans):
-        if width > 0 and abs(width - border_width) <= 6:
+        if width > 0 and abs(width - border_width) <= BORDER_WIDTH_TOL:
             offsets[y] = left
-    return offsets if np.count_nonzero(~np.isnan(offsets)) >= 20 else None
+    return offsets if np.count_nonzero(~np.isnan(offsets)) >= MIN_BORDER_ROWS else None
 
 
 def realign_bands(gray):
@@ -217,16 +242,16 @@ def realign_bands(gray):
     reference = np.nanmedian(offsets)
     if np.isnan(reference):
         return None
-    out = gray.copy()
-    shift = 0
-    moved = False
+    # Forward-fill the last known offset across rows the border detector skipped
+    # (NaN), so a shredded band inherits its neighbour's correction; rounding
+    # happens once, in _apply_row_shifts.
+    shifts = np.zeros(gray.shape[0])
+    cur = 0.0
     for y in range(gray.shape[0]):
         if not np.isnan(offsets[y]):
-            shift = int(round(reference - offsets[y]))
-        if shift:
-            out[y] = np.roll(gray[y], shift)
-            moved = True
-    return out if moved else None
+            cur = reference - offsets[y]
+        shifts[y] = cur
+    return _apply_row_shifts(gray, shifts)
 
 
 # --- local text-seam corrector (experiments/probe_seam_text.py, graduated) ---
@@ -292,19 +317,19 @@ def line_offsets(gray):
     right_rev = ok_r[:, ::-1]
     right = np.where(right_rev.any(axis=1), W - 1 - right_rev.argmax(axis=1), np.nan)
     both = ~np.isnan(left) & ~np.isnan(right)
-    if both.sum() < 20:
+    if both.sum() < MIN_BORDER_ROWS:
         return None
     bw = float(np.median((right - left)[both]))
     if bw < W / 2:
         return None
     offsets = np.full(H, np.nan)
-    pair_ok = both & (np.abs((right - left) - bw) <= 6)
+    pair_ok = both & (np.abs((right - left) - bw) <= BORDER_WIDTH_TOL)
     offsets[pair_ok] = left[pair_ok]
     only_l = ~np.isnan(left) & np.isnan(right)
     offsets[only_l] = left[only_l]
     only_r = np.isnan(left) & ~np.isnan(right)
     offsets[only_r] = right[only_r] - bw
-    return offsets if np.count_nonzero(~np.isnan(offsets)) >= 20 else None
+    return offsets if np.count_nonzero(~np.isnan(offsets)) >= MIN_BORDER_ROWS else None
 
 
 def merged_offsets(gray):
@@ -433,14 +458,7 @@ def realign_local(gray):
         nxt = runs[i + 1][0] if i + 1 < len(runs) else len(profile) - 1
         p2[b + 1:nxt + 1] += delta
     reference = np.nanmedian(p2)
-    out = gray.copy()
-    moved = False
-    for y in range(gray.shape[0]):
-        shift = int(round(reference - p2[y]))
-        if shift:
-            out[y] = np.roll(gray[y], shift)
-            moved = True
-    return out if moved else None
+    return _apply_row_shifts(gray, reference - p2)
 
 
 # --- optical restoration (behind config.ocr_optical) ------------------------
