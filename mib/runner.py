@@ -111,6 +111,7 @@ def predict_from_evidence(pages, reads_by_page, stem):
     vocab_fills = fallbacks.closed_vocab_fallback(pkt, values)
     vocab_fills.update(fallbacks.visa_fallback(pkt, values))
     vocab_fills.update(fallbacks.sponsor_fallback(pkt, values))
+    vocab_fills.update(fallbacks.arrival_date_fallback(pkt, values))
     values.update(vocab_fills)
     record = emit.build_record(pkt.case_id, values, sig["emit_flags"], decision, conf)
     debug = {

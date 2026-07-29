@@ -28,8 +28,11 @@ SPONSOR_ID = [
 ]
 ARRIVAL_DATE = [
     ("2026-05-01", "2026-05-01"),          # clean read
-    ("2028-11-30", "2026-11-30"),          # 6->8 year misread, one glyph off 2026
-    ("2099-01-01", "2099-01-01"),          # future but NOT a 1-glyph misread -> kept
+    ("2027-05-01", "2026-05-01"),          # cap: corpus tops out at 2026, so >=2027 is garble
+    ("2028-11-30", "2026-11-30"),          # 6->8 year misread
+    ("2928-11-30", "2026-11-30"),          # 9/0 + 6->8, >1 glyph off -> now snapped (was dropped)
+    ("2976-05-03", "2026-05-03"),          # 9/0 stroke garble -> 2026
+    ("2099-01-01", "2026-01-01"),          # any future-impossible year snaps to 2026
     ("2024-01-01", "2024-01-01"),          # plausible past date -> never un-staled
     ("no date", None),
 ]

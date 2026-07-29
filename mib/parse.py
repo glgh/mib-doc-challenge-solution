@@ -432,11 +432,14 @@ def valid_value(field, value):
             return False
         # OCR year garble forms plausible ISO dates (MIB-000826's 2928 = 2026
         # under 9/0 stroke confusion, 2976) that then outvote the true reading
-        # and confuse the staleness math. This is a contemporary intake corpus;
-        # a wide decade window kills garble without riding the label
-        # distribution. The 1900-01-01 missing sentinel is emitted downstream
-        # of validity and is unaffected.
-        return 2020 <= parsed.year <= 2030
+        # and confuse the staleness math. The corpus tops out at 2026 (1000 train
+        # labels: zero 2027+), so the upper bound rides that distribution: >=2027
+        # is future-impossible and `coerce_arrival_date` snaps it to 2026 upstream
+        # — this bound is the backstop that also stops a raw 2027-2030 read from
+        # being accepted as-is (the MIB-000003 gap). The lower bound stays wide:
+        # a past year is a plausible stale date we must not repair. The
+        # 1900-01-01 missing sentinel is emitted downstream of validity.
+        return 2020 <= parsed.year <= 2026
     if field == "fee_status":
         return value.lower() in FEE_STATUSES
     if field == "species_code":

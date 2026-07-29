@@ -135,15 +135,20 @@ def coerce_sponsor_ids(text):
 def coerce_arrival_date(value):
     """A YYYY-MM-DD date pulled from a mangled read, or None.
 
-    Visas run <=180 days from a 2026-era receipt, so a year >= 2028 is
-    future-impossible: one glyph off 2026 means the scanner misread the year (the
-    6->8 confusion is systematic in the corpus). Past years get no such repair —
-    2020 or 2024 is always a *plausible* stale date, and rewriting a genuine one
-    would un-stale a legitimate denial."""
+    The corpus is a 2026-era intake whose arrivals top out at 2026 (1000 train
+    labels: 948x 2026, 52x 2025, zero 2027+; visas run <=180 days from a mid-2026
+    receipt). So any year >= 2027 is future-impossible garble — a misread true
+    2026 (6->8 gives 2028; 9/0 stroke garble gives 2928/2976, >1 glyph off and
+    formerly dropped) — and snaps to 2026, the only plausible recent value. This
+    is deliberately tighter than a generic decade window: it rides the corpus's
+    own distribution. Past years get no repair — 2020 or 2024 is a *plausible*
+    stale date and rewriting one would un-stale a legitimate denial. (A genuinely
+    stale date garbled INTO a >=2027 read is un-staled by this snap — the residual
+    CFA exposure this widens; kept 0 on the dev replay.)"""
     m = _DATE_TOLERANT.search((value or "").strip())
     if not m:
         return None
     year = m.group(1)
-    if int(year) >= 2028 and plausible_misread(year, "2026"):
+    if int(year) >= 2027:
         year = "2026"
     return f"{year}-{m.group(2)}-{m.group(3)}"

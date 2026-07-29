@@ -384,3 +384,54 @@ def sponsor_fallback(packet, values):
     best = max(support.items(),
                key=lambda kv: (len(kv[1][0]), kv[1][1], -kv[1][2]))
     return {"sponsor_id": best[0]}
+
+
+# --- arrival-date fallback ---------------------------------------------------
+# arrival_date is the last structured field the merge leaves empty when its LABEL
+# erodes past recognition while the ISO value beside it reads clean or one-glyph
+# off. The parse is key-anchored — it extracts a field only after `key_for`
+# recognizes the label — so a mangled 'Antvel Dete 2026-03-29' / 'nal iste:
+# 2028-04-29' drops a perfectly legible date on the floor (the "legible value
+# under a garbled key" class, FIELDS.md; the merge produced NO date candidate at
+# all). A YYYY-MM-DD is self-identifying, so it needs no label: scan value-first
+# through the same coercion the merge uses (grammar.coerce_arrival_date: tolerant
+# separators + the >=2027 future-impossible year snap), take the best-supported
+# date by distinct contributing PAGES, then occurrence count, then first-seen —
+# the _variant_vote / sponsor_fallback page-balance principle, a deterministic
+# total order.
+#
+# DISPLAY-ONLY by the fee_fallback contract: the runner applies this AFTER
+# policy.adjudicate + signals.derive ran on the merged (empty) value, so a
+# recovered date can never arm or disarm staleness / missing_arrival — the
+# decision stands on the empty-date evidence (NEEDS_REVIEW-safe), and a wrong
+# recovered date scores the same 0 as the 1900-01-01 sentinel it replaces
+# (net >= 0 on extraction). Decoy pages are dropped before _guarded_raw_lines and
+# the injection / answer-key guards drop bait-line dates, so no hidden or other-
+# applicant date is ever in scope. This also removes the pipeline's only observed
+# nondeterminism: these empty-date cases were being rescued or not by an order-
+# dependent path, so the emitted date swung between the valid value and the
+# sentinel purely on iteration order (a "hidden tie"); a deterministic recovery
+# pins it to the valid value.
+def arrival_date_fallback(packet, values):
+    """field -> arrival date for a packet whose arrival_date never parsed,
+    value-first: coerce every date-shaped token on a guarded OCR line and take
+    the best-supported valid date. Returns {} when arrival_date already has a
+    value or nothing coerces to a valid date."""
+    from . import parse
+    if values.get("arrival_date"):
+        return {}
+    support = {}   # arrival date -> [pages set, count, first_seen]
+    seq = 0
+    for page_no, line in _guarded_raw_lines(packet):
+        d = grammar.coerce_arrival_date(line)
+        if not d or not parse.valid_value("arrival_date", d):
+            continue
+        rec = support.setdefault(d, [set(), 0, seq])
+        rec[0].add(page_no)
+        rec[1] += 1
+        seq += 1
+    if not support:
+        return {}
+    best = max(support.items(),
+               key=lambda kv: (len(kv[1][0]), kv[1][1], -kv[1][2]))
+    return {"arrival_date": best[0]}
