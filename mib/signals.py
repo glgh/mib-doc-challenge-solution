@@ -280,6 +280,59 @@ def _finding_in(lines):
     return m.group(1).replace(" ", "_") if m else None
 
 
+# When a note's Finding glyph is torn, its Reason survives and RESTATES the
+# verdict: the organizer prints one of a small template set, each pinned to a
+# decision. Read only as a fallback when the finding VALUE is illegible, so it
+# never overrides a legible finding. Matched FUZZILY because a shredded note
+# mangles the reason too — MIB-000568's reason OCR'd "Disaualifvipa tisk flga
+# olanetary_embayoo" and still resolves to its deny template. Train purity of the
+# fuzzy assignment: review 40/40, approve 28/28, deny 62/66 overall but 10/10 on
+# the torn-finding set the fallback actually reaches. Recovers the torn-finding
+# misses 931 (review), 399 (deny), 333/685 (approve). Approve rides the same fuzzy
+# path as deny/review by explicit call (the -4 false-approval asymmetry accepted:
+# the template is 28/28 pure and this is the highest-precedence document).
+_REASON_TEMPLATES = [
+    ("denial supported by damaged registry evidence and visible policy notes", "DENIED"),
+    ("packet contains damaged or contradictory visible evidence", "NEEDS_REVIEW"),
+    ("approval supported by surviving visible evidence", "APPROVED"),
+    ("clean or exception-qualified packet", "APPROVED"),
+    ("review-only risk flag present", "NEEDS_REVIEW"),
+    ("disqualifying risk flag", "DENIED"),
+    ("embargo home world", "DENIED"),
+    ("mandatory fee unpaid", "DENIED"),
+    ("revoked sponsor", "DENIED"),
+    ("stale arrival date", "DENIED"),
+    ("fee status unknown", "NEEDS_REVIEW"),
+]
+_REASON_CUT = 0.72
+_REASON_RE = re.compile(r"reason[:.]\s*(.+)", re.I)
+
+
+def _reason_ratio(tmpl, reason):
+    """Best partial (windowed) difflib ratio of the template against the reason,
+    so trailing OCR debris on the reason line does not dilute a real match."""
+    if len(reason) <= len(tmpl):
+        return difflib.SequenceMatcher(None, tmpl, reason).ratio()
+    w, best = len(tmpl), 0.0
+    for i in range(0, len(reason) - w + 1, 2):
+        best = max(best, difflib.SequenceMatcher(None, tmpl, reason[i:i + w]).ratio())
+    return best
+
+
+def _reason_decision(lines):
+    """The verdict a torn note's Reason template states, or None if none matches."""
+    m = _REASON_RE.search(" ".join(lines).lower())
+    if not m:
+        return None
+    reason = m.group(1)
+    best_dec, best_r = None, _REASON_CUT
+    for tmpl, dec in _REASON_TEMPLATES:
+        r = _reason_ratio(tmpl, reason)
+        if r > best_r:
+            best_r, best_dec = r, dec
+    return best_dec
+
+
 def adjudicator_finding(packet):
     """Explicit decision on a Manual Adjudicator Note — highest-trust evidence. (validated)
 
@@ -321,6 +374,21 @@ def adjudicator_finding(packet):
             seen.add(found)
     if len(seen) == 1:
         return seen.pop()
+    # Finding glyph torn everywhere: recover the verdict from the note's Reason
+    # template (see _REASON_TEMPLATES). Scanned across docs/variants like the
+    # finding, since a shredded note's title can be destroyed too.
+    if adjudicator:
+        dec = _reason_decision(adjudicator.get("_raw", []))
+        if dec:
+            return dec
+    for _dtype, _src, kv in packet.docs:
+        dec = _reason_decision(kv.get("_raw", []))
+        if dec:
+            return dec
+    for _dtype, kv in packet.variant_docs:
+        dec = _reason_decision(kv.get("_raw", []))
+        if dec:
+            return dec
     return None
 
 

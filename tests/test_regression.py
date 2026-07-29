@@ -821,3 +821,42 @@ def test_garbled_fee_values_reconstruct_by_weighted_distance():
     assert vocab.snap("visa_class", "XW-L") == "XW-1"
     assert vocab.snap("declared_purpose", "translaton") == "translation"
     assert vocab.snap("visa_class", "XW-#") is None
+
+
+def test_reason_fallback_recovers_verdict_from_a_torn_finding_note():
+    """When a Manual Adjudicator Note's Finding glyph is shredded, its Reason
+    line still RESTATES the verdict through an organizer template. adjudicator_
+    finding falls back to a fuzzy template match — reached ONLY when no legible
+    finding exists, so it never overrides one — across all three directions, and
+    resolves the reason even when it is itself OCR-mangled (the notes shred). The
+    live recoveries: MIB-000931 (review), 399/444 (deny), 185/333/685 (approve)."""
+    from mib import signals
+    from mib.packet import SRC_OCR, Packet
+
+    def note(raw):
+        p = Packet(case_id="MIB-000000")
+        p.docs = [(parse.DOC_ADJUDICATOR, SRC_OCR, {"_raw": raw})]
+        return p
+
+    # torn finding glyph + each template direction
+    assert signals.adjudicator_finding(note(
+        ["Finding: t", "Reason: Packet contains damaged or contradictory visible evidence."]
+    )) == "NEEDS_REVIEW"
+    assert signals.adjudicator_finding(note(
+        ["Finding: |", "Reason: Denial supported by damaged registry evidence and visible policy notes."]
+    )) == "DENIED"
+    assert signals.adjudicator_finding(note(
+        ["Finding:", "Reason: Clean or exception-qualified packet."]
+    )) == "APPROVED"
+    # OCR-mangled reason still resolves (fuzzy path is load-bearing, MIB-000568)
+    assert signals.adjudicator_finding(note(
+        ["Finding: 1", "Reason: Disaualifvipa. tisk flga; olanetary_embayoo."]
+    )) == "DENIED"
+    # a LEGIBLE finding is never overridden by a conflicting reason
+    assert signals.adjudicator_finding(note(
+        ["Finding: DENIED", "Reason: Clean or exception-qualified packet."]
+    )) == "DENIED"
+    # no template match -> None (the cascade decides; never a guessed verdict)
+    assert signals.adjudicator_finding(note(
+        ["Finding: t", "Reason: some unrelated free text about the weather."]
+    )) is None
