@@ -213,7 +213,7 @@ def test_layout_pass_fires_only_on_truncation(monkeypatch):
     import numpy as np
     gray = np.zeros((4, 4), dtype=np.uint8)
     monkeypatch.setattr(render, "_sources",
-                        lambda doc, page, tmp: [("render", b"enc", gray)])
+                        lambda doc, page, tmp, render_base="up200": [("render", b"enc", gray)])
     monkeypatch.setattr(render, "_orientation_chains", lambda *a, **k: [])
     monkeypatch.setattr(render, "_ocr_optical", lambda: False)   # isolate the layout path
     monkeypatch.setattr(render.imaging, "orientation_profile",

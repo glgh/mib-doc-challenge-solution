@@ -154,9 +154,16 @@ def _tesseract(image_path, psm=PRIMARY_PSM, dpi=None):
 # Gated to weak pages: the unguarded A/B showed well-formed-but-wrong binarized
 # reads displacing correct ones on pages that already read well (11 recovered /
 # 10 corrupted, dev).
+# `equalize` is registered as an A/B instrument (MIB_OPT_SET=...,equalize) but is
+# NOT in the default `opt` — the full-dev frontier rejected it (2026-07-30): histogram
+# equalization manufactures ink on washed-out scans, dissolving a real sponsor_mismatch
+# into a clean approval on MIB-000661 (NEEDS_REVIEW->APPROVED). It fixed 4 risk_flags but
+# cost more classification than it returned: -0.04 dev vs the 2-optic default. The one
+# untested revival path is a 288-DPI recipe (docs/experiments.md).
 _OPTICAL_MODULES = {
     "adapt": imaging.local_threshold,
     "autocon": imaging.autocontrast,
+    "equalize": imaging.equalize,
 }
 
 
@@ -347,13 +354,17 @@ def extraction_gaps(reads):
     return Gaps(weak=weak, truncated=truncated, furniture=furniture)
 
 
-def _sources(doc, page, tmp):
+def _sources(doc, page, tmp, render_base="up200"):
     """Page pixels to read, as (name, encoded_bytes, grayscale array): embedded
-    raster first, then a full-page render at >=200 DPI — raised to the native
-    resolution of the page's largest embedded image (MAX_RENDER_ZOOM cap) so a
-    high-DPI scan is never downsampled by the fixed floor. The encoded bytes are
-    kept so the unrestored pass reads exactly the original image, not a
-    re-encode of it."""
+    raster first, then a full-page render. The encoded bytes are kept so the
+    unrestored pass reads exactly the original image, not a re-encode of it.
+
+    `render_base` sets the render resolution (config.grid_plan, stamped into
+    `restore`): "up200" (default) keeps the historical >=200-DPI floor — raised
+    to the largest embedded image's native resolution (MAX_RENDER_ZOOM cap) so a
+    high-DPI scan is never downsampled, but UPSCALING the ~144-DPI train scans to
+    200; "native" renders at that native resolution directly, so tesseract reads
+    the raw scan grid instead of an interpolated upscale."""
     images = page.get_images()
     if images:
         img = doc.extract_image(images[0][0])
@@ -362,7 +373,13 @@ def _sources(doc, page, tmp):
     # get_images tuples carry (xref, smask, width, ...) — no decode needed.
     native_px = max((im[2] for im in images), default=0)
     native_zoom = native_px / max(1.0, page.rect.width)
-    zoom = max(RENDER_ZOOM, min(native_zoom, MAX_RENDER_ZOOM))
+    if render_base == "native" and native_zoom >= 1.0:
+        # Render at the scan's own resolution — no >=200 upscale. Guarded to a
+        # real full-page scan (native_zoom>=1.0); a sub-1.0 page (photo-box only)
+        # has no text grid to preserve, so it keeps the 200 floor below.
+        zoom = min(native_zoom, MAX_RENDER_ZOOM)
+    else:
+        zoom = max(RENDER_ZOOM, min(native_zoom, MAX_RENDER_ZOOM))
     pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom))
     # Straight from the pixmap samples — the old path went pixmap -> PNG ->
     # PIL -> array, paying a deflate encode + decode for identical pixels
@@ -423,7 +440,7 @@ def reads_for(doc, page, page_no):
             frame_images[variant] = image
             read(imaging.to_pnm_bytes(image), variant)
 
-        sources = list(_sources(doc, page, tmp))
+        sources = list(_sources(doc, page, tmp, plan.get("render_base", "up200")))
 
         geom, opt = plan["geom"], plan["opt"]
         oprofs = {name: imaging.orientation_profile(gray)

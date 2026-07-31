@@ -43,7 +43,8 @@ GRID_PRESETS = {
     # whose field label is present but its value truncated. Subset A/B FIXED 3 /
     # BROKE 0 / CFA 0 + one correct adjudication (362 NR->DENIED); `off` reverts.
     "grid": {"name": "grid", "geom": ("skew", "turn1", "turn3", "deshred", "local"),
-             "opt": ("adapt", "autocon"), "opt_base": "frames", "layout_pass": "psm3"},
+             "opt": ("adapt", "autocon"), "opt_base": "frames", "layout_pass": "psm3",
+             "render_base": "up200"},
 }
 DEFAULT_PLAN = "grid"            # flipped 2026-07-26 (Track 6 Phase 3: dev 124.94 -> 125.35, CFA 0, FIXED 25 / BROKE 0)
 
@@ -59,6 +60,14 @@ def grid_plan():
         plan["opt_base"] = os.environ["MIB_OPT_BASE"]
     if os.environ.get("MIB_LAYOUT_PASS") in ("off", "psm3"):
         plan["layout_pass"] = os.environ["MIB_LAYOUT_PASS"]
+    # render_base: how the whole-page render source is resolved. "up200" (default)
+    # keeps the historical >=200-DPI floor (upscaling the ~144-DPI train scans);
+    # "native" renders at the largest embedded image's own resolution instead, so
+    # tesseract reads the raw scan grid rather than an interpolated upscale (probe:
+    # the 200-DPI upscale garbles marginal digits the native read gets — MIB-000543
+    # SPN-0007). A/B knob; stamped into `restore`.
+    if os.environ.get("MIB_RENDER_BASE") in ("up200", "native"):
+        plan["render_base"] = os.environ["MIB_RENDER_BASE"]
     return plan
 
 
@@ -69,7 +78,7 @@ def _restore_for(plan):
     produces anymore — they refuse to join current artifacts by construction.)"""
     diffs = []
     base = GRID_PRESETS["grid"]
-    for key in ("geom", "opt", "opt_base", "layout_pass"):
+    for key in ("geom", "opt", "opt_base", "layout_pass", "render_base"):
         if plan[key] != base[key]:
             val = ",".join(plan[key]) if isinstance(plan[key], tuple) else plan[key]
             diffs.append(f"{key}={val}")

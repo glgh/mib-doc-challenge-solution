@@ -500,6 +500,16 @@ def autocontrast(gray):
     return np.asarray(ImageOps.autocontrast(Image.fromarray(gray).convert("L"), cutoff=1))
 
 
+def equalize(gray):
+    """Histogram-equalize: remap intensities so the gray histogram is flat. Unlike
+    autocontrast (a linear stretch), this is a non-linear remap that pulls apart
+    mid-gray strokes packed into a narrow band — the recoverable channel the
+    {dpi x optics} sweep isolated (equalize carried 15/45 unique-to-optic
+    reachable fields, one third of the reachable set; adapt/autocon were near-
+    redundant with the plain read). Returns a uint8 image."""
+    return np.asarray(ImageOps.equalize(Image.fromarray(gray).convert("L")))
+
+
 def to_png_bytes(gray):
     buf = io.BytesIO()
     Image.fromarray(gray).save(buf, format="PNG")
