@@ -23,8 +23,8 @@ plain deshred. The pre-grid `ladder` enumerator and its switchable
 `off`/`skew`/`turn` predecessors are gone (experiments.md rows 11-14, 59-60);
 the record stays in the docs and in git.
 
-OCR is exhaustive: every variant is produced and read, and `best()` keeps the
-strongest. An earlier design stopped as soon as a reading looked good enough;
+OCR is exhaustive: every variant is produced and read, and `records.best_read`
+keeps the strongest. An earlier design stopped as soon as a reading looked good enough;
 that measured −0.21 dev (experiments.md row 16) because it settled for a worse
 variant while spending the most OCR on the hardest pages, which never cleared
 the bar anyway. The per-case wall-clock bound (`runner.CASE_OCR_BUDGET_S`)
@@ -32,7 +32,7 @@ is what keeps this affordable, not skipping work.
 
 `reads_for` returns **every** reading it produced, not just the winner — the
 discarded readings survive the seam, which is what an ensemble over variants
-needs. Choosing among them is `best()`, deliberately separate.
+needs. Choosing among them is `records.best_read`, deliberately separate.
 """
 import difflib
 import hashlib
@@ -52,7 +52,7 @@ from .. import grammar
 from .. import imaging
 from ..adversarial import INJECTION_RE
 from ..config import ocr_optical as _ocr_optical
-from ..records import Read, best_read, conf_excess_mass
+from ..records import Read, conf_excess_mass
 from ..vocab import FLAGS, HOME_WORLDS, SPECIES, VISAS, clean_ocr_line
 from ..vocab import _weighted_sim
 
@@ -515,11 +515,3 @@ def reads_for(doc, page, page_no):
     return reads
 
 
-def best(reads):
-    """The strongest reading (records.best_read); kept as S2's public name."""
-    return best_read(reads)
-
-
-def best_lines(reads):
-    chosen = best(reads)
-    return chosen.lines if chosen else []

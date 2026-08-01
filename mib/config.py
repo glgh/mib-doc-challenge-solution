@@ -108,7 +108,7 @@ SCHEMA = 5
 # join across them is meaningless. A key MISSING from a stamp (artifact written
 # before the key existed) is tolerated — only two present-but-different values
 # refuse the join.
-CRITICAL_KEYS = ("restore", "early_stop", "ocr_passes", "ocr_optical")
+CRITICAL_KEYS = ("restore", "ocr_passes", "ocr_optical")
 # A mismatch here is usually just as invalidating, but the working tree is
 # routinely dirty mid-phase and rebuilding every artifact per commit is not
 # affordable, so it warns instead of failing.
@@ -161,13 +161,6 @@ def workers(default=4):
         return default
 
 
-# S2 reads every geometric variant and keeps the best; the early stop that used
-# to be selectable here is gone (it measured −0.21 dev, experiments.md row 16).
-# The key stays in the stamp as a frozen False so that caches built before the
-# removal — which are not in git, `output/` being ignored — remain joinable.
-EARLY_STOP = False
-
-
 def _git_state():
     try:
         rev = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"],
@@ -187,7 +180,6 @@ def stamp(**extra):
     return {
         "schema": SCHEMA,
         "restore": _restore_for(grid_plan()),   # live, not the import-time constant
-        "early_stop": EARLY_STOP,
         "ocr_passes": OCR_PASSES,
         "ocr_optical": ocr_optical(),
         "select": SELECT_METRIC,
@@ -203,17 +195,13 @@ def describe(meta):
         return "UNSTAMPED"
     dirty = "+dirty" if meta.get("git_dirty") else ""
     back = " (backfilled)" if meta.get("backfilled") else ""
-    es = " early_stop" if meta.get("early_stop") else ""      # legacy caches only
     passes = meta.get("ocr_passes")
     ocr = f" ocr={passes}" if passes and passes != OCR_PASSES else ""
     opt = " optical" if meta.get("ocr_optical") else ""
-    # Legacy stamps may carry a `decider` key (the learned decider, deleted);
-    # shown so an old mlp eval artifact is still identifiable as one.
-    dec = f" decider={meta['decider']}" if meta.get("decider") not in (None, "rules") else ""
     # Uppercase on purpose: a subset cache's scores are not split numbers, and
     # this tag is the only thing standing between a probe and a quoted "dev" score.
     sub = f" SUBSET={meta['subset']}({meta.get('n_subset', '?')})" if meta.get("subset") else ""
-    return f"restore={meta.get('restore', '?')}{es}{ocr}{opt}{dec}{sub} rev={meta.get('git_rev') or '?'}{dirty}{back}"
+    return f"restore={meta.get('restore', '?')}{ocr}{opt}{sub} rev={meta.get('git_rev') or '?'}{dirty}{back}"
 
 
 def require_agreement(labelled):
