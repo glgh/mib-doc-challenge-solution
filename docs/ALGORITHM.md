@@ -1,6 +1,6 @@
 # Algorithm: how the pipeline works right now
 
-_Last updated: 2026-07-26. Rewrite this file in place when the algorithm changes; do not append._
+_Last updated: 2026-08-01. Rewrite this file in place when the algorithm changes; do not append._
 
 The reference for **what the system actually does**, stage by stage, with the real constants. Sister docs answer the other questions: [STATUS.md](STATUS.md) — where we are and what we tried; [experiments.md](experiments.md) — one scored row per change; [BACKGROUND.md](BACKGROUND.md) — the evidence behind the constants (organizer rulings, label mining, fraud-signal taxonomy, scan geometry, competitor intel, signal-space verdicts); [FIELDS.md](FIELDS.md) — the same evidence indexed per schema field; the challenge's own [EVALUATION.md](../../mib-doc-challenge/EVALUATION.md) — what the evaluator rewards. [CLAUDE.md](../CLAUDE.md) briefs a newcomer on the problem.
 
@@ -132,7 +132,7 @@ A calibrated-logistic decider (66 features, EV-argmax over the real scoring matr
 
 ## Confidence + emit (`mib/confidence.py`, `mib/emit.py`)
 
-- Per-branch table fitted from dev empirical accuracy (Laplace k=10, clamped to [0.05, 0.95], `mib/confidence_table.json`, via `scripts/fit_confidence.py`); hand-set fallback if the table is absent. Never a constant — the calibration section scores `20·max(0, 1 − 2·mean_brier)`. `confidence_table.meta.json` stamps the substrate it was fitted on (currently the grid substrate — `output/replay_grid_final` off `train_grid.jsonl`, the row-60 refit); refit after any change that moves branch membership.
+- Per-branch table fitted from dev empirical accuracy (Laplace k=10, clamped to [0.05, 0.95], `mib/confidence_table.json`, via `scripts/fit_confidence.py`); hand-set fallback if the table is absent. Never a constant — the calibration section scores `20·max(0, 1 − 2·mean_brier)`. Refinement is **cell-keyed** (rows 86/87, `mib/confidence_cells.json`): within a branch, two bits — a co-firing second review reason, and a fee imputed `paid` from silence — split the fitted value where the pooled branch was dishonest. `confidence_table.meta.json` stamps the substrate it was fitted on (the 2026-07-27 cell-keyed refit at `928b5b5`); refit after any change that moves branch membership. The table holds 16 branches, not 17: `injected_approval_review` never fires on train, so it takes its value from the hand-set fallbacks by design.
 - **`emit.validate`** is the schema safety net (the evaluator hard-fails on bad enums / confidence / duplicate or malformed ids): clamps enums and confidence, repairs `case_id` (last resort `MIB-000000`, a valid shape that matches no case — strictly better than a fatal malformed id), shape-checks `arrival_date` (coerces to `1900-01-01` on shape failure). A failed case emits a `NEEDS_REVIEW` fallback row rather than nothing (worth up to 8 raw pts, dodges the missing penalty).
 
 ## Orchestration (`solution.py`)
@@ -157,8 +157,9 @@ Deliberately a **rewrite of already-written rows**, via a sibling temp file and 
 | `MIB_OPT_SET` | unset | A/B override of the optical module set (`adapt,autocon`) |
 | `MIB_OPT_BASE` | `frames` | compose optical over corrected `frames` (default) or `raw` gray only |
 | `MIB_LAYOUT_PASS` | `psm3` | `off` disables the layout-pass PSM-3 re-read (default-on 2026-07-27, TODO 6.7); it fires on a truncated field label (`extraction_gaps.truncated`), one call on the best frame |
+| `MIB_RENDER_BASE` | `up200` | `native` renders the page at the largest embedded image's own resolution instead of the ≥200-DPI floor, so tesseract reads the raw scan grid rather than an interpolated upscale; stamped via the plan |
 | `MIB_OCR_OPTICAL` | **on** (row 48) | `off` disables the faint-scan variants (local-adaptive threshold + autocontrast, `mib/imaging.py`), gated on weak geometric reads; critical join key |
 | `MIB_WORKERS` | 4 | local wall-clock knob only (`config.workers()` — the contract's vCPU count is the default). Output is byte-identical at any worker count, so it is deliberately not stamped |
 | `MIB_DEBUG_JSONL` | unset | path for the per-case diagnostic sidecar |
 
-The per-case OCR wall-clock bound (120 s) is a constant (`runner.CASE_OCR_BUDGET_S`), not a knob; experiments override it per-call via `read_case(pdf, budget_s=...)`. Three knobs were deleted in the de-special-casing batch (2026-07-26): `MIB_PLAN` (the ladder legacy enumerator is gone — the grid is the only plan), `MIB_SELECT` (conf-mass is the only selector; `evidence_score` deleted), and `MIB_OCR_PASSES` (the per-image dual PSM pass; the layout-pass tier is its revival path). All three still stamp constants (`restore`/`select`/`ocr_passes`) so existing caches join-check unchanged.
+The per-case OCR wall-clock bound (120 s) is a constant (`runner.CASE_OCR_BUDGET_S`), not a knob; experiments override it per-call via `read_case(pdf, budget_s=...)`. Three knobs were deleted in the de-special-casing batch (2026-07-26): `MIB_PLAN` (the ladder legacy enumerator is gone — the grid is the only plan), `MIB_SELECT` (conf-mass is the only selector; `evidence_score` deleted), and `MIB_OCR_PASSES` (the per-image dual PSM pass; the layout-pass tier is its revival path). Their frozen stamp constants outlived them so that older caches still join-checked; every cache was regenerated on 2026-08-01 and the constants went with them, leaving `CRITICAL_KEYS = ("restore", "ocr_optical")`.

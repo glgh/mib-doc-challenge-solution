@@ -1,6 +1,6 @@
 # Background: the evidence behind the constants
 
-_Last updated: 2026-07-25. Rewrite in place when a finding changes; do not append._
+_Last updated: 2026-08-01. Rewrite in place when a finding changes; do not append._
 
 Why the policy constants, signals, and restoration cascade are what they are. The code is in `mib/`; [ALGORITHM.md](ALGORITHM.md) says what it does; this file says *why those numbers*; for the same evidence indexed *by schema field* (sources, shape, decoys, handling, open gaps), see [FIELDS.md](FIELDS.md). Sources are labelled train-mining (`../mib-doc-challenge/data/train_labels.csv`, 1,000 rows: 431 DENIED / 289 APPROVED / 280 NEEDS_REVIEW), organizer rulings (authoritative), or competitor intel (hypotheses, verified before adoption). Scoring mechanics live in the challenge's own [EVALUATION.md](../../mib-doc-challenge/EVALUATION.md) and CLAUDE.md.
 
