@@ -122,7 +122,7 @@ Against the corrected P3 baseline on this cache: **46 cases gain a flag, 0 phant
 
 **Confirmed by a full-pipeline eval (2026-07-23, HEAD `17f82ae`, `output/eval_head`):** the committed tree runs the real pipeline end-to-end on the 1,000-PDF train set at **dev 119.10** (class 62.41, extr 41.36, calib 15.32, CFA 0, 0 missing) in 515s — matching the row-18 cache replay to within 0.01, so the provisional caveat is discharged. `read_case` non-determinism is still real (it moves ~0.01) but does not move the sign or safety. The non-determinism investigation remains open.
 
-**Learned decider re-measured on the 119.10 substrate — edge inverted, promotion shelved (2026-07-23, `output/eval_head`, dev 5-fold OOF, `scripts/train_decision.py`):**
+**Learned decider re-measured on the 119.10 substrate — edge inverted, promotion shelved (2026-07-23, `output/eval_head`, dev 5-fold OOF, `scripts/train_decision.py` — deleted with the learned decider in row 27, in git history):**
 
 | decider | class /80eq | Brier | CFA |
 | --- | ---: | ---: | ---: |
