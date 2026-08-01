@@ -2,7 +2,7 @@
 """A browsable contact sheet of the pixels that actually reach OCR.
 
 The restoration ladder OCRs several variants of a weak page and acts on the
-best-scoring one (`mib.stages.render.best`). This renders that winning image for
+best-scoring one (`mib.records.best_read`). This renders that winning image for
 every scan page in the census sweep — the exact bytes tesseract read — as a
 filterable grid, so the corpus can be eyeballed rather than argued about.
 

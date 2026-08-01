@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Ensemble page-text cache — the whole OCR ensemble, not just best()'s winner.
 
-`scripts/dump_text.py` persists one line-list per scan page (`best_lines`), which
+`scripts/dump_text.py` persists one line-list per scan page (the `best_read` winner), which
 is the exact winner-take-all collapse a merge is meant to undo — so every merge
 experiment had to re-OCR from the PDFs (minutes). This dumps EVERY reading per
 scan page ONCE, so `best` / `union` / field-vote strategies replay downstream in

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Parse-realized crop probe (and voting ceiling) on the dev scan sample.
 
-The ocr_bench union metric is ambiguous: it overstates vs a single pass and
-understates the crop's real mechanism (a clean crop reading winning best() and
+A union-of-variants metric is ambiguous: it overstates vs a single pass and
+understates the crop's real mechanism (a clean crop reading winning selection and
 getting *parsed*). This drives the REAL downstream (predict_from_evidence) A/B:
-best() over production reads, with vs without crop reads — so we see the actual
-field recovery + adjudication effect, not a presence proxy.
+`records.best_read` over production reads, with vs without crop reads — so we see
+the actual field recovery + adjudication effect, not a presence proxy.
 
-  A = current   : best_lines(prod_reads)
-  B = +crop      : best_lines(prod_reads + crop_reads)
+  A = current   : best_read(prod_reads)
+  B = +crop      : best_read(prod_reads + crop_reads)
   V = vote       : per-field weighted vote across ALL scan readings (prod+crop)
                    — approximate (ignores text-layer precedence), a ceiling signal.
 

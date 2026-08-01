@@ -162,7 +162,7 @@ Ev outcomes (guard semantics): as a **replacement** the tracker regresses 045 (3
 
 ## 2026-07-26 — text-centric quick tests (probe_seam_text.py): the reframe holds seam-locally; whole-page conf is not name-safe
 
-User reframe under test: only seams that cut THROUGH text matter; whitespace seams are cosmetic; engine confidence is the unused sensor. Five zero-to-cheap probes (`probe_seam_text.py` qta-qte; plan let-s-pause-here-and-luminous-comet), caches `hard_conf4.jsonl` + census jsonls, <5 min new OCR total.
+User reframe under test: only seams that cut THROUGH text matter; whitespace seams are cosmetic; engine confidence is the unused sensor. Five zero-to-cheap probes (`probe_seam_text.py` qta-qte — the probe was deleted 2026-08-01 once the `evidence_score` API it calls was gone; it is in git history at row 71's commit; plan let-s-pause-here-and-luminous-comet), caches `hard_conf4.jsonl` + census jsonls, <5 min new OCR total.
 
 | test | result |
 | --- | --- |
