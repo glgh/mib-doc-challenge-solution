@@ -1,6 +1,6 @@
 # Submission — MIB Doc Challenge ("Intergalactic Intake")
 
-**Public solution repo:** `<FILL IN: https://github.com/<your-github-username>/mib-doc-challenge-solution>`
+**Public solution repo:** https://github.com/glgh/mib-doc-challenge-solution
 
 That repo contains the `Dockerfile`, the full pipeline under `mib/`, the development tooling under `scripts/` and `experiments/`, and the complete change record under `docs/`.
 
