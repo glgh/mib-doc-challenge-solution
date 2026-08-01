@@ -70,7 +70,11 @@ def main(input_dir, out_path, stems=None, subset_name=None):
                   f"{sorted(missing)[:5]}")
     out = Path(out_path)
     extra = {"subset": subset_name, "n_subset": len(pdfs)} if stems is not None else {}
-    meta = config.stamp(artifact="page_text", input_dir=str(input_dir),
+    # Stamp the corpus by name, not by absolute path: the stamp is copied into
+    # every artifact fitted from this cache (mib/confidence_table.meta.json ships
+    # inside the image), and a developer's home directory has no business
+    # travelling with it. The name still distinguishes train from validation.
+    meta = config.stamp(artifact="page_text", input_dir=Path(input_dir).name,
                         n_pdfs=len(pdfs), **extra)
     t0 = time.time()
     done = 0
