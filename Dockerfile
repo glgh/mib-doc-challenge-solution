@@ -16,15 +16,19 @@ COPY mib /app/mib
 RUN chmod +x /app/run.sh
 
 # The contract runs us with a read-only root and a writable /tmp only.
-# Scan restoration is no longer configurable: S2 always runs the full ladder
-# (deskew + quarter-turn + shred-band realignment), fixed in mib/config.py. Note
-# the scored submission is invoked with no `-e` at all, so anything pinned here
-# is documentation for us, never a lever the grader can pull.
-# MIB_OCR_PASSES is pinned so the shipped OCR recipe is visible in the image
-# rather than inferred from a code default. `dual` (adding a PSM 3 pass per
-# image) measured +0.87 dev at CFA 0, but its cost is concentrated in a heavy
-# tail that tripped the 120s per-case budget and did not survive a
-# contract-limits timing run — so it stays off until that is resolved.
+#
+# The scored submission is invoked with no `-e` at all, so the shipped recipe is
+# whatever mib/config.py resolves by default — this image pins nothing that
+# selects it. That recipe is GRID_PRESETS["grid"]: S2 enumerates a composition
+# grid (source -> orientation -> deskew -> deshred/local -> optical) with
+# geom=(skew,turn1,turn3,deshred,local), opt=(adapt,autocon) over corrected
+# frames, a PSM-3 layout pass on truncated field labels, and a >=200-DPI render
+# floor. Every read crosses the S2/S3 seam; a plurality vote settles the rest.
+# The MIB_* env knobs exist for A/B runs only and all stamp themselves into the
+# `restore` provenance field, so a run that used one cannot be mistaken for a
+# shipped run. OCR is a single PSM 11 pass per image: the PSM 3+11 dual pass
+# measured +0.87 dev at CFA 0 but put its cost in a heavy tail that tripped the
+# per-case budget, so only the gated layout-pass tier survives.
 #
 # glibc allocator containment. Measured (experiments/_rss_probe.py): one worker's
 # RSS high-water ratchets to ~2.2 GiB over a run of heavy OCR pages and is never
@@ -38,7 +42,6 @@ RUN chmod +x /app/run.sh
 # Output is byte-identical — this is resident-memory hygiene, not a recipe knob.
 ENV TMPDIR=/tmp \
     OMP_THREAD_LIMIT=1 \
-    MIB_OCR_PASSES=psm11 \
     MALLOC_ARENA_MAX=2 \
     MALLOC_TRIM_THRESHOLD_=131072
 

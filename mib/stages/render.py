@@ -154,16 +154,13 @@ def _tesseract(image_path, psm=PRIMARY_PSM, dpi=None):
 # Gated to weak pages: the unguarded A/B showed well-formed-but-wrong binarized
 # reads displacing correct ones on pages that already read well (11 recovered /
 # 10 corrupted, dev).
-# `equalize` is registered as an A/B instrument (MIB_OPT_SET=...,equalize) but is
-# NOT in the default `opt` — the full-dev frontier rejected it (2026-07-30): histogram
-# equalization manufactures ink on washed-out scans, dissolving a real sponsor_mismatch
-# into a clean approval on MIB-000661 (NEEDS_REVIEW->APPROVED). It fixed 4 risk_flags but
-# cost more classification than it returned: -0.04 dev vs the 2-optic default. The one
-# untested revival path is a 288-DPI recipe (docs/experiments.md).
+# (`equalize` was trialed as a third optic and removed 2026-07-31 — the full-dev
+# frontier rejected it: histogram equalization manufactures ink on washed-out
+# scans, dissolving a real sponsor_mismatch into a clean approval on MIB-000661.
+# See docs/experiments.md row 98. The one untested revival is a 288-DPI recipe.)
 _OPTICAL_MODULES = {
     "adapt": imaging.local_threshold,
     "autocon": imaging.autocontrast,
-    "equalize": imaging.equalize,
 }
 
 
