@@ -39,7 +39,7 @@ def main(cases_file):
                 page = doc[page_no]
                 if not page.get_images():
                     continue
-                srcs = list(render._sources(doc, page, tmp))
+                srcs = list(render._sources(doc, page))
                 enc = next((e for n, e, _g in srcs if n == "render"), None)
                 if enc is None:
                     continue

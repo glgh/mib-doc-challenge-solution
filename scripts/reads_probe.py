@@ -45,7 +45,7 @@ def _crop_reads(doc, page_no):
     reads = []
     page = doc[page_no]
     with tempfile.TemporaryDirectory() as tmp:
-        for name, _enc, gray in render._sources(doc, page, tmp):
+        for name, _enc, gray in render._sources(doc, page):
             H, W = gray.shape
             desh = imaging.realign_bands(gray)
             variants = [("crop", gray[:int(H * HF), :int(W * WF)])]
@@ -58,7 +58,7 @@ def _crop_reads(doc, page_no):
                 # page_score stands in for the deleted evidence_score: these
                 # text-only reads carry no conf, so best() ranks them by quality.
                 reads.append(Read(page_no=page_no, lines=lines, variant=f"{name}+{label}",
-                                  quality=render.page_score(lines), cost_ms=0))
+                                  cost_ms=0))
     return reads
 
 

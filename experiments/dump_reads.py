@@ -53,7 +53,7 @@ def dump_one(cid):
                        "hidden_lines": pt.hidden_lines, "image_count": pt.image_count,
                        "reads": None}
                 if pt.is_scan_only:
-                    rec["reads"] = [{"variant": r.variant, "quality": r.quality,
+                    rec["reads"] = [{"variant": r.variant,
                                      "lines": r.lines}
                                     for r in render.reads_for(doc, doc[pt.page_no], pt.page_no)]
                 pages_out.append(rec)
@@ -67,7 +67,7 @@ def dump_one(cid):
 
 def _reads(page_rec):
     return [records.Read(page_no=page_rec["page_no"], lines=r["lines"],
-                         variant=r["variant"], quality=r["quality"])
+                         variant=r["variant"])
             for r in (page_rec["reads"] or [])]
 
 

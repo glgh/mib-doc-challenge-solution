@@ -67,7 +67,7 @@ def ocr(gray):
 def src_gray(case, page):
     with extract.open_document(CH / f"data/train/{case}.pdf") as doc:
         with tempfile.TemporaryDirectory(prefix="fg") as tmp:
-            return next(render._sources(doc, doc[page], tmp))[2]
+            return next(render._sources(doc, doc[page]))[2]
 
 
 def best_restored(src):

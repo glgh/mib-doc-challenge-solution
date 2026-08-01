@@ -292,18 +292,17 @@ def candidates(packet):
                 if not raw:
                     continue
                 out.append(Candidate(
-                    field_name=fname, value=raw.strip(), raw_value=raw,
+                    field_name=fname, value=raw.strip(),
                     doc_type=dtype, source=source, page_no=page_no,
-                    valid=parse.valid_value(fname, raw),
-                    quality=1.0 if source == SRC_TEXT else 0.5))
+                    valid=parse.valid_value(fname, raw)))
     return out
 
 
 def _preference(cand):
     """Sort key deciding which candidate for a field wins: source (clean text
-    beats OCR), then field-manual trust order. (`Candidate.quality` is NOT
-    consulted — source IS the read-quality signal at this seam; the numeric
-    field stays a documented future seam, records.py.)
+    beats OCR), then field-manual trust order. Source IS the read-quality signal
+    at this seam; a numeric per-candidate quality was carried alongside it for a
+    while, never consulted, and removed 2026-08-01.
 
     `packet.docs` is ordered (doc_type, source), which ranks whole *documents* and
     therefore lets an OCR'd high-trust document win every field at once over a
@@ -371,7 +370,7 @@ def _line_conf(kv, value):
         return None
     best = None
     for entry in kv.get("_conf") or []:
-        if len(entry) > 3 and want in re.sub(r"[^a-z0-9]", "", entry[3].lower()):
+        if want in re.sub(r"[^a-z0-9]", "", entry[3].lower()):
             best = entry[0] if best is None else max(best, entry[0])
     return best
 

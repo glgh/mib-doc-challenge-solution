@@ -145,14 +145,9 @@ def test_extraction_gaps_short_legit_labels_are_excluded():
     assert g.truncated == frozenset()
 
 
-def test_extraction_gaps_furniture_fires_on_image_box_words():
-    g = render.extraction_gaps([_R("PASSPORT IMAGE")])
-    assert g.furniture is True and g.has_gap is True
-
-
 def test_extraction_gaps_empty_reads_is_weak():
     g = render.extraction_gaps([])
-    assert g.weak is True and g.has_gap is True
+    assert g.weak is True and not g.truncated
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +208,7 @@ def test_layout_pass_fires_only_on_truncation(monkeypatch):
     import numpy as np
     gray = np.zeros((4, 4), dtype=np.uint8)
     monkeypatch.setattr(render, "_sources",
-                        lambda doc, page, tmp, render_base="up200": [("render", b"enc", gray)])
+                        lambda doc, page, render_base="up200": [("render", b"enc", gray)])
     monkeypatch.setattr(render, "_orientation_chains", lambda *a, **k: [])
     monkeypatch.setattr(render, "_ocr_optical", lambda: False)   # isolate the layout path
     monkeypatch.setattr(render.imaging, "orientation_profile",

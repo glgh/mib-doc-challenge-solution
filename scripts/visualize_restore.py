@@ -139,7 +139,7 @@ def source_gray(stem, page_no):
     """The exact pixels S2 would read for this page."""
     with extract.open_document(CH / f"data/train/{stem}.pdf") as doc:
         with tempfile.TemporaryDirectory(prefix="viz") as tmp:
-            name, _encoded, gray = next(render._sources(doc, doc[page_no], tmp))
+            name, _encoded, gray = next(render._sources(doc, doc[page_no]))
     return name, gray
 
 
@@ -290,7 +290,7 @@ def census_page(stem):
                 if not page.is_scan_only:
                     continue
                 with tempfile.TemporaryDirectory(prefix="census") as tmp:
-                    src = next(render._sources(doc, doc[page.page_no], tmp), None)
+                    src = next(render._sources(doc, doc[page.page_no]), None)
                 if src is None:
                     continue
                 gray = src[2]

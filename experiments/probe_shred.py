@@ -33,7 +33,7 @@ def prepared_gray(case, page, orientation):
     """Source pixels after orientation + deskew — where shred is decided."""
     with extract.open_document(CH / f"data/train/{case}.pdf") as doc:
         with tempfile.TemporaryDirectory(prefix="probe") as tmp:
-            gray = next(render._sources(doc, doc[page], tmp))[2]
+            gray = next(render._sources(doc, doc[page]))[2]
     if orientation == "turn1":
         gray = imaging.turn(gray, 1)
     elif orientation == "turn3":

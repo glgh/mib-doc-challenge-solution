@@ -12,7 +12,6 @@ Reports:
   * OPTICAL-FLIP: pages where the injection-immune `weak` differs from the raw
     page_score weak() the optical rung uses today (on BASE reads) — the scope of
     the moved optical gate, i.e. whether slice C's regen also moves optical
-  * furniture-solo count (the ship/drop call for the furniture arm)
   * per-label tell histogram (does any excluded short-value label leak in?)
   * per-CASE projected calls (the 120 s OCR-budget tail; time itself is
     unmeasured here — that is slice C's regen)
@@ -75,7 +74,7 @@ def main():
     print(f"meta:  {config.describe(meta) if meta else '(unstamped)'}\n")
 
     n_pages = 0
-    fire = weak_n = trunc_n = furn_n = 0
+    fire = weak_n = trunc_n = 0
     excl = Counter()          # which single arm fired, when exactly one did
     optical_flip = 0
     per_case_calls = Counter()
@@ -96,7 +95,7 @@ def main():
             if raw_weak(base) != g_base.weak:
                 optical_flip += 1
 
-            if g.has_gap:
+            if g.weak or g.truncated:
                 fire += 1
                 per_case_calls[stem] += 1
                 arms = []
@@ -107,9 +106,6 @@ def main():
                     trunc_n += 1
                     arms.append("trunc")
                     tell_labels.update(g.truncated)
-                if g.furniture:
-                    furn_n += 1
-                    arms.append("furn")
                 if len(arms) == 1:
                     excl[arms[0]] += 1
 
@@ -118,9 +114,8 @@ def main():
 
     print(f"scanned pages: {n_pages}   firing pages (added PSM-3 calls): {fire}"
           f"  ({100 * fire / max(1, n_pages):.1f}%)")
-    print(f"  weak {weak_n}   truncated {trunc_n}   furniture {furn_n}")
-    print(f"  exclusive: weak-only {excl['weak']}  trunc-only {excl['trunc']}"
-          f"  furn-only {excl['furn']}")
+    print(f"  weak {weak_n}   truncated {trunc_n}")
+    print(f"  exclusive: weak-only {excl['weak']}  trunc-only {excl['trunc']}")
     print(f"\noptical-gate flip (base-read weak moves under the filter): "
           f"{optical_flip} pages  -> {'byte-identical optical cache' if optical_flip == 0 else 'optical gate moves; slice C regen covers it'}")
 
@@ -144,11 +139,11 @@ def main():
             continue
         for page_no, nreads, rw, g in rows:
             print(f"  {stem} p{page_no}: reads={nreads} raw_weak={rw} "
-                  f"| gaps weak={g.weak} trunc={sorted(g.truncated)} furn={g.furniture}")
+                  f"| gaps weak={g.weak} trunc={sorted(g.truncated)}")
         _p, _n, _rw, _g = rows[0]
-        # show the tell's view on the page(s) that fired trunc/furn
+        # show the tell's view on the page(s) that fired trunc
         for page_no, nreads, rw, g in rows:
-            if g.truncated or g.furniture:
+            if g.truncated:
                 _pages, rbp = None, None
                 # re-fetch this page's reads for a label dump
                 for rec in recs:

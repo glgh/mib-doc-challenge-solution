@@ -75,9 +75,8 @@ def parse_variant(variant):
 
 def restored_image(doc, page, variant, plan):
     name, q, chain_parts, mod = parse_variant(variant)
-    with tempfile.TemporaryDirectory(prefix="euro") as tmp:
-        sources = {n: gray for n, _e, gray in render._sources(
-            doc, page, tmp, plan.get("render_base", "up200"))}
+    sources = {n: gray for n, _e, gray in render._sources(
+        doc, page, plan["render_base"])}
     gray = sources[name]
     skew_deg = imaging.orientation_profile(gray)[q]["skew_deg"]
     target = (f"turn{q}",) + chain_parts if q else chain_parts

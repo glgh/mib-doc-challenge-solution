@@ -36,7 +36,7 @@ THUMB_W = 300
 def source_gray(case, page):
     with extract.open_document(CH / f"data/train/{case}.pdf") as doc:
         with tempfile.TemporaryDirectory(prefix="bench") as tmp:
-            return next(render._sources(doc, doc[page], tmp))[2]
+            return next(render._sources(doc, doc[page]))[2]
 
 
 def _uri(gray, width=THUMB_W, q=60):

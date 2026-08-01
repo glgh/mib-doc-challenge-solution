@@ -279,12 +279,6 @@ _TELL_LABELS = (
 TELL_LABEL_SIM = 0.80   # weighted-sim bar for a line head to name a label
 TELL_TAIL_MIN = 3       # non-space value-tail chars; <= this reads as truncated/absent
 
-# Furniture of the large graphic boxes that defeat PSM-11 sparse-text grouping
-# (row 67): they OCR at high confidence while the real field block truncates;
-# PSM-3 layout analysis reads around them.
-_IMAGE_BOX_WORDS = ("passport image", "registry image")
-
-
 @dataclass(frozen=True)
 class Gaps:
     """What a page's readings still fail to deliver, injection-filtered.
@@ -292,15 +286,14 @@ class Gaps:
     weak      -- the whole page reads faint (frozen page_score under WEAK_BAR).
     truncated -- labels present in some read whose value reached no read (best
                  tail across all reads is short/absent).
-    furniture -- an image-box furniture word is present (PSM-11's mis-seg tell).
+
+    A third arm, `furniture` (an image-box word present, PSM-11's mis-seg tell),
+    was carried here until 2026-08-01: the layout-pass census priced it as pure
+    over-fire, nothing ever gated on it, and it cost a substring scan over every
+    line of every read. TODO 6.7 / experiments row 83 hold the reasoning.
     """
     weak: bool
     truncated: frozenset
-    furniture: bool
-
-    @property
-    def has_gap(self):
-        return self.weak or bool(self.truncated) or self.furniture
 
 
 def _injection_free(lines):
@@ -327,15 +320,12 @@ def extraction_gaps(reads):
     the ensemble already does).
     """
     if not reads:
-        return Gaps(weak=True, truncated=frozenset(), furniture=False)
+        return Gaps(weak=True, truncated=frozenset())
     filtered = [_injection_free(r.lines) for r in reads]
     weak = max(page_score(lines) for lines in filtered) < WEAK_BAR
     best_tail = {}
-    furniture = False
     for lines in filtered:
         for line in lines:
-            if not furniture and any(w in line.lower() for w in _IMAGE_BOX_WORDS):
-                furniture = True
             if len(line.split()) < 2:          # mirror page_score's label rule
                 continue
             head, tail = _label_tail(line)
@@ -348,10 +338,10 @@ def extraction_gaps(reads):
                     break
     truncated = frozenset(lbl for lbl, sig in best_tail.items()
                           if sig <= TELL_TAIL_MIN)
-    return Gaps(weak=weak, truncated=truncated, furniture=furniture)
+    return Gaps(weak=weak, truncated=truncated)
 
 
-def _sources(doc, page, tmp, render_base="up200"):
+def _sources(doc, page, render_base="up200"):
     """Page pixels to read, as (name, encoded_bytes, grayscale array): embedded
     raster first, then a full-page render. The encoded bytes are kept so the
     unrestored pass reads exactly the original image, not a re-encode of it.
@@ -437,7 +427,7 @@ def reads_for(doc, page, page_no):
             frame_images[variant] = image
             read(imaging.to_pnm_bytes(image), variant)
 
-        sources = list(_sources(doc, page, tmp, plan.get("render_base", "up200")))
+        sources = list(_sources(doc, page, plan["render_base"]))
 
         geom, opt = plan["geom"], plan["opt"]
         oprofs = {name: imaging.orientation_profile(gray)
@@ -504,7 +494,8 @@ def reads_for(doc, page, page_no):
         # row 67's image-box class, e.g. `Home World: Tit`). One call per
         # triggered page. Weak/faint pages are deliberately NOT a trigger: PSM-3
         # is null on the distress class (row 76), and the census priced the
-        # weak/furniture arms as pure over-fire (TODO 6.7 slice B).
+        # weak and furniture arms as pure over-fire (TODO 6.7 slice B; the
+        # furniture arm was removed outright 2026-08-01).
         if plan["layout_pass"] == "psm3" and extraction_gaps(reads).truncated:
             candidates = [r for r in reads if r.variant in frame_images]
             if candidates:

@@ -22,7 +22,6 @@ vocabularies. Nothing outside this module should re-spell `MIB-\\d{6}`.
 """
 import re
 
-from .textmatch import plausible_misread
 
 # Numeric payloads — the counts live once so a widened id can't half-migrate.
 _CASE_NUM = r"\d{6}"

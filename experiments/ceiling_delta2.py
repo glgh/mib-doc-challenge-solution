@@ -39,7 +39,7 @@ def restored(cid,pno,variant):   # probe-1 winning frame (for PSM sweep)
     gc=tuple(t for t in rest if t!=opt); q=qof(variant)
     with tempfile.TemporaryDirectory() as tmp:
         doc=fitz.open(CH/f"data/train/{cid}.pdf"); page=doc[pno]
-        srcs=list(render._sources(doc,page,tmp))
+        srcs=list(render._sources(doc,page))
         gray=next((g for n,e,g in srcs if n=="render"), srcs[0][2])
         sk=imaging.orientation_profile(gray)[q]["skew_deg"]; img=None
         for ch,im in render._orientation_chains(gray,q,sk,GEOM):

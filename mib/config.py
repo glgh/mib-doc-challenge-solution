@@ -87,47 +87,40 @@ def _restore_for(plan):
 
 RESTORE = _restore_for(grid_plan())
 
-# 2: page dicts carry `struck` (red-strikethrough value cells). Older schema-1
-# caches lack the key and rehydrate with struck=[] (no voiding) — backward
-# compatible, so this is a documentation signal, not a join gate (require_agreement
-# does not check SCHEMA).
-# 3: reads carry `conf` — per-line (mean word conf, n_words, y_frac) from the
-# tsv renderer of the same recognition pass. Older caches rehydrate conf=None.
-# 4: conf entries gain the line's cleaned TEXT as a 4th element, making
-# per-line confidence queryable (vote ties, per-field preference, consensus).
-# Schema-3 caches rehydrate 3-tuples; consumers index [:3] and must not unpack
-# by arity.
-# 5: reads carry `cost_ms` (that pass's tesseract wall time). Older caches
-# rehydrate cost_ms=0. Wall clock is nondeterministic by construction, so it
-# must NEVER join a comparison key (verify_render excludes it); it exists so
-# pass-level cost is learnable offline (the row-20 PSM-3 gate-direction
-# question, plan-ablation cost accounting).
+# The record shape, as it grew: 2 added `struck` (red-strikethrough value cells)
+# to page dicts, 3 added per-line `conf` (mean word conf, n_words, y_frac) from
+# the tsv renderer of the same recognition pass, 4 added the line's cleaned TEXT
+# as a 4th conf element (making per-line confidence queryable for vote ties and
+# per-field preference), 5 added per-read `cost_ms`.
+#
+# Reading schemas 1-4 is no longer supported: every cache on disk was
+# regenerated at schema 5 on 2026-08-01, and carrying the rehydration defaults
+# for formats nothing produces was costing more than it protected. A pre-5 cache
+# now fails loudly on a missing key — regenerate it with scripts/dump_text.py.
+# `cost_ms` is wall clock, nondeterministic by construction, so it must NEVER
+# join a comparison key (verify_render excludes it); it exists so pass-level cost
+# stays learnable offline.
 SCHEMA = 5
 
 # A mismatch here means the two artifacts describe different pipelines and any
 # join across them is meaningless. A key MISSING from a stamp (artifact written
 # before the key existed) is tolerated — only two present-but-different values
 # refuse the join.
-CRITICAL_KEYS = ("restore", "ocr_passes", "ocr_optical")
+CRITICAL_KEYS = ("restore", "ocr_optical")
 # A mismatch here is usually just as invalidating, but the working tree is
 # routinely dirty mid-phase and rebuilding every artifact per commit is not
 # affordable, so it warns instead of failing.
 ADVISORY_KEYS = ("git_rev",)
 
 
-# S2 runs a single PSM 11 (sparse text) pass per image. The MIB_OCR_PASSES=dual
-# second PSM 3 pass (+0.87 dev, unshipped for cost — row 20) was deleted in the
-# de-special-casing batch (2026-07-26); the grid's last-resort tier is the
-# designated revival path (one PSM 3 call per still-dead page, not per image).
-# The stamp keeps emitting `ocr_passes` so old caches still join-check.
-OCR_PASSES = "psm11"
-
-# `records.best_read` ranks by guarded excess confidence mass (conf, default
-# since row 43); the `MIB_SELECT=ev` legacy selector (evidence_score, the
-# hand-built shape score) was deleted in the same batch. Reads without conf
-# (tesseract tsv failure) fall back to `quality`. The stamp keeps emitting
-# `select` so old caches still join-check.
-SELECT_METRIC = "conf"
+# S2 runs a single PSM 11 (sparse text) pass per image, and `records.best_read`
+# ranks by guarded excess confidence mass. The knobs that used to select those
+# — MIB_OCR_PASSES=dual (the per-image PSM 3 fan-out, +0.87 dev but unshipped
+# for cost, row 20) and MIB_SELECT=ev (the hand-built evidence_score) — were
+# deleted in the de-special-casing batch (2026-07-26). Their frozen stamp
+# constants outlived them so that caches written before the deletion still
+# join-checked; every such cache was regenerated on 2026-08-01, so the stamps
+# went too. The grid's layout-pass tier is the dual pass's revival path.
 
 
 def ocr_optical():
@@ -180,9 +173,7 @@ def stamp(**extra):
     return {
         "schema": SCHEMA,
         "restore": _restore_for(grid_plan()),   # live, not the import-time constant
-        "ocr_passes": OCR_PASSES,
         "ocr_optical": ocr_optical(),
-        "select": SELECT_METRIC,
         "git_rev": rev,
         "git_dirty": dirty,
         "created": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -195,13 +186,11 @@ def describe(meta):
         return "UNSTAMPED"
     dirty = "+dirty" if meta.get("git_dirty") else ""
     back = " (backfilled)" if meta.get("backfilled") else ""
-    passes = meta.get("ocr_passes")
-    ocr = f" ocr={passes}" if passes and passes != OCR_PASSES else ""
     opt = " optical" if meta.get("ocr_optical") else ""
     # Uppercase on purpose: a subset cache's scores are not split numbers, and
     # this tag is the only thing standing between a probe and a quoted "dev" score.
     sub = f" SUBSET={meta['subset']}({meta.get('n_subset', '?')})" if meta.get("subset") else ""
-    return f"restore={meta.get('restore', '?')}{ocr}{opt}{sub} rev={meta.get('git_rev') or '?'}{dirty}{back}"
+    return f"restore={meta.get('restore', '?')}{opt}{sub} rev={meta.get('git_rev') or '?'}{dirty}{back}"
 
 
 def require_agreement(labelled):

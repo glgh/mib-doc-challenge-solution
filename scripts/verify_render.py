@@ -32,15 +32,10 @@ def main(cache_path, n_scans=4, n_random=2):
         raise SystemExit(
             f"cache was built at restore={stamped!r} but this code only produces "
             f"{config.RESTORE!r}; rebuild it with scripts/dump_text.py before comparing.")
-    # The stored `ocr_lines` is the primary the cache's OWN selection metric
-    # picked. Only conf selection exists now (the ev selector was deleted in
-    # the de-special-casing batch), so an ev-stamped cache cannot be reproduced
-    # — refuse it like a foreign restore level.
-    stamped_select = (meta or {}).get("select")
-    if stamped_select and stamped_select != config.SELECT_METRIC:
-        raise SystemExit(
-            f"cache was written under select={stamped_select!r} but this code only "
-            f"selects by {config.SELECT_METRIC!r}; regenerate it with scripts/dump_text.py.")
+    # The stored `ocr_lines` is the primary the cache's own selection picked.
+    # Conf mass is the only selector there has ever been since the ev selector
+    # was deleted, and the last ev-stamped caches were regenerated on
+    # 2026-08-01, so the stamp check that guarded this went with them.
     from mib import runner
 
     print(f"cache:   {config.describe(meta)}")
@@ -63,14 +58,11 @@ def main(cache_path, n_scans=4, n_random=2):
                          "regenerate it with scripts/dump_text.py.")
 
     def norm_reads(reads):
-        # Fixed identity keys only. `cost_ms` (schema 5) is wall clock —
-        # nondeterministic by construction, comparing it would fail every run;
-        # a schema-4 cache simply lacks it. `quality` is excluded too: the
-        # evidence_score that used to fill it died with the ladder, so fresh
-        # reads carry 0.0 while old caches carry the historical score — it is
-        # display residue, not identity (selection keys on conf). Conf tuples
-        # JSON-round-trip as lists; live reads carry tuples.
-        return [{"variant": r.get("variant", ""),
+        # Fixed identity keys only. `cost_ms` is wall clock — nondeterministic
+        # by construction, so comparing it would fail every run. (`quality` used
+        # to need excluding here too; the field itself is gone as of 2026-08-01.)
+        # Conf tuples JSON-round-trip as lists; live reads carry tuples.
+        return [{"variant": r["variant"],
                  "lines": r["lines"],
                  "conf": None if r.get("conf") is None else
                  [tuple(t) for t in r["conf"]]} for r in reads]

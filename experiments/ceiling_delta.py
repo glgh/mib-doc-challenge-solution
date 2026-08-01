@@ -30,7 +30,7 @@ def restored(cid,pno,variant):
     gc=tuple(t for t in rest if t!=opt); q=3 if "turn3" in gc else 1 if "turn1" in gc else 0
     with tempfile.TemporaryDirectory() as tmp:
         doc=fitz.open(CH/f"data/train/{cid}.pdf"); page=doc[pno]
-        srcs=list(render._sources(doc,page,tmp))
+        srcs=list(render._sources(doc,page))
         gray=next((g for n,e,g in srcs if n=="render"), srcs[0][2])
         sk=imaging.orientation_profile(gray)[q]["skew_deg"]; img=None
         for ch,im in render._orientation_chains(gray,q,sk,GEOM):

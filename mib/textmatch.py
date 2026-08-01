@@ -42,7 +42,7 @@ def hidden_text(page_dicts):
     """The hidden text-layer content, reconstructed for mining only — never evidence.
 
     No current callers: hidden spans are barred from sourcing any value (see
-    `trusted_text`) and guarded by `test_hidden_text_cannot_change_the_output`.
+    `trusted_text`) and guarded by `test_hidden_text_cannot_make_the_output_more_assertive`.
     Retained for the untried STATUS.md question-11 lever — mining hidden content
     as a FLAG-only signal (e.g. a hidden SPN/date that conflicts with the visible
     value), never as a value source or a branch flip toward the hidden value.

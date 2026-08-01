@@ -119,7 +119,7 @@ A field-indexed reference: for each schema field, *where it lives, its shape, it
 ## `adjudication` — 80 pts (the decision, not an extracted field)
 
 - **Shape:** `APPROVED` / `DENIED` / `NEEDS_REVIEW`. Scoring: correct 8; wrong-to-NR 2; missed-NR 1; APPROVED↔DENIED 0; **false approval of a denied case −4** (the CFA — hard gate at 0).
-- **Handling:** the ordered rules cascade (`mib/policy.py`, 16 branches). Precedence: `finding` → `disqualifying_flag` → `embargo_world[_partial]` → `revoked_sponsor` → `transit_visa` → `fee_unpaid` → `stale_arrival` → `fee_unknown` → `waived_non_dip` → `missing_arrival` → `review_flag` → `missing_sponsor` → `missing_visa` → `b13_census` → `clean_approve`. Deny rules require *positive* evidence of their precondition.
+- **Handling:** the ordered rules cascade (`mib/policy.py`, 17 branches). Precedence: `finding` → `disqualifying_flag` → `embargo_world[_partial]` → `revoked_sponsor` → `transit_visa` → `fee_unpaid` → `stale_arrival` → `fee_unknown` → `waived_non_dip` → `missing_arrival` → `review_flag` → `missing_sponsor` → `missing_visa` → `b13_census` → `injected_approval_review` → `clean_approve`. Deny rules require *positive* evidence of their precondition.
 - **Mining:** the two irreducible loss cells are `fee_unknown` (7.11, no signal) and `b13_census` (6.25, a generation artifact — do not model on `n_scan_pages`). ML ceiling over the current partition is closed (learned decider deleted, edge inverted to −0.50 with 14 CFAs).
 - **See:** BACKGROUND §1–3 · ALGORITHM §S5 · STATUS · experiments rows 27, 34 · `mib/policy.py`
 
@@ -127,5 +127,5 @@ A field-indexed reference: for each schema field, *where it lives, its shape, it
 
 - **Shape:** number in `[0,1]`, scored by Brier against adjudication correctness (`20 · max(0, 1 − 2·mean_brier)`). **Never emit a constant.**
 - **Handling:** per-policy-branch fitted value (`mib/confidence_table.json`, `scripts/fit_confidence.py` — dev-empirical P(correct|branch), Laplace k=10, clamp [0.05, 0.95]). Refit after any change that moves branch membership (standing hazard); the audit found the table is the one fitted constant with OOF bias (−0.23).
-- **Open lever:** it is **not** derived from OCR word-confidence today — capturing `tesseract … tsv` in `_tesseract` would supply a variant-vote tie-break and a per-line conf for the flag scan (STATUS question 7; calibration-side use measured dead, BACKGROUND §6).
+- **Shipped (rows 41–44):** per-line engine confidence is captured in the same recognition pass (`_tesseract` runs `txt tsv`), stored on every `Read`, and used for primary-read selection (`records.conf_excess_mass`) and vote tie-breaks (`packet._line_conf`). The calibration-side use of the same signal measured dead (BACKGROUND §6).
 - **See:** experiments rows 10, 21, 22, 31, 34 · `mib/confidence.py`

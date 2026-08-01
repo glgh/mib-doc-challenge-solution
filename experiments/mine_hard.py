@@ -66,7 +66,7 @@ def census_page(stem):
                 if not pg.is_scan_only:
                     continue
                 with tempfile.TemporaryDirectory(prefix="mine") as tmp:
-                    src = next(render._sources(doc, doc[pg.page_no], tmp), None)
+                    src = next(render._sources(doc, doc[pg.page_no]), None)
                     if src is None:
                         continue
                     gray = src[2]

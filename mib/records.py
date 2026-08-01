@@ -79,7 +79,6 @@ class Read:
     page_no: int = 0
     lines: list = field(default_factory=list)
     variant: str = ""
-    quality: float = 0.0
     conf: list = None
     cost_ms: int = 0
 
@@ -106,7 +105,7 @@ def conf_excess_mass(read):
     if read.conf is None:
         return None
     total = 0.0
-    for entry in read.conf:                 # 3-tuple (schema 3) or 4-tuple (schema 4)
+    for entry in read.conf:
         line_conf, n_words, y_frac = entry[0], entry[1], entry[2]
         if y_frac >= FOOTER_Y:
             continue
@@ -120,8 +119,9 @@ def best_read(reads):
 
     Ranking metric: guarded excess confidence mass (`conf_excess_mass`, the
     default since row 43's flip; the `MIB_SELECT=ev` legacy selector was
-    deleted in the de-special-casing batch). Reads without conf (tesseract tsv
-    failure) fall back to the stored `quality`.
+    deleted in the de-special-casing batch). A read whose tsv pass failed scores
+    None and therefore never outranks a read that has conf; if no read has conf,
+    the earliest survives on the tie rule.
 
     Lives here (not in stages.render) because it is a pure function of stored
     Reads that both S2 tooling and the S4 merge consult — the selection itself
@@ -129,8 +129,7 @@ def best_read(reads):
     """
     chosen, chosen_key = None, None
     for r in reads:
-        m = conf_excess_mass(r)
-        key = r.quality if m is None else m
+        key = conf_excess_mass(r) or 0.0
         if chosen is None or key > chosen_key:
             chosen, chosen_key = r, key
     return chosen
@@ -143,20 +142,13 @@ def best_read(reads):
 class Candidate:
     """One value for one field, with everything needed to prefer another.
 
-    `raw_value` is what the document actually said before whitespace and
-    vocabulary repair; keeping both is what lets a later stage tell a clean read
-    from a rescued one.
-
-    `valid` is schema conformance (does this look like a sponsor id at all),
-    which is a different question from `quality` (how well did we read the page
-    it came from). Today only `valid` is consulted; separating them is what makes
-    "prefer the clean text-layer copy over the OCR'd one" expressible later.
+    `valid` is schema conformance: does this look like a sponsor id at all.
+    Preference between two candidates is decided by `source` and `doc_type`
+    (see `packet._preference`) — a clean text-layer copy beats an OCR'd one.
     """
     field_name: str = ""
     value: str = ""
-    raw_value: str = ""
     doc_type: int = 0
     source: int = 0
     page_no: int = 0
     valid: bool = False
-    quality: float = 0.0

@@ -96,7 +96,7 @@ def frame_images(doc, page):
     geom, opt = plan["geom"], plan["opt"]
     frames, sources = {}, []
     # _sources takes a tmp dir only to satisfy its signature; nothing is written.
-    for name, _enc, gray in render._sources(doc, page, None):
+    for name, _enc, gray in render._sources(doc, page):
         sources.append((name, gray))
     oprofs = {name: imaging.orientation_profile(gray) for name, gray in sources}
     for name, gray in sources:
