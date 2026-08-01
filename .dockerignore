@@ -1,8 +1,19 @@
+# The image is built from explicit COPYs (run.sh, solution.py, requirements.txt,
+# mib/), so nothing here can reach it by accident. This file exists to keep the
+# build context small — output/ alone runs to hundreds of MB — and to make the
+# runtime/dev split legible: everything listed is development surface that the
+# container has no business seeing.
 .venv/
 .git/
 __pycache__/
 *.pyc
+.pytest_cache/
+.claude/
 output/
 docs/
 scripts/
+experiments/
+tests/
 data_splits.json
+requirements-dev.txt
+CLAUDE.md
