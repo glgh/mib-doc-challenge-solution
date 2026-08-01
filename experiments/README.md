@@ -45,8 +45,12 @@ A self-contained battery run against the shared hard-case set (`probes/cases.txt
 3. When one cleanly separates positives from negatives on the set, promote it to `mib/imaging.py` and wire it into `mib/stages/render.py`.
 4. Re-run the probe after any `mib/imaging.py` change as a regression check.
 
-## Published benches
+## Benches
 
-Republish to the same artifact URL so reviewer links stay stable:
-- hard set: https://claude.ai/code/artifact/80cf7754-b2fa-4831-ad9f-935c1d62f2f2
-- 50-page bag: https://claude.ai/code/artifact/32057700-1b5b-4003-bb97-485a0e444d32
+Both galleries regenerate locally — they are the before/after sheets the user reads to judge repair quality, and nothing in `mib/` depends on them:
+- hard set: `.venv/bin/python experiments/repair_bench.py --set hard` (cases from `hard_cases.jsonl`)
+- 50-page bag: `.venv/bin/python experiments/repair_bench.py --set bag` (pages from `test_pages.txt`)
+
+Both write a self-contained HTML file; add `--ocr` to annotate each cell with tesseract evidence.
+
+They were also published to private web artifacts during development; those links are account-scoped and are deliberately not reproduced here.

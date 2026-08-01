@@ -19,6 +19,8 @@ docker run --rm --network none \
 - `run.sh` — container entrypoint
 - `Dockerfile` — offline runtime image (no network access at runtime)
 
+`scripts/` and `experiments/` are offline analysis only — neither is imported by the pipeline, and neither reaches the container image. The per-case lists in `experiments/` (`hard_set.txt`, `hard_cases.jsonl`) are iteration sets for development: **no case list, case id, or file name is read at runtime.** The only literal case id in `mib/` is the unmatchable `MIB-000000` sentinel in `emit.py`; every other one appears in a comment.
+
 The seam between `render` and `parse` is a cache boundary: OCR is ~95% of runtime, so `scripts/dump_text.py` materializes page text once and `scripts/replay.py` re-runs everything downstream in seconds.
 
 ## Docs

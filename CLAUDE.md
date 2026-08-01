@@ -89,7 +89,7 @@ PDFs deliberately contain prompt injection: white-on-white text, text outside th
 Local loop (run from `../mib-doc-challenge`):
 
 ```bash
-docker build -t mib-submission /Users/foo/repos/mib-doc-challenge-solution
+docker build -t mib-submission ../mib-doc-challenge-solution
 mkdir -p /tmp/mib-output
 docker run --rm --network none \
   --mount type=bind,src="$PWD/data/train",dst=/input,readonly \
