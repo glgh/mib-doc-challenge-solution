@@ -32,6 +32,10 @@ Key members to preserve:
 - `flags_oracle.py` — the risk_flags reachability bound (TODO 1.10, row 56): classifies every missing truth flag on wrong dev risk_flags fields by the strongest evidence any reading holds for it under the production matchers (inferred_only / reachable / value_blocked / decoy_only / near_miss / hidden_only / unreachable). Detail JSONL to `output/viz/flags_oracle.jsonl`. Run: `.venv/bin/python experiments/flags_oracle.py [cache] [--split dev|hold|all]`.
 - `tier_probe.py` — evidence-tier probes (TODO 5.8, row 57): deny-branch firings bucketed by the weakest provenance tier among their arming fields (TEXT/OCR/VOTE) with truth mix, and clean_approve cases graded by how many load-bearing fields ride text-grade evidence. Needs a current-rev eval dir (`scripts/replay.py <cache> <dir>`). Run: `.venv/bin/python experiments/tier_probe.py <eval_dir>`.
 
+### `probes/` — the offline P1–P8 suite
+
+A self-contained battery run against the shared hard-case set (`probes/cases.txt`), one question per file, with every verdict written up in `probes/FINDINGS.md`: P1 multi-binarization (GO on recovery, +0 on score), P2/P2b template matching (NO-GO), P3 rank-2 alternates (NO-GO), P5 confusion-table unification (code-health only), P6 probabilistic calibration (**GO**, +0.74 calibration points, holdout-validated — graduated via `p6_ablation.py`), P7 can the signal drive decisions (NO — re-derives the −0.50/14-CFA wall), P8 hunt a NEEDS_REVIEW split (no legitimate split exists). The model-bearing probes take a replay dir as `argv[1]` (`scripts/replay.py <cache> <dir>`).
+
 (Orientation needed no separate probe — the anisotropy detector was tuned via `pipeline.py` + `repair_bench.py` to 13/13; see findings.md 2026-07-23.)
 
 ## Workflow

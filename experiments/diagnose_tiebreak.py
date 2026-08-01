@@ -1,6 +1,6 @@
 import sys, re
 from pathlib import Path
-ROOT=Path("/Users/foo/repos/mib-doc-challenge-solution"); sys.path.insert(0,str(ROOT))
+ROOT=Path(__file__).resolve().parent.parent; sys.path.insert(0,str(ROOT))
 from mib import cache, packet, parse, textmatch
 from experiments.probe_arbitration import domain_hits
 

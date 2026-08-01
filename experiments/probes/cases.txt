@@ -1,0 +1,16 @@
+# Shared hard-case set for the probe suite. One case per line: <kind> <case_id>.
+# Truth values are pulled from ../../../mib-doc-challenge/data/train_labels.csv by the scripts.
+#
+# sponsor digit-confusion cells (single-swap 6->8 / 9->8, plus two multi-digit garbles)
+sponsor MIB-000784
+sponsor MIB-000395
+sponsor MIB-000594
+sponsor MIB-000554
+sponsor MIB-000870
+sponsor MIB-000008
+sponsor MIB-000667
+sponsor MIB-000714
+# blotted closed-vocab / flag cases cited by experiments rows 77/78
+flags MIB-000070
+flags MIB-000957
+vocab MIB-000016

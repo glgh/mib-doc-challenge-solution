@@ -2,7 +2,7 @@ import sys, re, json, tempfile, difflib
 from pathlib import Path
 import numpy as np
 from PIL import Image
-ROOT = Path("/Users/foo/repos/mib-doc-challenge-solution"); CH = ROOT.parent/"mib-doc-challenge"
+ROOT = Path(__file__).resolve().parent.parent; CH = ROOT.parent/"mib-doc-challenge"
 sys.path.insert(0, str(ROOT))
 import fitz
 from mib import cache, imaging, records
