@@ -32,10 +32,16 @@ The image is 577 MB uncompressed. It writes only to `/output` and to the `/tmp` 
 | Read-only root filesystem | Temp files go to `/tmp`, output to `/output` |
 | Image ≤ 4 GiB | 577 MB |
 | Model artifacts ≤ 250 MiB each, ≤ 1 GiB total | No model artifacts; the confidence table is ~2 KB of JSON |
-| Runtime ≤ 6 s/PDF average, ≤ 30,000 s total | 1,000-case gate under the exact contract limits: per-case p50 13.4 s, p99 49.9 s, max 66.0 s inside the 4-vCPU container, projecting ~19,000 s wall for 5,000 PDFs — **≈3.8 s/PDF average** against the 6 s budget. `<UPDATE with the measured 5,000-case wall clock>` |
+| Runtime ≤ 6 s/PDF average, ≤ 30,000 s total | Measured on the full 5,000-case validation set under the exact contract limits: **4.72 s/PDF**, **23,606 s total** against the 30,000 s cap. Per-case compute mean 18.84 s, p50 17.83 s, p99 50.09 s, max 66.84 s (four workers run concurrently, so per-case cost is ~4× the wall-clock average). Validation packets run ~40% heavier than train ones, so the real headroom is **1.27×**, not the 1.5× the 1,000-case train gate suggested. See the note below on what that assumes about the hardware. |
 | Predictions ≤ 25 MiB | Well under |
 | No hardcoded answers or per-case lookups | No case list, case id or file name is read at runtime. The only literal id in `mib/` is the unmatchable `MIB-000000` sentinel in `emit.py`; every other one appears in a comment. `experiments/` and `scripts/` are offline analysis and are excluded from the build context. |
 | Runs from a clean checkout | `docker build` from a fresh clone is the only step |
+
+### A caveat on the runtime figure
+
+The 23,606 s was measured with `--cpus 4` on an Apple-silicon host, and the contract fixes the vCPU *count* but never the vCPU *speed* — there is no reference machine in `DOCKER_SUBMISSION.md` or `EVALUATION.md`. On AWS and GCP a vCPU is normally one hardware thread, so "4 vCPU" on an SMT instance is two physical cores. Tesseract is compute-bound and cache-hungry, which is the bad case for SMT: two threads on one core contend for the same execution units. On such a host the effective parallelism is nearer 2.5 cores than 4, and 23,606 s could approach the 30,000 s limit.
+
+The failure mode is graceful rather than catastrophic. The pipeline streams and flushes each row as it completes, so a container stopped at the limit leaves a valid, scoreable submission covering everything finished by then, rather than an empty file.
 
 ## Where to look first
 

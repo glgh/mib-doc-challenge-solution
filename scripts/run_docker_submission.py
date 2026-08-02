@@ -43,6 +43,7 @@ omit it for the real full-corpus baseline.
 import argparse
 import csv
 import json
+import re
 import shutil
 import statistics
 import subprocess
@@ -97,13 +98,25 @@ def build_image():
     print(f"\nbuild: {time.perf_counter() - t0:.0f}s", flush=True)
 
 
+_SI = {"B": 1, "KB": 10**3, "MB": 10**6, "GB": 10**9, "TB": 10**12}
+
+
 def image_size_gib():
-    res = _run(["docker", "image", "inspect", IMAGE, "--format", "{{.Size}}"],
+    """Uncompressed image size in GiB — the quantity the 4 GiB cap is on.
+
+    Read from `docker images`, not from `docker image inspect --format {{.Size}}`:
+    under the containerd image store the latter reports the *compressed* size
+    (142 MB here against a true 577 MB), which would let an oversized image pass
+    the cap. The `docker images` SIZE column stays uncompressed on both stores.
+    It is a human string in SI units ("577MB"), so parse rather than int().
+    """
+    res = _run(["docker", "images", IMAGE, "--format", "{{.Size}}"],
                capture_output=True, text=True)
-    try:
-        return int(res.stdout.strip()) / 1024**3
-    except ValueError:
+    text = res.stdout.strip().splitlines()[0].strip() if res.stdout.strip() else ""
+    match = re.fullmatch(r"([\d.]+)\s*([KMGT]?B)", text, re.IGNORECASE)
+    if not match:
         return None
+    return float(match.group(1)) * _SI[match.group(2).upper()] / 1024**3
 
 
 def stage_input(input_dir, limit):
