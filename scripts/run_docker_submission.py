@@ -41,6 +41,7 @@ Defaults: --input ../mib-doc-challenge/data/train. --limit stages the first N PD
 omit it for the real full-corpus baseline.
 """
 import argparse
+import csv
 import json
 import shutil
 import statistics
@@ -145,6 +146,124 @@ def run_container(mount_in, mount_out):
     if res.returncode:
         raise SystemExit(f"container exited {res.returncode} after {wall:.0f}s")
     return wall
+
+
+# --- resume -----------------------------------------------------------------
+#
+# A 5,000-case run is ~6 hours, and losing it to an infrastructure fault (Docker
+# Desktop's VM died at case 4,260 on 2026-08-01) means paying for the whole
+# corpus again. Resume re-predicts only the missing case ids and merges.
+#
+# This lives HERE and not in solution.py on purpose. solution.py is the shipped
+# entrypoint; the graders run it once against an empty /output, where resume can
+# never apply, so putting merge logic on the contract path would be pure risk.
+#
+# Correctness rests on one property, established in experiments.md row 97 (the
+# same one that let worker recycling ship as output-invariant): a case is a pure
+# function of its PDF, with no cross-case worker state. The single exception is
+# the corpus-level pass `corpus.revise`, which counts sponsor-id recurrence over
+# the whole corpus — so it is re-applied over the MERGED set here, exactly as
+# solution.py applies it over a complete run.
+
+
+def _read_jsonl(path):
+    return [json.loads(line) for line in Path(path).open() if line.strip()]
+
+
+def load_partial(out_dir):
+    """(records, debugs) from a partial run, or (None, None) if there is none.
+
+    Refuses a partial it cannot merge safely: the debug sidecar must exist and
+    align 1:1 with predictions, because `corpus.revise` consults each case's
+    branch to honour precedence (a case already decided by a higher-ranked
+    branch must not be revised). Without branches the merge would silently
+    over-deny.
+    """
+    preds, debug = out_dir / "predictions.jsonl", out_dir / "debug.jsonl"
+    if not preds.exists() or preds.stat().st_size == 0:
+        return None, None
+    records = _read_jsonl(preds)
+    if not debug.exists():
+        raise SystemExit(
+            f"{preds} holds {len(records)} rows but {debug} is missing.\n"
+            f"Resume needs the sidecar: corpus.revise reads each case's branch to\n"
+            f"respect precedence. Re-run without --resume.")
+    debugs = _read_jsonl(debug)
+    ids_p = [r["case_id"] for r in records]
+    ids_d = [d.get("case_id") for d in debugs]
+    if ids_p != ids_d:
+        raise SystemExit(
+            f"predictions ({len(ids_p)}) and debug ({len(ids_d)}) disagree — "
+            f"cannot merge. Re-run without --resume.")
+    if len(set(ids_p)) != len(ids_p):
+        raise SystemExit("partial predictions contain duplicate case ids.")
+    return records, debugs
+
+
+def stage_missing(input_dir, done_ids):
+    """Copy only the PDFs whose case id is not already predicted. Same contract as
+    stage_input: copy, never symlink — the mount is read-only inside."""
+    pdfs = [p for p in sorted(Path(input_dir).glob("*.pdf")) if p.stem not in done_ids]
+    if not pdfs:
+        return None, (lambda: None), 0
+    staged = Path(tempfile.mkdtemp(prefix="mib_resume_in_"))
+    for pdf in pdfs:
+        shutil.copy2(pdf, staged / pdf.name)
+    return staged, (lambda: shutil.rmtree(staged, ignore_errors=True)), len(pdfs)
+
+
+def merge_and_revise(base, new, out_dir):
+    """Merge (records, debugs) pairs, re-apply the corpus pass, write the result.
+
+    The subset run applied `corpus.revise` to its own slice, whose recurrence
+    spectrum is not the corpus's. That is only harmful if it actually revised
+    something — it acts solely on ids absent from vocab.REVOKED_SPONSORS — so we
+    assert the no-op rather than assume it.
+    """
+    from mib import corpus                                       # noqa: PLC0415
+
+    (b_rec, b_dbg), (n_rec, n_dbg) = base, new
+    tainted = [d["case_id"] for d in n_dbg if d.get("sponsor_source") == "recurring"]
+    if tainted:
+        raise SystemExit(
+            f"the resumed slice's corpus pass revised {len(tainted)} case(s) "
+            f"({tainted[:5]}...) off a partial spectrum. Merging would not "
+            f"reproduce a single run — re-run the whole corpus without --resume.")
+
+    records = sorted(b_rec + n_rec, key=lambda r: r["case_id"])
+    debugs = sorted(b_dbg + n_dbg, key=lambda d: d["case_id"])
+    ids = [r["case_id"] for r in records]
+    if len(set(ids)) != len(ids):
+        raise SystemExit("merge produced duplicate case ids — refusing to write.")
+
+    new_ids, revised = corpus.revise(records, debugs)
+    print(f"\n== merge ==")
+    print(f"  carried over: {len(b_rec)}   newly predicted: {len(n_rec)}   "
+          f"total: {len(records)}")
+    print(f"  corpus pass over the merged set: "
+          f"{f'{revised} case(s) revised, new ids {sorted(new_ids)}' if revised else 'no-op'}")
+
+    (out_dir / "predictions.jsonl").write_text(
+        "".join(json.dumps(r, sort_keys=True) + "\n" for r in records))
+    (out_dir / "debug.jsonl").write_text(
+        "".join(json.dumps(d, sort_keys=True) + "\n" for d in debugs))
+    return records
+
+
+def check_against_manifest(out_dir, manifest):
+    """The submission must cover exactly the manifest's case ids."""
+    if not Path(manifest).exists():
+        print(f"\n== manifest ==\n  WARNING: {manifest} not found — skipped.")
+        return
+    with open(manifest, newline="") as fh:
+        want = {r["case_id"] for r in csv.DictReader(fh)}
+    got = {r["case_id"] for r in _read_jsonl(out_dir / "predictions.jsonl")}
+    print("\n== manifest ==")
+    print(f"  manifest {len(want)}   predicted {len(got)}   "
+          f"missing {len(want - got)}   unexpected {len(got - want)}")
+    if want != got:
+        raise SystemExit("  case id set does not match the manifest.")
+    print("  OK: exact coverage.")
 
 
 def _pct(values, q):
@@ -265,6 +384,12 @@ def main():
     ap.add_argument("--out", default=str(ROOT / "output" / "docker_gate"))
     ap.add_argument("--no-build", action="store_true", help="reuse the existing image")
     ap.add_argument("--keep-output", action="store_true")
+    ap.add_argument("--resume", action="store_true",
+                    help="continue a partial run in --out: predict only the case ids "
+                         "missing from its predictions.jsonl, then merge and re-apply "
+                         "the corpus pass over the complete set")
+    ap.add_argument("--manifest", default=None,
+                    help="csv with a case_id column; assert exact coverage after a run")
     args = ap.parse_args()
 
     assert_vm_idle()
@@ -275,18 +400,47 @@ def main():
         print(f"image: {size:.2f} GiB (cap 4 GiB)   {'OK' if size <= 4 else 'OVER'}")
 
     out_dir = Path(args.out) / RESTORE
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
+    base_rec, base_dbg = (load_partial(out_dir) if args.resume else (None, None))
 
-    mount_in, cleanup, n_pdfs = stage_input(args.input, args.limit)
-    try:
-        wall = run_container(mount_in.resolve(), out_dir.resolve())
-    finally:
-        cleanup()
+    if base_rec is None:
+        if out_dir.exists():
+            shutil.rmtree(out_dir)
+        out_dir.mkdir(parents=True)
+        mount_in, cleanup, n_pdfs = stage_input(args.input, args.limit)
+        try:
+            wall = run_container(mount_in.resolve(), out_dir.resolve())
+        finally:
+            cleanup()
+        check_stamp(out_dir)
+        report_runtime(out_dir, n_pdfs, wall)
+    else:
+        # Resume. The subset runs into its OWN directory: solution.py opens the
+        # output with "w", so pointing the container at the partial file would
+        # truncate exactly the work we are trying to keep.
+        done = {r["case_id"] for r in base_rec}
+        print(f"\n== resume ==\n  {len(done)} case(s) already predicted in {out_dir}")
+        mount_in, cleanup, n_pdfs = stage_missing(args.input, done)
+        if n_pdfs == 0:
+            print("  nothing missing — merging and re-applying the corpus pass only.")
+            merge_and_revise((base_rec, base_dbg), ([], []), out_dir)
+            wall = 0.0
+        else:
+            print(f"  {n_pdfs} case(s) still to predict")
+            sub_dir = Path(tempfile.mkdtemp(prefix="mib_resume_out_"))
+            try:
+                wall = run_container(mount_in.resolve(), sub_dir.resolve())
+                check_stamp(sub_dir)
+                report_runtime(sub_dir, n_pdfs, wall)
+                new_rec, new_dbg = load_partial(sub_dir)
+                merge_and_revise((base_rec, base_dbg), (new_rec or [], new_dbg or []),
+                                 out_dir)
+                shutil.copy2(sub_dir / "meta.json", out_dir / "meta.json")
+            finally:
+                cleanup()
+                shutil.rmtree(sub_dir, ignore_errors=True)
 
-    check_stamp(out_dir)
-    report_runtime(out_dir, n_pdfs, wall)
+    if args.manifest:
+        check_against_manifest(out_dir, args.manifest)
     if args.reference:
         check_parity(out_dir, args.reference)
 
