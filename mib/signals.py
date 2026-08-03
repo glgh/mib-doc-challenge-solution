@@ -403,7 +403,50 @@ def waiver_code(packet):
     return "" if code.lower() in ("", "n/a", "none") else code
 
 
-def derive(packet, values):
+def visa_contested(packet, values, provenance):
+    """True when an OCR-read `DIP-1` is contradicted by a real visa elsewhere.
+
+    `DIP-1` is the highest-leverage value in the schema: it alone disarms five
+    branches (`embargo_world_partial`, `revoked_sponsor`, `stale_arrival`,
+    `waived_non_dip`, `missing_sponsor`), so one wrong `DIP-1` can carry a case
+    that should deny. On train, 7 of 222 emitted `DIP-1` are wrong and every one
+    is OCR-vote-sourced from a single page.
+
+    They are NOT misreads — the scanner reads `Visa Class: DIP-1` verbatim four
+    to eight times, so no snapping bar or margin reaches them. They are document
+    conflicts: one page asserts `DIP-1` while another asserts a different class.
+    That distinction is why the obvious guard was rejected. Requiring
+    corroboration before an OCR `DIP-1` may disarm anything measured **-14 raw
+    classification points** on train at 18% precision: it forces denials on five
+    genuinely-DIP-1 packets, to catch errors that produce zero false approvals.
+
+    This is the narrow rule that matches the actual failure shape. A different
+    valid visa asserted on a different page IS positive evidence of a non-DIP
+    class, which is exactly what the deny rules ask for — so the effect is to
+    re-arm them, not to invent a denial. It is deliberately disarm-only and
+    never replaces the emitted value: MIB-000221 is truly `DIP-1` and would lose
+    an extraction field if this overwrote it.
+
+    Measured on train: population 3, one decision changed, +6 raw, 0
+    regressions, CFA still 0. One decision is below any significance bar — this
+    ships because it is directionally right and costs nothing, not because +6 is
+    established. Only the trust-ordered `packet.docs` vote here; the losing
+    variant readings are far too noisy to contradict a page with.
+    """
+    if values.get("visa_class") != "DIP-1" or not provenance:
+        return False
+    prov = provenance.get("visa_class")
+    if not prov or prov[1] != SRC_OCR:
+        return False
+    dip_pages = {kv.get("_page_no") for _dt, _src, kv in packet.docs
+                 if kv.get("visa_class") == "DIP-1"}
+    return any(kv.get("visa_class") in vocab.VISAS
+               and kv.get("visa_class") != "DIP-1"
+               and kv.get("_page_no") not in dip_pages
+               for _dt, _src, kv in packet.docs)
+
+
+def derive(packet, values, provenance=None):
     """All signals as a dict; single entry point for policy and diagnostics.
 
     Two flag sets, deliberately distinct. `flags` is what policy acts on:
@@ -444,6 +487,11 @@ def derive(packet, values):
         # approval at NEEDS_REVIEW (policy). Presence only — never a value source.
         "injected_approval": packet.injected_approval,
         "waiver_code": waiver_code(packet),
+        # Lets policy treat a page-contradicted OCR `DIP-1` as non-DIP for the
+        # five branches it would otherwise disarm. `provenance` defaults to
+        # None, so an offline probe that calls derive() without it simply never
+        # sets this — the pipeline always passes it (runner.predict_from_evidence).
+        "visa_contested": visa_contested(packet, values, provenance),
         # Presence counts LOSING variants too (fourth application of the
         # losing-variants principle, after the flag union, the finding
         # fallback, and identity agreement): MIB-000886's B-13 page is typed

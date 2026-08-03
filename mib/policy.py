@@ -65,8 +65,14 @@ def _ctx(values, sig):
         # Deny rules require POSITIVE evidence of their preconditions: an unknown
         # visa must not arm the non-DIP-only denials (it produced 3 over-denials
         # of true DIP-1 packets whose visa field failed to extract).
-        known_non_dip=visa is not None and visa != "DIP-1",
-        non_dip_or_unknown=visa != "DIP-1",
+        # A `DIP-1` contradicted by a different valid visa on another page is
+        # not positive evidence of diplomatic status — the rival page IS the
+        # positive evidence these predicates ask for, so it re-arms them
+        # (signals.visa_contested). Disarm-only: the emitted visa_class is
+        # untouched, because the contested value is often the true one.
+        known_non_dip=(visa is not None and visa != "DIP-1")
+                      or bool(sig.get("visa_contested")),
+        non_dip_or_unknown=visa != "DIP-1" or bool(sig.get("visa_contested")),
     )
 
 

@@ -101,8 +101,26 @@ def revise(records, debugs):
 
     The branch stays `revoked_sponsor` because it is the same rule; what differs
     is where the id came from, which `sponsor_source` records.
+
+    Fallback-filled fields are excluded, because the records this reads are
+    POST-fallback (`runner.predict_from_evidence` fills sponsor/visa after
+    `policy.adjudicate` has already run) while the rule it reproduces is
+    pre-fallback. `fallbacks` is explicit that a recovered revoked id "can never
+    arm a denial — the decision stands on the empty-sponsor evidence"; without
+    this the corpus pass would arm exactly that denial on evidence policy
+    refused to act on, and a fallback-snapped visa would stand in for the
+    genuinely-unknown visa that `policy`'s `known_non_dip` guard exists to
+    reject. A field named in `vocab_fills` had no value before the fallback ran
+    (both fallbacks no-op on a populated field), so membership is a faithful
+    "this was empty" test and needs no extra plumbing. Filled sponsors are kept
+    out of the occurrence spectrum too — an inferred id is not an observation,
+    and counting it could manufacture the very recurrence being detected.
     """
-    detected = recurring_sponsors([r.get("sponsor_id") for r in records])
+    filled = {d.get("case_id"): set(d.get("vocab_fills") or ())
+              for d in debugs if d}
+    detected = recurring_sponsors(
+        [r.get("sponsor_id") for r in records
+         if "sponsor_id" not in filled.get(r.get("case_id"), ())])
     new_ids = detected - set(vocab.REVOKED_SPONSORS)
     if not new_ids:
         return frozenset(), 0
@@ -110,9 +128,10 @@ def revise(records, debugs):
     by_case = {d.get("case_id"): d for d in debugs if d}
     revised = 0
     for record in records:
-        if record.get("sponsor_id") not in new_ids:
+        fills = filled.get(record.get("case_id"), ())
+        if record.get("sponsor_id") not in new_ids or "sponsor_id" in fills:
             continue
-        if record.get("visa_class") not in NON_DIP_VISAS:
+        if record.get("visa_class") not in NON_DIP_VISAS or "visa_class" in fills:
             continue
         debug = by_case.get(record["case_id"]) or {}
         if debug.get("branch") in OUTRANKS_REVOKED or record["adjudication"] == "DENIED":

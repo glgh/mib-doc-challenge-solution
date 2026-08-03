@@ -83,7 +83,7 @@ def predict_from_evidence(pages, reads_by_page, stem):
     pkt = packet.assemble(pages, reads_by_page, fallback_case_id=stem)
     provenance = {}
     values = packet.merge_fields(pkt, provenance)
-    sig = signals.derive(pkt, values)
+    sig = signals.derive(pkt, values, provenance)
     decision, branch = policy.adjudicate(values, sig)
     # Every fired predicate per tier — the per-case co-fire matrix, used by the
     # debug sidecar and the cell-keyed confidence below. adjudicate() above

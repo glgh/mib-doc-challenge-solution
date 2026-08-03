@@ -896,3 +896,54 @@ def test_arrival_date_fallback_recovers_a_legible_date_under_a_garbled_key():
                                  {}) == {}
     # no date -> no fill
     assert arrival_date_fallback(pkt(["no date on this line"]), {}) == {}
+
+
+def test_a_page_contradicted_dip1_stops_disarming_the_deny_rules():
+    """`DIP-1` disarms five branches, so a wrong one can carry a case that
+    should deny. When another page asserts a different valid visa, that rival
+    page IS the positive evidence the deny rules require, so they re-arm.
+
+    Deliberately narrow. The broader guard — require corroboration before any
+    OCR-sourced `DIP-1` may disarm anything — measured -14 raw classification
+    points on train at 18% precision, because the bad `DIP-1`s are not misreads
+    (the scanner reads `Visa Class: DIP-1` verbatim 4-8 times) but document
+    conflicts, and they cause zero false approvals. This rule is disarm-only:
+    the emitted `visa_class` is untouched, since the contested value is often
+    the true one and overwriting it would cost an extraction field.
+    """
+    from mib import packet, policy, signals
+
+    def decide(pages_visas, prov_source):
+        """pages_visas: [(page_no, visa)] as trust-ordered docs."""
+        pkt = packet.Packet(case_id="MIB-000250")
+        pkt.docs = [(2, packet.SRC_OCR,
+                     {"visa_class": v, "_page_no": pg, "_raw": [], "_conf": None})
+                    for pg, v in pages_visas]
+        values = {"visa_class": "DIP-1", "home_world": "Wolf-1061c",
+                  "sponsor_id": "SPN-1234", "fee_status": "paid",
+                  "arrival_date": "2026-06-01"}
+        prov = {"visa_class": (99, prov_source)}
+        sig = signals.derive(pkt, values, prov)
+        return policy.adjudicate(values, sig), sig["visa_contested"]
+
+    # A partial-embargo world is disarmed by DIP-1; with a rival MED-3 on
+    # another page the branch fires again.
+    world = next(iter(policy.PARTIAL_EMBARGO_WORLDS))
+    uncontested, flag = decide([(0, "DIP-1")], packet.SRC_OCR)
+    assert flag is False and uncontested[0] != "DENIED"
+
+    (decision, branch), flag = decide([(0, "DIP-1"), (2, "MED-3")], packet.SRC_OCR)
+    assert flag is True, "a rival visa on another page must contest the DIP-1"
+
+    # A text-layer DIP-1 is trusted: the rule targets the OCR vote only.
+    _res, flag = decide([(0, "DIP-1"), (2, "MED-3")], packet.SRC_TEXT)
+    assert flag is False, "a text-layer DIP-1 must not be contested"
+
+    # A rival on the SAME page is not a contradiction between pages.
+    _res, flag = decide([(0, "DIP-1"), (0, "MED-3")], packet.SRC_OCR)
+    assert flag is False
+
+    # Junk is not a rival visa.
+    _res, flag = decide([(0, "DIP-1"), (2, "NOT-A-VISA")], packet.SRC_OCR)
+    assert flag is False
+    assert world  # partial-embargo list is non-empty, so the branch is reachable

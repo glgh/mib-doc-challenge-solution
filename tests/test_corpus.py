@@ -148,3 +148,57 @@ def test_killed_run_leaves_valid_provisional_output(tmp_path):
     # 3 cases is far below MIN_CASES, so the detector abstained and every row is
     # exactly what the per-case pipeline produced.
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def _filled(cid, spn, fills, visa="XW-1"):
+    """A case whose sponsor/visa came from a post-adjudication fallback fill."""
+    record, debug = _case(cid, spn, visa=visa, adj="NEEDS_REVIEW",
+                          branch="missing_sponsor")
+    debug["vocab_fills"] = sorted(fills)
+    return record, debug
+
+
+def test_revise_ignores_fallback_filled_sponsor_and_visa():
+    """A denial may never be armed by a value `fallbacks` invented after
+    `policy.adjudicate` had already declined to act on it.
+
+    The records reaching `revise` are post-fallback, so `sponsor_id` and
+    `visa_class` can hold values that were empty when policy ran — and
+    `fallbacks` states outright that a recovered revoked id "can never arm a
+    denial". A filled visa additionally impersonates the positively-read visa
+    that `policy.known_non_dip` requires, reopening the "an unknown visa must
+    not arm a denial" hazard. Both must be skipped, per field.
+    """
+    real = [_case(f"MIB-10{i:04d}", "SPN-7777") for i in range(20)]
+    sponsor_filled = [_filled(f"MIB-20{i:04d}", "SPN-7777", {"sponsor_id"})
+                      for i in range(5)]
+    visa_filled = [_filled(f"MIB-30{i:04d}", "SPN-7777", {"visa_class"})
+                   for i in range(5)]
+    # An unrelated fill (species) must NOT exempt the case — the guard is
+    # per-field, not "this record touched a fallback at all".
+    other_filled = [_filled(f"MIB-40{i:04d}", "SPN-7777", {"species_code"})
+                    for i in range(3)]
+
+    (new_ids, n), records = _revise(real + sponsor_filled + visa_filled
+                                    + other_filled)
+    assert new_ids == {"SPN-7777"}
+    assert n == 23, "only the sponsor/visa-filled cases are exempt"
+
+    by_id = {r["case_id"]: r for r in records}
+    assert all(by_id[f"MIB-20{i:04d}"]["adjudication"] == "NEEDS_REVIEW"
+               for i in range(5)), "a filled sponsor armed a denial"
+    assert all(by_id[f"MIB-30{i:04d}"]["adjudication"] == "NEEDS_REVIEW"
+               for i in range(5)), "a filled visa armed a denial"
+    assert all(by_id[f"MIB-40{i:04d}"]["adjudication"] == "DENIED"
+               for i in range(3)), "an unrelated fill wrongly exempted a case"
+
+
+def test_filled_sponsors_do_not_feed_the_occurrence_spectrum():
+    """An inferred id is not an observation. If fallback fills could vote in the
+    recurrence count, the detector could manufacture the very recurrence it is
+    supposed to discover — here 20 filled cases would otherwise be enough to
+    make SPN-8888 look like a policy entity."""
+    filled = [_filled(f"MIB-50{i:04d}", "SPN-8888", {"sponsor_id"})
+              for i in range(20)]
+    (new_ids, n), _records = _revise(filled)
+    assert new_ids == frozenset() and n == 0
