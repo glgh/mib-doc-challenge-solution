@@ -67,4 +67,4 @@ python3 scripts/evaluate.py --truth data/train_labels.csv \
   --submission /path/to/predictions.jsonl
 ```
 
-Train, on the frozen 700/300 split (seed 8090, `data_splits.json`): dev 128.15 / 150, holdout 128.52 / 150, 0 catastrophic false approvals, 0 missing rows.
+Train, on the frozen 700/300 split (seed 8090, `data_splits.json`): dev 128.24 / 150, holdout 128.28 / 150, 0 catastrophic false approvals, 0 missing rows.
