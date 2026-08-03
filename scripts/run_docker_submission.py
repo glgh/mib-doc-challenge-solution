@@ -98,7 +98,8 @@ def build_image():
     print(f"\nbuild: {time.perf_counter() - t0:.0f}s", flush=True)
 
 
-_SI = {"B": 1, "KB": 10**3, "MB": 10**6, "GB": 10**9, "TB": 10**12}
+_SI = {"B": 1, "KB": 10**3, "MB": 10**6, "GB": 10**9, "TB": 10**12,
+       "KIB": 1024, "MIB": 1024**2, "GIB": 1024**3, "TIB": 1024**4}
 
 
 def image_size_gib():
@@ -109,11 +110,20 @@ def image_size_gib():
     (142 MB here against a true 577 MB), which would let an oversized image pass
     the cap. The `docker images` SIZE column stays uncompressed on both stores.
     It is a human string in SI units ("577MB"), so parse rather than int().
+
+    Returns None when the size cannot be read. The caller must treat that as
+    "the cap was NOT checked" and say so: a silent None is how a gate fails
+    open. `docker images` really can exit non-zero with empty stdout (a daemon
+    API 500 does it) while `docker image inspect` still answers, so the failure
+    is reachable, not theoretical. Binary units are accepted too — some Docker
+    builds print GiB — because an unparsed unit is the same silent skip.
     """
     res = _run(["docker", "images", IMAGE, "--format", "{{.Size}}"],
                capture_output=True, text=True)
-    text = res.stdout.strip().splitlines()[0].strip() if res.stdout.strip() else ""
-    match = re.fullmatch(r"([\d.]+)\s*([KMGT]?B)", text, re.IGNORECASE)
+    lines = [l.strip() for l in (res.stdout or "").splitlines() if l.strip()]
+    if getattr(res, "returncode", 0) or not lines:
+        return None
+    match = re.fullmatch(r"([\d.]+)\s*([KMGT]?I?B)", lines[0], re.IGNORECASE)
     if not match:
         return None
     return float(match.group(1)) * _SI[match.group(2).upper()] / 1024**3
@@ -236,10 +246,19 @@ def merge_and_revise(base, new, out_dir):
     from mib import corpus                                       # noqa: PLC0415
 
     (b_rec, b_dbg), (n_rec, n_dbg) = base, new
-    tainted = [d["case_id"] for d in n_dbg if d.get("sponsor_source") == "recurring"]
+    # Both sides, not just the new slice. `corpus.revise` only ever tightens and
+    # skips a case that is already DENIED, so a denial made off a PARTIAL
+    # spectrum is unrepairable by a later corpus-wide pass. The base can carry
+    # one whenever it is itself the output of an earlier merge (crash, resume,
+    # crash, resume) or of a --limit run whose in-container pass saw only a
+    # slice. Checking only `n_dbg` would let that survive silently into the
+    # final file, while the summary truthfully reports the second pass as a
+    # no-op.
+    tainted = [d["case_id"] for d in b_dbg + n_dbg
+               if d.get("sponsor_source") == "recurring"]
     if tainted:
         raise SystemExit(
-            f"the resumed slice's corpus pass revised {len(tainted)} case(s) "
+            f"a corpus pass already revised {len(tainted)} case(s) "
             f"({tainted[:5]}...) off a partial spectrum. Merging would not "
             f"reproduce a single run — re-run the whole corpus without --resume.")
 
@@ -409,7 +428,10 @@ def main():
     if not args.no_build:
         build_image()
     size = image_size_gib()
-    if size is not None:
+    if size is None:
+        print("image: SIZE UNKNOWN — the 4 GiB cap was NOT checked "
+              "(docker images gave no parseable size)")
+    else:
         print(f"image: {size:.2f} GiB (cap 4 GiB)   {'OK' if size <= 4 else 'OVER'}")
 
     out_dir = Path(args.out) / RESTORE

@@ -2,7 +2,7 @@
 
 **Solution repo:** see `SUBMISSION.md` · **Approach:** offline OCR + classical CV + a hand-written rules cascade. No LLM, no VLM, no cloud API, no network at runtime.
 
-**Where it scores (train, frozen 700/300 split, seed 8090):** dev **128.15 / 150** — classification 66.09 / 80, extraction 45.21 / 50, calibration 16.85 / 20, **0 catastrophic false approvals**, 0 missing rows. Holdout, read sparingly so it retains meaning — and never to justify a change being rejected: **128.52**, with the holdout-over-dev gap stable across reads. Runtime under the exact contract limits: p50 13.4 s/case, max 66 s, projecting ~19,000 s against the 30,000 s budget.
+**Where it scores (train, frozen 700/300 split, seed 8090):** dev **128.15 / 150** — classification 66.09 / 80, extraction 45.21 / 50, calibration 16.85 / 20, **0 catastrophic false approvals**, 0 missing rows. Holdout, read sparingly so it retains meaning — and never to justify a change being rejected: **128.52**, with the holdout-over-dev gap stable across reads. Runtime, measured on the full 5,000-case validation set under the exact contract limits: **4.72 s/PDF, 23,606 s against the 30,000 s cap** (per-case p50 17.83 s, p99 50.09 s, max 66.84 s; four workers run concurrently, so per-case cost is ~4× the wall-clock average). That is 1.27× headroom, and the contract fixes the vCPU count but never the vCPU speed — see `SUBMISSION.md`.
 
 ---
 
@@ -24,7 +24,7 @@ Two design choices did most of the work. **Keeping the whole OCR ensemble alive 
 
 ## 2. Adversarial handling
 
-Visible document evidence beats hidden instructions, and the invariant is enforced by tests rather than by intent: `test_hidden_text_cannot_make_the_output_more_assertive` and `test_an_injected_answer_key_is_never_followed`. Injected lines are filtered before any weakness assessment, so bait cannot even influence *which* recovery tier fires. The one place the injections are read at all is defensive and one-directional: a hidden `APPROVED` answer key **caps** an otherwise-unforced approval at NEEDS_REVIEW (presence only, content never trusted). On validation it fires on 4 of 5,000, and all four are embargo-world packets carrying the generator's lying approval key — a real catch in the CFA-safe direction.
+Visible document evidence beats hidden instructions, and the invariant is enforced by tests rather than by intent: `test_hidden_text_cannot_make_the_output_more_assertive` and `test_an_injected_answer_key_is_never_followed`. Injected lines are filtered before any weakness assessment, so bait cannot even influence *which* recovery tier fires. The one place the injections are read at all is defensive and one-directional: a hidden `APPROVED` answer key **caps** an otherwise-unforced approval at NEEDS_REVIEW (presence only, content never trusted). On validation it fires on 3 of 5,000: two are Wolf-1061c packets carrying the generator's lying approval key, and the third is a clean-registry Barnard-c packet — so the cap is not purely an embargo backstop, and each fire is a would-be approval held at NEEDS_REVIEW in the CFA-safe direction.
 
 Emitted risk flags are **observed-only**. Several flags are inferable from policy structure and would raise the field score, but the organizer ruling is explicit that unrecoverable flags must not be guessed, so inferred flags drive decisions and are never written.
 
@@ -34,7 +34,7 @@ Emitted risk flags are **observed-only**. Several flags are inferable from polic
 
 **The under-determined cases are not extraction failures.** `fee_unknown` and `b13_census` are largely the organizer's intended NEEDS_REVIEW shape: the packet genuinely lacks the evidence. Chasing those labels manufactures false-approval risk elsewhere.
 
-**The one uncovered false-approval route is a private-set-only embargo world.** Approvals come only from zero-predicate cases and signed adjudicator findings, so a home world we have never seen sails to `clean_approve`. No structural detector is possible — worlds are a closed recurring set of 13 with no bimodal recurrence signature of the kind that lets `mib/corpus.py` recover unseen revoked sponsors label-free. The exposure is bounded: on dev, 23 of 31 full-embargo cases were caught redundantly by an observed `planetary_embargo` flag or a finding. The residual ~26% is irreducible with the evidence available.
+**The one uncovered false-approval route is a private-set-only embargo world.** Approvals come only from zero-predicate cases and signed adjudicator findings, so a home world we have never seen sails to `clean_approve`. No structural detector is possible — worlds are a closed recurring set of 13 with no bimodal recurrence signature of the kind that lets `mib/corpus.py` recover unseen revoked sponsors label-free. The exposure is bounded: on dev, 29 of 34 full-embargo cases are caught redundantly by an observed `planetary_embargo` flag or a signed finding, leaving 5 that rest on the world list alone. The residual ~15% is irreducible with the evidence available.
 
 **Calibration is fitted to this corpus's damage rate.** The ignorance branches (0.26–0.50) are functions of how damaged the scans are, and the damage rate roughly halves on validation. On a cleaner private corpus those confidences will under-claim and cost Brier.
 

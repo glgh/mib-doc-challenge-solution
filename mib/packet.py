@@ -165,6 +165,32 @@ def _without_hidden_echo(lines, hidden_norm):
     return kept
 
 
+def _evidence_lines(lines):
+    """Drop injection-shaped lines so they can never be read as evidence.
+
+    S1 quarantines the hidden text layer, but that is only one of the channels
+    the corpus uses: the same payload also arrives as ink in the raster, which
+    S2 legitimately OCRs (`adversarial.py` names MIB-000114 p2). Those lines
+    reached `_raw` unfiltered, and `_raw` is what the highest-trust readers
+    scan — `signals._finding_in`, `_reason_decision`, `manual_corrections` and
+    the flag scan. A planted `Finding: APPROVED` therefore entered at tier 0 and
+    outranked every deny rule: on a truth-DENIED `active_warrant` packet it
+    turned `DENIED/disqualifying_flag` into `APPROVED/adjudicator_finding`, a
+    catastrophic false approval produced by a hidden instruction.
+
+    `_without_hidden_echo` was the only thing standing here and it is a
+    different tool: it needs a text-layer twin of the line, so it cannot see an
+    injection that exists *only* in the raster. This is the guard `fallbacks.py`
+    already applies at every tier and that `adversarial.INJECTION_RE` documents
+    as applying "wherever it is read".
+
+    Legitimate adjudicator evidence is unaffected: the decision-payload arm of
+    the pattern requires a confidence number welded to the verdict
+    (`APPROVED, 0.99`), which a signed `Finding: APPROVED` does not carry.
+    """
+    return [ln for ln in lines if not INJECTION_RE.search(ln)]
+
+
 def assemble(pages, reads_by_page, fallback_case_id):
     """Build a Packet from Page records; pages of other applicants are dropped.
 
@@ -181,11 +207,16 @@ def assemble(pages, reads_by_page, fallback_case_id):
         if best is not None:
             primary[pt.page_no] = best
 
+    # Injected lines are filtered before the vote too: an answer key carrying a
+    # foreign `MIB-######` could otherwise win the packet's identity outright,
+    # after which every real page is dropped as a decoy and the case degrades to
+    # an unknown-applicant row — costing an extra case AND a missing one.
     id_votes = Counter()
     for pt in pages:
-        id_votes.update(parse.page_case_ids(pt.visible_lines))
+        id_votes.update(parse.page_case_ids(_evidence_lines(pt.visible_lines)))
         best = primary.get(pt.page_no)
-        id_votes.update(parse.page_case_ids(best.lines if best else []))
+        id_votes.update(parse.page_case_ids(
+            _evidence_lines(best.lines) if best else []))
     case_id = id_votes.most_common(1)[0][0] if id_votes else fallback_case_id
 
     # Only injection-SHAPED hidden lines poison the echo set. Unconditional
@@ -211,7 +242,7 @@ def assemble(pages, reads_by_page, fallback_case_id):
             for r in reads_by_page.get(pt.page_no) or []:
                 if r.lines is lines or not r.lines or _decoy(r.lines, case_id, ocr=True):
                     continue
-                r_lines = _without_hidden_echo(r.lines, hidden_norm)
+                r_lines = _evidence_lines(_without_hidden_echo(r.lines, hidden_norm))
                 if not r_lines:
                     continue
                 kv = _parse_lines(r_lines, ocr=True)
@@ -221,6 +252,7 @@ def assemble(pages, reads_by_page, fallback_case_id):
                 packet.variant_docs.append((parse.detect_doc_type(r_lines), kv))
         if source == SRC_OCR:
             lines = _without_hidden_echo(lines, hidden_norm)
+        lines = _evidence_lines(lines)
         if _decoy(lines, case_id, ocr=(source == SRC_OCR)):
             continue  # decoy page for a different applicant
         kv = _parse_lines(lines, ocr=(source == SRC_OCR))

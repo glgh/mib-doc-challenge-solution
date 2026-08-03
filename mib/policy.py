@@ -104,7 +104,7 @@ REVIEW_RULES = (
     ("review_flag", lambda c: c.flags & REVIEW_FLAGS),
     ("missing_sponsor", lambda c: not c.sponsor and c.non_dip_or_unknown),
     ("missing_visa", lambda c: not c.visa),
-    # Risk-concealment census (docs/organizer-guidance.md): a would-be approval
+    # Risk-concealment census (docs/BACKGROUND.md): a would-be approval
     # with no readable B-13 is the under-determined shape — the incriminating
     # evidence may simply be absent. Organizer ruling: NEEDS_REVIEW, never
     # APPROVED. Train-measured cost ~2.6 classification pts for CFA 52→~0;

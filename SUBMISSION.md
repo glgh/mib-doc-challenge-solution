@@ -32,10 +32,19 @@ The image is 577 MB uncompressed. It writes only to `/output` and to the `/tmp` 
 | Read-only root filesystem | Temp files go to `/tmp`, output to `/output` |
 | Image ≤ 4 GiB | 577 MB |
 | Model artifacts ≤ 250 MiB each, ≤ 1 GiB total | No model artifacts; the confidence table is ~2 KB of JSON |
-| Runtime ≤ 6 s/PDF average, ≤ 30,000 s total | Measured on the full 5,000-case validation set under the exact contract limits: **4.72 s/PDF**, **23,606 s total** against the 30,000 s cap. Per-case compute mean 18.84 s, p50 17.83 s, p99 50.09 s, max 66.84 s (four workers run concurrently, so per-case cost is ~4× the wall-clock average). Validation packets run ~40% heavier than train ones, so the real headroom is **1.27×**, not the 1.5× the 1,000-case train gate suggested. See the note below on what that assumes about the hardware. |
+| Runtime ≤ 6 s/PDF average, ≤ 30,000 s total | Measured on the full 5,000-case validation set under the exact contract limits: **4.72 s/PDF**, **23,606 s total** against the 30,000 s cap. Per-case compute mean 18.84 s, p50 17.83 s, p99 50.09 s, max 66.84 s (four workers run concurrently, so per-case cost is ~4× the wall-clock average). Validation runs heavier than the 1,000-case train gate projected — 23,606 s against that gate's ~19,000 s projection (~24%), with in-container per-case p50 rising 13.4 s → 17.83 s — so the real headroom is **1.27×**, not the 1.5× the train gate suggested. See the note below on what that assumes about the hardware. |
 | Predictions ≤ 25 MiB | Well under |
-| No hardcoded answers or per-case lookups | No case list, case id or file name is read at runtime. The only literal id in `mib/` is the unmatchable `MIB-000000` sentinel in `emit.py`; every other one appears in a comment. `experiments/` and `scripts/` are offline analysis and are excluded from the build context. |
+| No hardcoded answers or per-case lookups | No case list and no per-case lookup exists. The only literal *case* id in `mib/` is the unmatchable `MIB-000000` sentinel in `emit.py`; every other one appears in a comment. See the disclosure below for the constants that *are* label-derived, and for the one place a file name is used. `experiments/` and `scripts/` are offline analysis and are excluded from the build context. |
 | Runs from a clean checkout | `docker build` from a fresh clone is the only step |
+
+### Disclosure: what is derived from the training labels
+
+Stated plainly rather than left for a reviewer to find, because the anti-gaming rule is about per-case memorisation and these are policy-level constants:
+
+- **Revoked sponsor ids** (`mib/vocab.py:45-48`) — six `SPN-####` values. Three are published in `FIELD_MANUAL.md`; three were originally mined from train labels. They are no longer load-bearing on their own: `mib/corpus.py` recovers revoked sponsors from the *occurrence spectrum of whatever input directory it is pointed at*, using no labels and no per-PDF keys, and on validation it independently rediscovers exactly these six.
+- **Closed vocabularies** (`mib/vocab.py:8-38`) — 13 home worlds, 12 species, 10 declared purposes, and a name-part list, enumerated from the 1,000 train cases. These are used to *reject* unrepairable OCR rather than to supply answers: a value that cannot be snapped to the vocabulary is dropped, on the principle that absent beats wrong.
+- **A per-branch confidence table** (`mib/confidence_table.json`, ~2 KB) fitted on the training split, plus embargo-world and staleness constants derived from labelled data.
+- **The PDF file name** is used in exactly one place: `mib/runner.py:70` passes the stem as a *fallback* case id, used only when no case id is legible anywhere in the packet (`mib/packet.py`). It is a relative name, never an absolute path, and never a key into anything.
 
 ### A caveat on the runtime figure
 
