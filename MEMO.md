@@ -2,7 +2,7 @@
 
 **Solution repo:** see `SUBMISSION.md` · **Approach:** offline OCR + classical CV + a hand-written rules cascade. No LLM, no VLM, no cloud API, no network at runtime.
 
-**Where it scores (train, frozen 700/300 split, seed 8090):** dev **128.24 / 150** — classification 66.17 / 80, extraction 45.21 / 50, calibration 16.86 / 20, **0 catastrophic false approvals**, 0 missing rows. Holdout, read sparingly so it retains meaning — and never to justify a change being rejected: **128.28**, with the holdout-over-dev gap stable across reads. Runtime, measured on the full 5,000-case validation set under the exact contract limits: **4.72 s/PDF, 23,606 s against the 30,000 s cap** (per-case p50 17.83 s, p99 50.09 s, max 66.84 s; four workers run concurrently, so per-case cost is ~4× the wall-clock average). That is 1.27× headroom, and the contract fixes the vCPU count but never the vCPU speed — see `SUBMISSION.md`.
+**Where it scores (train, frozen 700/300 split, seed 8090):** dev **128.24 / 150** — classification 66.17 / 80, extraction 45.21 / 50, calibration 16.86 / 20, **0 catastrophic false approvals**, 0 missing rows. Holdout, read sparingly so it retains meaning — and never to justify a change being rejected: **128.28**, with the holdout-over-dev gap stable across reads. Runtime, measured on the full 5,000-case validation set under the exact contract limits: **4.62 s/PDF, 23,086 s against the 30,000 s cap**, in one uninterrupted run with zero cases hitting the per-case OCR budget. That is 1.30× headroom, and the contract fixes the vCPU count but never the vCPU speed — see `SUBMISSION.md`.
 
 ---
 
